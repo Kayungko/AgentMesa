@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { initWorkspace } from '../workspace.js';
 import type { MesaWorkspacePaths } from '../workspace.js';
-import { appendMessage, listMessages, getMessagesByTask, resetMessageCounter } from '../services/message-service.js';
+import { appendMessage, listMessages, getMessagesByTask } from '../services/message-service.js';
 
 let testDir: string;
 let paths: MesaWorkspacePaths;
@@ -12,7 +12,6 @@ let paths: MesaWorkspacePaths;
 beforeEach(() => {
   testDir = mkdtempSync(join(tmpdir(), 'agentmesa-test-'));
   paths = initWorkspace(testDir);
-  resetMessageCounter();
 });
 
 afterEach(() => {
@@ -28,19 +27,20 @@ describe('appendMessage', () => {
       type: 'review_request',
       summary: 'Please review',
     });
-    expect(msg.id).toBe('M-0001');
+    expect(msg.id).toMatch(/^msg_/);
     expect(msg.taskId).toBe('T-0001');
     expect(msg.from).toBe('agent-1');
     expect(msg.to).toBe('agent-2');
     expect(msg.type).toBe('review_request');
-    expect(msg.protocolVersion).toBe('0.1.0');
+    expect(msg.protocolVersion).toBe('0.2.0');
   });
 
-  it('auto-increments message IDs', () => {
+  it('generates unique message IDs', () => {
     const m1 = appendMessage(paths, { from: 'agent-1', type: 'task_created', summary: 'Created' });
     const m2 = appendMessage(paths, { from: 'agent-1', type: 'handoff', summary: 'Handoff' });
-    expect(m1.id).toBe('M-0001');
-    expect(m2.id).toBe('M-0002');
+    expect(m1.id).toMatch(/^msg_/);
+    expect(m2.id).toMatch(/^msg_/);
+    expect(m1.id).not.toBe(m2.id);
   });
 
   it('stores artifact references', () => {

@@ -2,40 +2,35 @@ import { join } from 'node:path';
 import {
   MesaTaskSchema,
   CreateTaskInputSchema,
-  mesaProtocolVersion,
+  currentProtocolVersion,
+  generateTaskId,
+  canTransitionTaskStatus,
 } from '@agentmesa/protocol';
 import type { MesaTask, CreateTaskInput, TaskStatus } from '@agentmesa/protocol';
 import type { MesaWorkspacePaths } from '../workspace.js';
 import { readJson, writeJson, listJson, deleteFile } from '../storage.js';
-import { TaskNotFoundError, InvalidStatusTransitionError, ValidationError } from '../errors.js';
-import { canTransitionTaskStatus } from '@agentmesa/protocol';
+import { TaskNotFoundError, InvalidStatusTransitionError } from '../errors.js';
 import { appendMessage } from './message-service.js';
-
-let taskCounter = 0;
-
-function generateTaskId(): string {
-  taskCounter++;
-  return `T-${String(taskCounter).padStart(4, '0')}`;
-}
-
-export function resetTaskCounter(): void {
-  taskCounter = 0;
-}
+import { createMeeting } from './meeting-service.js';
 
 export function createTask(paths: MesaWorkspacePaths, input: CreateTaskInput): MesaTask {
   const validated = CreateTaskInputSchema.parse(input);
 
+  const meetingId = validated.meetingId ?? createMeeting(paths, { title: `Meeting for ${validated.title}` }).id;
+
   const now = new Date().toISOString();
   const task: MesaTask = {
-    protocolVersion: mesaProtocolVersion,
+    protocolVersion: currentProtocolVersion,
     id: generateTaskId(),
     title: validated.title,
     status: 'todo',
     createdBy: validated.createdBy,
     assignedTo: validated.assignedTo,
     reviewer: validated.reviewer,
-    meetingId: validated.meetingId,
+    meetingId,
     branch: validated.branch,
+    priority: validated.priority ?? 'normal',
+    kind: validated.kind ?? 'implement',
     context: validated.context,
     createdAt: now,
     updatedAt: now,
@@ -45,6 +40,7 @@ export function createTask(paths: MesaWorkspacePaths, input: CreateTaskInput): M
   writeJson(join(paths.tasksDir, `${task.id}.json`), result);
 
   appendMessage(paths, {
+    meetingId,
     taskId: task.id,
     from: task.createdBy,
     type: 'task_created',
@@ -92,6 +88,7 @@ export function updateTaskStatus(
   writeJson(join(paths.tasksDir, `${taskId}.json`), result);
 
   appendMessage(paths, {
+    meetingId: task.meetingId,
     taskId,
     from: updatedBy ?? 'system',
     type: 'status_changed',
@@ -112,7 +109,9 @@ export function assignTask(
   const updated: MesaTask = {
     ...task,
     assignedTo,
+    assignedBuilder: assignedTo,
     reviewer: reviewer ?? task.reviewer,
+    assignedReviewer: reviewer ?? task.assignedReviewer,
     updatedAt: new Date().toISOString(),
   };
 

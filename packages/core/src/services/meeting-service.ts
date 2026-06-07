@@ -2,30 +2,20 @@ import { join } from 'node:path';
 import {
   MesaMeetingSchema,
   CreateMeetingInputSchema,
-  mesaProtocolVersion,
+  currentProtocolVersion,
+  generateMeetingId,
 } from '@agentmesa/protocol';
 import type { MesaMeeting, CreateMeetingInput, MeetingStatus } from '@agentmesa/protocol';
 import type { MesaWorkspacePaths } from '../workspace.js';
 import { readJson, writeJson, listJson } from '../storage.js';
 import { MeetingNotFoundError } from '../errors.js';
 
-let meetingCounter = 0;
-
-function generateMeetingId(): string {
-  meetingCounter++;
-  return `MTG-${String(meetingCounter).padStart(4, '0')}`;
-}
-
-export function resetMeetingCounter(): void {
-  meetingCounter = 0;
-}
-
 export function createMeeting(paths: MesaWorkspacePaths, input: CreateMeetingInput): MesaMeeting {
   const validated = CreateMeetingInputSchema.parse(input);
 
   const now = new Date().toISOString();
   const meeting: MesaMeeting = {
-    protocolVersion: mesaProtocolVersion,
+    protocolVersion: currentProtocolVersion,
     id: generateMeetingId(),
     title: validated.title,
     status: 'open',

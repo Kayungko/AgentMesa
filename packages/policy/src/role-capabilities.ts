@@ -59,5 +59,13 @@ export function defineRoleCapabilities(): RoleCapability {
       'manage_meetings',
       'delete_task',
     ],
+    researcher: [
+      'read_task',
+      'post_message',
+      'create_artifact',
+    ],
+    custom: [
+      'read_task',
+    ],
   };
 }

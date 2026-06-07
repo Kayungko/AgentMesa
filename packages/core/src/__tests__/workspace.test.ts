@@ -60,7 +60,7 @@ describe('loadConfig', () => {
   it('returns config after init', () => {
     initWorkspace(testDir);
     const config = loadConfig(testDir);
-    expect(config.protocolVersion).toBe('0.1.0');
+    expect(config.protocolVersion).toBe('0.2.0');
   });
 
   it('throws if not initialized', () => {

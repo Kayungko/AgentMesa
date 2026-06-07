@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { mesaProtocolVersion } from '@agentmesa/protocol';
+import { currentProtocolVersion } from '@agentmesa/protocol';
 import { ensureDir, readJson, writeJson } from './storage.js';
 import { WorkspaceNotFoundError, WorkspaceAlreadyExistsError } from './errors.js';
 
@@ -61,7 +61,7 @@ export function initWorkspace(rootDir: string): MesaWorkspacePaths {
   ensureDir(paths.locksDir);
 
   const config: MesaConfig = {
-    protocolVersion: mesaProtocolVersion,
+    protocolVersion: currentProtocolVersion,
   };
 
   writeJson(join(paths.mesaDir, 'config.json'), config);

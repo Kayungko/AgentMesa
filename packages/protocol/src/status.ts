@@ -1,10 +1,15 @@
 export const taskStatuses = [
+  'backlog',
+  'ready',
   'todo',
   'in_progress',
   'ready_for_review',
   'reviewing',
+  'in_review',
   'changes_requested',
+  'needs_fix',
   'approved',
+  'completed',
   'done',
   'blocked',
   'failed',
@@ -15,15 +20,20 @@ export const taskStatuses = [
 
 export type TaskStatus = (typeof taskStatuses)[number];
 
-const terminalStatuses: readonly TaskStatus[] = ['done', 'cancelled'];
+const terminalStatuses: readonly TaskStatus[] = ['completed', 'done', 'cancelled'];
 
 const allowedTransitions: Record<TaskStatus, TaskStatus[]> = {
+  backlog: ['ready', 'todo', 'cancelled'],
+  ready: ['in_progress', 'backlog', 'cancelled'],
   todo: ['in_progress', 'cancelled'],
-  in_progress: ['ready_for_review', 'blocked', 'failed', 'cancelled'],
+  in_progress: ['ready_for_review', 'in_review', 'blocked', 'failed', 'cancelled', 'needs_fix'],
   ready_for_review: ['reviewing', 'changes_requested', 'cancelled'],
   reviewing: ['approved', 'changes_requested', 'blocked', 'failed'],
-  changes_requested: ['in_progress', 'cancelled'],
-  approved: ['done', 'in_progress'],
+  in_review: ['approved', 'changes_requested', 'needs_fix', 'blocked', 'failed'],
+  changes_requested: ['in_progress', 'needs_fix', 'cancelled'],
+  needs_fix: ['in_progress', 'blocked', 'cancelled'],
+  approved: ['done', 'completed', 'in_progress'],
+  completed: [],
   done: [],
   blocked: ['in_progress', 'failed', 'cancelled'],
   failed: ['in_progress', 'cancelled'],

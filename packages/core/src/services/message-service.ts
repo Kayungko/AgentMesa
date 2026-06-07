@@ -2,29 +2,20 @@ import { join } from 'node:path';
 import {
   MesaMessageSchema,
   CreateMessageInputSchema,
-  mesaProtocolVersion,
+  currentProtocolVersion,
+  generateMessageId,
 } from '@agentmesa/protocol';
 import type { MesaMessage, CreateMessageInput } from '@agentmesa/protocol';
 import type { MesaWorkspacePaths } from '../workspace.js';
 import { readJson, writeJson, listJson } from '../storage.js';
 
-let messageCounter = 0;
-
-function generateMessageId(): string {
-  messageCounter++;
-  return `M-${String(messageCounter).padStart(4, '0')}`;
-}
-
-export function resetMessageCounter(): void {
-  messageCounter = 0;
-}
-
 export function appendMessage(paths: MesaWorkspacePaths, input: CreateMessageInput): MesaMessage {
   const validated = CreateMessageInputSchema.parse(input);
 
   const message: MesaMessage = {
-    protocolVersion: mesaProtocolVersion,
+    protocolVersion: currentProtocolVersion,
     id: generateMessageId(),
+    meetingId: validated.meetingId,
     taskId: validated.taskId,
     from: validated.from,
     to: validated.to,

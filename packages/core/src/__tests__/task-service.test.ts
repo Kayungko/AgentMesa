@@ -4,8 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { initWorkspace } from '../workspace.js';
 import type { MesaWorkspacePaths } from '../workspace.js';
-import { createTask, getTask, listTasks, updateTaskStatus, assignTask, deleteTask, resetTaskCounter } from '../services/task-service.js';
-import { resetMessageCounter } from '../services/message-service.js';
+import { createTask, getTask, listTasks, updateTaskStatus, assignTask, deleteTask } from '../services/task-service.js';
 import { TaskNotFoundError, InvalidStatusTransitionError } from '../errors.js';
 
 let testDir: string;
@@ -14,8 +13,6 @@ let paths: MesaWorkspacePaths;
 beforeEach(() => {
   testDir = mkdtempSync(join(tmpdir(), 'agentmesa-test-'));
   paths = initWorkspace(testDir);
-  resetTaskCounter();
-  resetMessageCounter();
 });
 
 afterEach(() => {
@@ -25,11 +22,11 @@ afterEach(() => {
 describe('createTask', () => {
   it('creates a task with todo status', () => {
     const task = createTask(paths, { title: 'Build feature', createdBy: 'user' });
-    expect(task.id).toBe('T-0001');
+    expect(task.id).toMatch(/^task_/);
     expect(task.title).toBe('Build feature');
     expect(task.status).toBe('todo');
     expect(task.createdBy).toBe('user');
-    expect(task.protocolVersion).toBe('0.1.0');
+    expect(task.protocolVersion).toBe('0.2.0');
   });
 
   it('creates a task with assignment', () => {
@@ -57,11 +54,12 @@ describe('createTask', () => {
     expect(task.context?.changedFiles).toEqual(['src/auth.ts']);
   });
 
-  it('auto-increments task IDs', () => {
+  it('generates unique task IDs', () => {
     const t1 = createTask(paths, { title: 'Task 1', createdBy: 'user' });
     const t2 = createTask(paths, { title: 'Task 2', createdBy: 'user' });
-    expect(t1.id).toBe('T-0001');
-    expect(t2.id).toBe('T-0002');
+    expect(t1.id).toMatch(/^task_/);
+    expect(t2.id).toMatch(/^task_/);
+    expect(t1.id).not.toBe(t2.id);
   });
 });
 

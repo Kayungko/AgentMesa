@@ -2,34 +2,27 @@ import { join } from 'node:path';
 import {
   MesaArtifactSchema,
   CreateArtifactInputSchema,
-  mesaProtocolVersion,
+  currentProtocolVersion,
+  generateArtifactId,
 } from '@agentmesa/protocol';
 import type { MesaArtifact, CreateArtifactInput, ArtifactKind } from '@agentmesa/protocol';
 import type { MesaWorkspacePaths } from '../workspace.js';
 import { readJson, writeJson, listJson } from '../storage.js';
 import { ArtifactNotFoundError } from '../errors.js';
 
-let artifactCounter = 0;
-
-function generateArtifactId(): string {
-  artifactCounter++;
-  return `A-${String(artifactCounter).padStart(4, '0')}`;
-}
-
-export function resetArtifactCounter(): void {
-  artifactCounter = 0;
-}
-
 export function createArtifact(paths: MesaWorkspacePaths, input: CreateArtifactInput): MesaArtifact {
   const validated = CreateArtifactInputSchema.parse(input);
 
   const artifact: MesaArtifact = {
-    protocolVersion: mesaProtocolVersion,
+    protocolVersion: currentProtocolVersion,
     id: generateArtifactId(),
     kind: validated.kind,
     taskId: validated.taskId,
     createdBy: validated.createdBy,
     content: validated.content,
+    mimeType: validated.mimeType ?? 'text/markdown',
+    version: 1,
+    tags: validated.tags ?? [],
     format: validated.format,
     metadata: validated.metadata,
     createdAt: new Date().toISOString(),

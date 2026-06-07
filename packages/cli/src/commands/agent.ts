@@ -29,7 +29,7 @@ export function runAgent(args: ParsedArgs): void {
           : (['builder'] as AgentRole[]);
 
         const client = typeof args.flags['client'] === 'string' ? args.flags['client'] : id;
-        const agent = registerAgent(paths, { id, name, client, roles });
+        const agent = registerAgent(paths, { id, name, client, status: 'available', roles });
         printSuccess(`Registered agent: ${agent.id} (${agent.name})`);
         if (json) formatOutput(agent, true);
         return;

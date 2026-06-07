@@ -309,6 +309,7 @@ export function handleRegisterAgent(
     id: args.id,
     name: args.name,
     client: args.client,
+    status: 'available',
     roles: args.roles as AgentRole[],
   });
   return JSON.stringify(agent);

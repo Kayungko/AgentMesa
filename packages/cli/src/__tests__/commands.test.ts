@@ -14,7 +14,6 @@ import {
   registerAgent,
   listAgents,
 } from '@agentmesa/core';
-import { resetTaskCounter, resetMessageCounter, resetMeetingCounter } from '@agentmesa/core';
 import type { MesaWorkspacePaths } from '@agentmesa/core';
 
 let testDir: string;
@@ -23,9 +22,6 @@ let paths: MesaWorkspacePaths;
 beforeEach(() => {
   testDir = mkdtempSync(join(tmpdir(), 'agentmesa-cli-test-'));
   paths = initWorkspace(testDir);
-  resetTaskCounter();
-  resetMessageCounter();
-  resetMeetingCounter();
 });
 
 afterEach(() => {
@@ -35,7 +31,7 @@ afterEach(() => {
 describe('CLI integration: task workflow', () => {
   it('creates and lists tasks', () => {
     const task = createTask(paths, { title: 'Build feature', createdBy: 'user' });
-    expect(task.id).toBe('T-0001');
+    expect(task.id).toMatch(/^task_/);
 
     const tasks = listTasks(paths);
     expect(tasks).toHaveLength(1);
@@ -52,8 +48,8 @@ describe('CLI integration: task workflow', () => {
   });
 
   it('registers and lists agents', () => {
-    registerAgent(paths, { id: 'claude', name: 'Claude Code', client: 'claude-code', roles: ['builder'] });
-    registerAgent(paths, { id: 'codex', name: 'Codex', client: 'codex', roles: ['reviewer'] });
+    registerAgent(paths, { id: 'claude', name: 'Claude Code', client: 'claude-code', status: 'available', roles: ['builder'] });
+    registerAgent(paths, { id: 'codex', name: 'Codex', client: 'codex', status: 'available', roles: ['reviewer'] });
 
     const agents = listAgents(paths);
     expect(agents).toHaveLength(2);
@@ -61,7 +57,7 @@ describe('CLI integration: task workflow', () => {
 
   it('creates meetings', () => {
     const meeting = createMeeting(paths, { title: 'Feature Review' });
-    expect(meeting.id).toBe('MTG-0001');
+    expect(meeting.id).toMatch(/^meeting_/);
     expect(meeting.status).toBe('open');
 
     const meetings = listMeetings(paths);
@@ -79,6 +75,6 @@ describe('CLI integration: workspace init', () => {
 
   it('config.json has correct protocol version', () => {
     const config = JSON.parse(readFileSync(join(paths.mesaDir, 'config.json'), 'utf-8'));
-    expect(config.protocolVersion).toBe('0.1.0');
+    expect(config.protocolVersion).toBe('0.2.0');
   });
 });

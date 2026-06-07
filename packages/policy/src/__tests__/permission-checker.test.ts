@@ -136,7 +136,7 @@ describe('PermissionChecker.getRolesForAction', () => {
 
   it('returns roles that can read_task', () => {
     const roles = checker.getRolesForAction('read_task');
-    expect(roles).toHaveLength(7);
+    expect(roles).toHaveLength(9);
   });
 
   it('returns roles that can manage_agents', () => {

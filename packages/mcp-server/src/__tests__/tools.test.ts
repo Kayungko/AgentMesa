@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { initWorkspace, resetTaskCounter, resetMessageCounter, resetArtifactCounter, resetMeetingCounter } from '@agentmesa/core';
+import { initWorkspace } from '@agentmesa/core';
 import type { MesaWorkspacePaths } from '@agentmesa/core';
 import type { MesaTask, MesaMessage, MesaArtifact, MesaMeeting, MesaAgent } from '@agentmesa/protocol';
 import {
@@ -28,10 +28,6 @@ let paths: MesaWorkspacePaths;
 beforeEach(() => {
   testDir = mkdtempSync(join(tmpdir(), 'agentmesa-mcp-test-'));
   paths = initWorkspace(testDir);
-  resetTaskCounter();
-  resetMessageCounter();
-  resetArtifactCounter();
-  resetMeetingCounter();
 });
 
 afterEach(() => {
@@ -47,7 +43,7 @@ describe('handleCreateTask', () => {
     const result = parse<MesaTask>(
       handleCreateTask(paths, { title: 'Build login', createdBy: 'user' })
     );
-    expect(result.id).toBe('T-0001');
+    expect(result.id).toMatch(/^task_/);
     expect(result.title).toBe('Build login');
     expect(result.status).toBe('todo');
     expect(result.createdBy).toBe('user');
@@ -86,8 +82,8 @@ describe('handleListTasks', () => {
     handleCreateTask(paths, { title: 'Task 2', createdBy: 'user' });
     const result = parse<MesaTask[]>(handleListTasks(paths));
     expect(result).toHaveLength(2);
-    expect(result[0]!.title).toBe('Task 1');
-    expect(result[1]!.title).toBe('Task 2');
+    const titles = result.map((t) => t.title).sort();
+    expect(titles).toEqual(['Task 1', 'Task 2']);
   });
 });
 
@@ -248,7 +244,7 @@ describe('handleAttachArtifact', () => {
         format: 'markdown',
       })
     );
-    expect(result.id).toBe('A-0001');
+    expect(result.id).toMatch(/^artifact_/);
     expect(result.kind).toBe('implementation_summary');
     expect(result.taskId).toBe(task.id);
     expect(result.content).toContain('Implementation complete');
@@ -330,7 +326,7 @@ describe('handleCreateMeeting', () => {
     const result = parse<MesaMeeting>(
       handleCreateMeeting(paths, { title: 'Sprint Planning' })
     );
-    expect(result.id).toBe('MTG-0001');
+    expect(result.id).toMatch(/^meeting_/);
     expect(result.title).toBe('Sprint Planning');
     expect(result.status).toBe('open');
   });

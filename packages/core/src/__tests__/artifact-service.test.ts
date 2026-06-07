@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { initWorkspace } from '../workspace.js';
 import type { MesaWorkspacePaths } from '../workspace.js';
-import { createArtifact, getArtifact, listArtifacts, resetArtifactCounter } from '../services/artifact-service.js';
+import { createArtifact, getArtifact, listArtifacts } from '../services/artifact-service.js';
 import { ArtifactNotFoundError } from '../errors.js';
 
 let testDir: string;
@@ -13,7 +13,6 @@ let paths: MesaWorkspacePaths;
 beforeEach(() => {
   testDir = mkdtempSync(join(tmpdir(), 'agentmesa-test-'));
   paths = initWorkspace(testDir);
-  resetArtifactCounter();
 });
 
 afterEach(() => {
@@ -29,12 +28,12 @@ describe('createArtifact', () => {
       content: '# Review\nLooks good',
       format: 'markdown',
     });
-    expect(artifact.id).toBe('A-0001');
+    expect(artifact.id).toMatch(/^artifact_/);
     expect(artifact.kind).toBe('review_report');
     expect(artifact.taskId).toBe('T-0001');
     expect(artifact.content).toBe('# Review\nLooks good');
     expect(artifact.format).toBe('markdown');
-    expect(artifact.protocolVersion).toBe('0.1.0');
+    expect(artifact.protocolVersion).toBe('0.2.0');
   });
 
   it('creates artifact with metadata', () => {
@@ -48,11 +47,12 @@ describe('createArtifact', () => {
     expect(artifact.metadata).toEqual({ passed: true, total: 42 });
   });
 
-  it('auto-increments artifact IDs', () => {
+  it('generates unique artifact IDs', () => {
     const a1 = createArtifact(paths, { kind: 'git_diff', createdBy: 'agent-1', content: 'diff1' });
     const a2 = createArtifact(paths, { kind: 'git_diff', createdBy: 'agent-1', content: 'diff2' });
-    expect(a1.id).toBe('A-0001');
-    expect(a2.id).toBe('A-0002');
+    expect(a1.id).toMatch(/^artifact_/);
+    expect(a2.id).toMatch(/^artifact_/);
+    expect(a1.id).not.toBe(a2.id);
   });
 });
 

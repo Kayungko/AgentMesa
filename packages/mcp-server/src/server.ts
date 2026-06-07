@@ -1,6 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { mesaProtocolVersion } from '@agentmesa/protocol';
+import { currentProtocolVersion } from '@agentmesa/protocol';
 import { createWorkspacePaths } from '@agentmesa/core';
 import type { MesaWorkspacePaths } from '@agentmesa/core';
 import {
@@ -76,7 +76,7 @@ export function createMcpServer(rootDir: string): McpServer {
 
   const server = new McpServer({
     name: 'agentmesa',
-    version: mesaProtocolVersion,
+    version: currentProtocolVersion,
   });
 
   // Task tools

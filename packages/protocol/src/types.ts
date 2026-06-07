@@ -1,8 +1,34 @@
-import type { TaskStatus } from './status.js';
+/**
+ * AgentMesa Protocol Types
+ *
+ * ALL types are inferred from Zod schemas — schemas are the sole source of truth.
+ * Enum-style literal unions are kept for convenience so consumers can use them
+ * without pulling in Zod.
+ */
 
-export const mesaProtocolVersion = '0.1.0' as const;
+import type {
+  MesaAgentSchema,
+  MesaAgentCapabilitySchema,
+  MesaTaskSchema,
+  MesaMessageSchema,
+  MesaArtifactSchema,
+  MesaMeetingSchema,
+  MesaThreadSchema,
+  MesaDecisionSchema,
+  MesaEventSchema,
+  MesaClientSchema,
+  MesaTransportSchema,
+  MesaAgentRunSchema,
+  MesaCheckResultSchema,
+  MesaRepositorySchema,
+} from './schemas.js';
 
-// --- Agent ---
+import type { z } from 'zod';
+
+// --- Re-export protocol version from the version module ---
+export { currentProtocolVersion } from './version.js';
+
+// --- Enum-style literal unions ---
 
 export type AgentRole =
   | 'chair'
@@ -11,14 +37,11 @@ export type AgentRole =
   | 'reviewer'
   | 'tester'
   | 'documenter'
-  | 'maintainer';
+  | 'maintainer'
+  | 'researcher'
+  | 'custom';
 
-export interface MesaAgent {
-  id: string;
-  name: string;
-  client: string;
-  roles: AgentRole[];
-}
+export type AgentStatus = 'available' | 'busy' | 'offline';
 
 export type PermissionLevel =
   | 'read_only'
@@ -26,36 +49,6 @@ export type PermissionLevel =
   | 'builder'
   | 'maintainer'
   | 'owner';
-
-export interface MesaAgentCapability {
-  agentId: string;
-  permissions: PermissionLevel[];
-}
-
-// --- Task ---
-
-export interface TaskContext {
-  goal?: string;
-  changedFiles?: string[];
-  commands?: string[];
-}
-
-export interface MesaTask {
-  protocolVersion: typeof mesaProtocolVersion;
-  id: string;
-  title: string;
-  status: TaskStatus;
-  createdBy: string;
-  assignedTo?: string;
-  reviewer?: string;
-  meetingId?: string;
-  branch?: string;
-  context?: TaskContext;
-  createdAt: string;
-  updatedAt: string;
-}
-
-// --- Message ---
 
 export type MessageType =
   | 'task_created'
@@ -66,56 +59,130 @@ export type MessageType =
   | 'fix_done'
   | 'test_result'
   | 'decision'
-  | 'status_changed';
-
-export interface MesaMessage {
-  protocolVersion: typeof mesaProtocolVersion;
-  id: string;
-  taskId?: string;
-  from: string;
-  to?: string;
-  type: MessageType;
-  summary: string;
-  artifactIds?: string[];
-  createdAt: string;
-}
-
-// --- Artifact ---
+  | 'status_changed'
+  | 'task_assignment'
+  | 'status_update'
+  | 'review_feedback'
+  | 'implementation_summary'
+  | 'question'
+  | 'answer'
+  | 'general';
 
 export type ArtifactKind =
   | 'implementation_summary'
   | 'review_report'
   | 'fix_summary'
   | 'test_result'
+  | 'test_results'
   | 'git_diff'
   | 'patch'
   | 'decision_record'
   | 'pr_summary'
-  | 'agent_run_log';
+  | 'agent_run_log'
+  | 'custom';
 
-export interface MesaArtifact {
-  protocolVersion: typeof mesaProtocolVersion;
-  id: string;
-  kind: ArtifactKind;
-  taskId?: string;
-  createdBy: string;
-  content: string;
-  format?: 'markdown' | 'json' | 'diff' | 'text';
-  metadata?: Record<string, unknown>;
-  createdAt: string;
-}
+export type MeetingStatus =
+  | 'planning'
+  | 'active'
+  | 'paused'
+  | 'completed'
+  | 'archived'
+  | 'open'
+  | 'closed';
 
-// --- Meeting ---
+export type TaskStatus =
+  | 'backlog'
+  | 'ready'
+  | 'todo'
+  | 'in_progress'
+  | 'in_review'
+  | 'needs_fix'
+  | 'approved'
+  | 'completed'
+  | 'done'
+  | 'blocked'
+  | 'failed'
+  | 'cancelled'
+  | 'conflict'
+  | 'needs_user_decision'
+  | 'reviewing'
+  | 'changes_requested'
+  | 'ready_for_review';
 
-export type MeetingStatus = 'open' | 'closed' | 'archived';
+export type TaskPriority = 'low' | 'normal' | 'high' | 'critical';
 
-export interface MesaMeeting {
-  protocolVersion: typeof mesaProtocolVersion;
-  id: string;
-  title: string;
-  status: MeetingStatus;
-  tasks: string[];
-  agents: string[];
-  createdAt: string;
-  updatedAt: string;
-}
+export type TaskKind =
+  | 'implement'
+  | 'review'
+  | 'fix'
+  | 'test'
+  | 'document'
+  | 'research'
+  | 'discuss';
+
+export type ThreadResolution = 'unresolved' | 'resolved' | 'stale';
+
+export type EventType =
+  | 'task_created'
+  | 'task_status_changed'
+  | 'task_assigned'
+  | 'meeting_created'
+  | 'agent_joined'
+  | 'agent_left'
+  | 'message_sent'
+  | 'artifact_created'
+  | 'decision_made'
+  | 'run_started'
+  | 'run_completed'
+  | 'check_completed'
+  | 'thread_created'
+  | 'thread_resolved';
+
+export type TransportKind = 'file' | 'mcp' | 'http' | 'websocket' | 'github' | 'ci';
+
+export type ClientType =
+  | 'claude-code'
+  | 'codex'
+  | 'cursor'
+  | 'gemini'
+  | 'github'
+  | 'ci'
+  | 'other';
+
+export type RunAction = 'implement' | 'review' | 'fix' | 'test' | 'document' | 'plan' | 'custom';
+
+export type RunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+
+export type CheckResultStatus = 'passed' | 'failed' | 'error' | 'skipped';
+
+export type CheckKind = 'test' | 'lint' | 'typecheck' | 'security' | 'custom';
+
+export type RepositoryType = 'github' | 'gitlab' | 'bitbucket' | 'none';
+
+export type ArtifactMimeType =
+  | 'text/markdown'
+  | 'application/json'
+  | 'text/x-diff'
+  | 'text/plain'
+  | 'application/vnd.agentmesa.patch+json';
+
+// --- Entity types (inferred from schemas) ---
+
+export type MesaAgent = z.infer<typeof MesaAgentSchema>;
+export type MesaAgentCapability = z.infer<typeof MesaAgentCapabilitySchema>;
+export type MesaTask = z.infer<typeof MesaTaskSchema>;
+export type MesaMessage = z.infer<typeof MesaMessageSchema>;
+export type MesaArtifact = z.infer<typeof MesaArtifactSchema>;
+export type MesaMeeting = z.infer<typeof MesaMeetingSchema>;
+export type MesaThread = z.infer<typeof MesaThreadSchema>;
+export type MesaDecision = z.infer<typeof MesaDecisionSchema>;
+export type MesaEvent = z.infer<typeof MesaEventSchema>;
+export type MesaClient = z.infer<typeof MesaClientSchema>;
+export type MesaTransport = z.infer<typeof MesaTransportSchema>;
+export type MesaAgentRun = z.infer<typeof MesaAgentRunSchema>;
+export type MesaCheckResult = z.infer<typeof MesaCheckResultSchema>;
+export type MesaRepository = z.infer<typeof MesaRepositorySchema>;
+
+// --- Deprecated: keep the old TaskContext interface for compatibility ---
+
+export type TaskContext = NonNullable<MesaTask['context']>;
