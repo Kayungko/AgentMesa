@@ -1,75 +1,170 @@
 # AgentMesa Roadmap
 
-## Phase 0: Design
+AgentMesa is targeting a complete plugin-first product, not a minimal MVP.
 
-- Define product positioning.
-- Define repository structure.
-- Draft Mesa Protocol.
-- Draft security model.
-- Draft connector architecture.
+The development approach is staged, but each stage is part of the full product architecture.
 
-## Phase 1: CLI + File Protocol MVP
+## Strategic Product Target
 
-Goal: make structured handoff work without a dashboard.
+AgentMesa should become the meeting layer for AI coding agents:
 
-Deliverables:
+```txt
+Claude Code + Codex + future agents
+  -> shared meetings
+  -> structured task handoffs
+  -> code review loops
+  -> safe local execution
+  -> auditable delivery
+```
 
-- `mesa init`
-- `.agentmesa/` local directory
-- Task YAML schema
-- Message JSONL schema
-- Artifact templates
-- Git diff helper
-- Basic task list/status commands
+## Phase 0: Design and Scope
 
-## Phase 2: MCP Server
+- Product positioning.
+- Architecture design.
+- Protocol draft.
+- Security model.
+- Connector model.
+- Full development plan.
 
-Goal: let Claude Code and Codex call AgentMesa through shared tools.
+## Phase 1: Engineering Foundation
 
-Deliverables:
+- TypeScript monorepo.
+- pnpm workspace.
+- Build system.
+- Linting and formatting.
+- Test framework.
+- CI workflow.
+- Package boundaries.
 
-- Mesa MCP server
-- mesa_create_task
-- mesa_list_tasks
-- mesa_read_task
-- mesa_request_review
-- mesa_submit_review
-- mesa_attach_artifact
-- mesa_get_git_diff
+## Phase 2: Protocol and Schemas
 
-## Phase 3: Claude + Codex Integration
+- Mesa Protocol TypeScript types.
+- JSON schemas.
+- Validators.
+- Status lifecycle.
+- Message/event taxonomy.
+- Fixtures and examples.
 
-Goal: prove the first real two-agent loop.
+## Phase 3: Mesa Core
 
-Deliverables:
+- `.agentmesa/` workspace manager.
+- Task service.
+- Meeting service.
+- Message service.
+- Artifact service.
+- Locking.
+- Config.
+- File storage.
+- SQLite index.
 
-- Claude Code plugin skeleton
-- Codex skill/config skeleton
-- AGENTS.md template
-- CLAUDE.md template
-- codex-review runner
-- claude-fix runner
+## Phase 4: Mesa CLI
 
-## Phase 4: Orchestration
+- `mesa init`.
+- `mesa doctor`.
+- Task commands.
+- Meeting commands.
+- Artifact commands.
+- Review commands.
+- Install commands.
+- JSON output.
 
-Goal: automate the review/fix loop safely.
+## Phase 5: Git and Shell Connectors
 
-Deliverables:
+- Git status and diff.
+- Changed files.
+- Branch and worktree helpers.
+- Patch artifacts.
+- Safe shell command runner.
+- Command allowlist.
 
-- Workflow engine
-- Max review loop count
-- Needs-user-decision state
-- Retry and failure handling
-- Command allowlist
+## Phase 6: Mesa MCP Server
 
-## Phase 5: Optional Mesa Desk
+- MCP tools.
+- MCP resources.
+- Permission checks.
+- Claude and Codex connection support.
 
-Goal: visualize meetings and agent state.
+## Phase 7: Mesa Runner
 
-Deliverables:
+- Runner interface.
+- Prompt builders.
+- Claude runner.
+- Codex runner.
+- Shell runner.
+- Output parsers.
+- Logs and artifacts.
 
-- Task board
-- Meeting timeline
-- Artifact viewer
-- Diff viewer
-- Agent configuration page
+## Phase 8: Claude Code Plugin
+
+- Plugin manifest.
+- Skills.
+- Commands.
+- Hooks.
+- MCP config.
+- CLAUDE.md generator.
+
+## Phase 9: Codex Skill / Plugin
+
+- Skill files.
+- AGENTS.md generator.
+- MCP config.
+- Review report templates.
+- Non-interactive review flow.
+
+## Phase 10: Orchestrator
+
+- Workflow definitions.
+- Review/fix loop.
+- Multi-agent task workflow.
+- Human approval gates.
+- Resume and failure handling.
+
+## Phase 11: Policy Engine
+
+- Role capability matrix.
+- File access policy.
+- Command policy.
+- Secret protection.
+- Audit log.
+- User confirmation gates.
+
+## Phase 12: GitHub and CI Integrations
+
+- PR linking.
+- PR diff import.
+- Review artifact export.
+- CI result import.
+- GitHub discussion import.
+
+## Phase 13: Optional Mesa Desk
+
+- Task board.
+- Meeting timeline.
+- Artifact viewer.
+- Diff viewer.
+- Agent status.
+- Policy settings.
+
+## Phase 14: Packaging and 1.0 Release
+
+- npm packages.
+- CLI binary.
+- Plugin packages.
+- Install guides.
+- Connector guides.
+- Troubleshooting docs.
+- End-to-end examples.
+
+## Full Product Completion Criteria
+
+AgentMesa reaches the complete product target when:
+
+- Claude and Codex can both connect through Mesa MCP.
+- Tasks, messages, artifacts, and meetings are durable.
+- Full review/fix/test/doc workflows are supported.
+- CLI can operate and inspect all core state.
+- Runner can operate in manual and automatic modes.
+- Orchestrator can pause, resume, and recover workflows.
+- Policy engine protects files, commands, and secrets.
+- Optional Desk can visualize the system state.
+- GitHub and CI integrations can connect AgentMesa to real team workflows.
