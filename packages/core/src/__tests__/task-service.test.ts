@@ -160,7 +160,14 @@ describe('deleteTask', () => {
   it('deletes an existing task', () => {
     const task = createTask(ctx, { title: 'Build feature' });
     const result = deleteTask(ctx, task.id);
+    const events = ctx.eventStore.list({ streamId: task.id });
+
     expect(result).toBe(true);
+    expect(events.map((event) => event.type)).toEqual([
+      'task_created',
+      'task_deleted',
+    ]);
+    expect(events.every((event) => event.actor === 'user:test')).toBe(true);
     expect(() => getTask(ctx, task.id)).toThrow(TaskNotFoundError);
   });
 

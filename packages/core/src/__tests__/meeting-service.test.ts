@@ -58,12 +58,16 @@ describe('meeting service', () => {
 
   it('records meeting events with runtime actor', () => {
     const meeting = createMeeting(ctx, { title: 'Feature Review' });
+    updateMeetingStatus(ctx, meeting.id, 'active');
+    addTaskToMeeting(ctx, meeting.id, 'task_12345678');
     addAgentToMeeting(ctx, meeting.id, 'agent:codex');
 
     const events = ctx.eventStore.list({ streamId: meeting.id });
     expect(events.map((event) => event.type)).toEqual([
       'meeting_created',
-      'agent_joined',
+      'meeting_status_changed',
+      'meeting_task_added',
+      'meeting_agent_added',
     ]);
     expect(events.every((event) => event.actor === 'user:test')).toBe(true);
   });

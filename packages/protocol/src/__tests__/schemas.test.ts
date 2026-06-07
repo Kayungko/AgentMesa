@@ -432,6 +432,26 @@ describe('MesaEventSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('accepts runtime context mutation event types', () => {
+    const eventTypes = [
+      'task_deleted',
+      'meeting_status_changed',
+      'meeting_task_added',
+      'meeting_agent_added',
+      'agent_registered',
+    ] as const;
+
+    for (const type of eventTypes) {
+      const result = MesaEventSchema.safeParse({
+        ...validEvent,
+        type,
+        streamId: `${type}_stream`,
+        streamType: 'runtime',
+      });
+      expect(result.success).toBe(true);
+    }
+  });
+
   it('rejects invalid event type', () => {
     const result = MesaEventSchema.safeParse({ ...validEvent, type: 'invalid_type' });
     expect(result.success).toBe(false);

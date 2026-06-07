@@ -18,7 +18,7 @@ export function registerAgent(ctx: MesaRuntimeContext, agent: MesaAgent): MesaAg
 
   appendRuntimeEvent(ctx, {
     meetingId: 'workspace',
-    type: 'agent_joined',
+    type: 'agent_registered',
     streamId: result.id,
     streamType: 'agent',
     data: { agent: result },

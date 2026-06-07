@@ -54,7 +54,7 @@ describe('agent registry', () => {
     const events = ctx.eventStore.list({ streamId: agent.id });
 
     expect(events).toHaveLength(1);
-    expect(events[0]!.type).toBe('agent_joined');
+    expect(events[0]!.type).toBe('agent_registered');
     expect(events[0]!.actor).toBe('user:test');
   });
 

@@ -77,14 +77,14 @@ Current progress:
 - Migrated Desk read paths for task/meeting/message/artifact/agent to system runtime context.
 - Migrated Git/Shell/GitHub connector artifact writes through connector actor runtime contexts.
 - Added default file storage, in-memory event store, allow-all policy, and console logger.
+- Added stable in-memory runtime events for task deletion, meeting status changes, meeting membership changes, and agent registration.
 - Preserved EventStore as a non-persistent in-memory stub; Event-backed State has not started.
 
 Deferred out of Priority 3:
 
 - Lock manager remains `paths`-based and moves to Storage Hardening with atomic and lock-aware writes.
 - Runner and Orchestrator full runtime lifecycles remain out of scope for this stage.
-- Protocol lacks a deletion event type, so `deleteTask` does not append a delete event yet.
-- Meeting status and meeting membership mutations currently update state through ctx storage but do not emit dedicated protocol events.
+- Runtime events are not persistent yet and cannot rebuild state.
 
 Direction:
 

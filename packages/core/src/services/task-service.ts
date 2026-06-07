@@ -179,11 +179,19 @@ export function assignTask(
 
 export function deleteTask(ctx: MesaRuntimeContext, taskId: string): boolean {
   assertPolicy(ctx, 'task.delete', `task:${taskId}`);
+  const task = getTask(ctx, taskId);
   const filePath = join(ctx.paths.tasksDir, `${taskId}.json`);
-  if (!ctx.storage.exists(filePath)) {
-    throw new TaskNotFoundError(taskId);
-  }
-  return ctx.storage.delete(filePath);
+  const deleted = ctx.storage.delete(filePath);
+
+  appendRuntimeEvent(ctx, {
+    meetingId: task.meetingId,
+    type: 'task_deleted',
+    streamId: taskId,
+    streamType: 'task',
+    data: { taskId },
+  });
+
+  return deleted;
 }
 
 function writeTask(ctx: MesaRuntimeContext, task: MesaTask): void {

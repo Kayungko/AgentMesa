@@ -2,6 +2,15 @@
 
 AgentMesa uses an event-sourced architecture to preserve a complete, append-only audit trail of every action across all agents, meetings, and tasks.
 
+## Current Implementation Status
+
+Current code has only the Runtime Context event interface and an in-memory `MesaEventStore` stub.
+Core services append protocol events for task creation/status/assignment/deletion, meeting creation/status/membership changes, message append, artifact creation, and agent registration.
+
+These runtime events are useful for policy/audit attribution tests, but they are not yet durable and they are not the source of truth. The durable state is still the readable JSON files under `.agentmesa/`. Event-backed State begins when these events move to an append-only persistent log and projections can be rebuilt from them.
+
+The current protocol event names use underscore literals such as `task_created`, `task_deleted`, `meeting_status_changed`, `meeting_task_added`, `meeting_agent_added`, `message_sent`, `artifact_created`, and `agent_registered`. The dot-delimited names below describe the long-term product model and may be reconciled in a future protocol version.
+
 ## 1. Event Model
 
 Every state change in AgentMesa is recorded as a **MesaEvent**. Events are the source of truth. They are appended, never mutated, and never deleted.

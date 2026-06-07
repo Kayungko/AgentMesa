@@ -81,6 +81,14 @@ export function updateMeetingStatus(
   const result = MesaMeetingSchema.parse(updated);
   writeMeeting(ctx, result);
 
+  appendRuntimeEvent(ctx, {
+    meetingId,
+    type: 'meeting_status_changed',
+    streamId: meetingId,
+    streamType: 'meeting',
+    data: { oldStatus: meeting.status, newStatus: status },
+  });
+
   return result;
 }
 
@@ -104,6 +112,14 @@ export function addTaskToMeeting(
 
   const result = MesaMeetingSchema.parse(updated);
   writeMeeting(ctx, result);
+
+  appendRuntimeEvent(ctx, {
+    meetingId,
+    type: 'meeting_task_added',
+    streamId: meetingId,
+    streamType: 'meeting',
+    data: { taskId },
+  });
 
   return result;
 }
@@ -131,7 +147,7 @@ export function addAgentToMeeting(
 
   appendRuntimeEvent(ctx, {
     meetingId,
-    type: 'agent_joined',
+    type: 'meeting_agent_added',
     streamId: meetingId,
     streamType: 'meeting',
     data: { agentId },
