@@ -1,0 +1,36 @@
+{
+  "name": "@agentmesa/connector-git",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "author": "AgentMesa Contributors",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/agentmesa/agentmesa",
+    "directory": "packages/connectors/git"
+  },
+  "keywords": ["agentmesa", "ai-agents", "claude-code", "codex", "mcp"],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts",
+    "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@agentmesa/core": "workspace:*",
+    "@agentmesa/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
