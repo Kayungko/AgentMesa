@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { initWorkspace } from '@agentmesa/core';
-import type { MesaWorkspacePaths } from '@agentmesa/core';
+import { createRuntimeContext, initWorkspace } from '@agentmesa/core';
+import type { MesaRuntimeContext, MesaWorkspacePaths } from '@agentmesa/core';
 import type { MesaTask, MesaMessage, MesaArtifact, MesaMeeting, MesaAgent } from '@agentmesa/protocol';
 import {
   handleCreateTask,
@@ -24,10 +24,15 @@ import {
 
 let testDir: string;
 let paths: MesaWorkspacePaths;
+let ctx: MesaRuntimeContext;
 
 beforeEach(() => {
   testDir = mkdtempSync(join(tmpdir(), 'agentmesa-mcp-test-'));
   paths = initWorkspace(testDir);
+  ctx = createRuntimeContext({
+    rootDir: testDir,
+    actor: { id: 'user', type: 'agent', roles: ['custom'], client: 'mcp' },
+  });
 });
 
 afterEach(() => {
@@ -41,7 +46,7 @@ function parse<T>(result: string): T {
 describe('handleCreateTask', () => {
   it('creates a task with basic fields', () => {
     const result = parse<MesaTask>(
-      handleCreateTask(paths, { title: 'Build login', createdBy: 'user' })
+      handleCreateTask(ctx, { title: 'Build login', createdBy: 'user' })
     );
     expect(result.id).toMatch(/^task_/);
     expect(result.title).toBe('Build login');
@@ -51,7 +56,7 @@ describe('handleCreateTask', () => {
 
   it('creates a task with full context', () => {
     const result = parse<MesaTask>(
-      handleCreateTask(paths, {
+      handleCreateTask(ctx, {
         title: 'Build login',
         createdBy: 'user',
         assignedTo: 'agent-1',
@@ -73,14 +78,14 @@ describe('handleCreateTask', () => {
 
 describe('handleListTasks', () => {
   it('returns empty array when no tasks', () => {
-    const result = parse<MesaTask[]>(handleListTasks(paths));
+    const result = parse<MesaTask[]>(handleListTasks(ctx));
     expect(result).toEqual([]);
   });
 
   it('lists all tasks', () => {
-    handleCreateTask(paths, { title: 'Task 1', createdBy: 'user' });
-    handleCreateTask(paths, { title: 'Task 2', createdBy: 'user' });
-    const result = parse<MesaTask[]>(handleListTasks(paths));
+    handleCreateTask(ctx, { title: 'Task 1', createdBy: 'user' });
+    handleCreateTask(ctx, { title: 'Task 2', createdBy: 'user' });
+    const result = parse<MesaTask[]>(handleListTasks(ctx));
     expect(result).toHaveLength(2);
     const titles = result.map((t) => t.title).sort();
     expect(titles).toEqual(['Task 1', 'Task 2']);
@@ -90,35 +95,35 @@ describe('handleListTasks', () => {
 describe('handleReadTask', () => {
   it('reads a task by ID', () => {
     const created = parse<MesaTask>(
-      handleCreateTask(paths, { title: 'Build feature', createdBy: 'user' })
+      handleCreateTask(ctx, { title: 'Build feature', createdBy: 'user' })
     );
-    const result = parse<MesaTask>(handleReadTask(paths, { taskId: created.id }));
+    const result = parse<MesaTask>(handleReadTask(ctx, { taskId: created.id }));
     expect(result.id).toBe(created.id);
     expect(result.title).toBe('Build feature');
   });
 
   it('throws for non-existent task', () => {
-    expect(() => handleReadTask(paths, { taskId: 'T-9999' })).toThrow();
+    expect(() => handleReadTask(ctx, { taskId: 'T-9999' })).toThrow();
   });
 });
 
 describe('handleUpdateStatus', () => {
   it('updates task status with valid transition', () => {
     const created = parse<MesaTask>(
-      handleCreateTask(paths, { title: 'Build feature', createdBy: 'user' })
+      handleCreateTask(ctx, { title: 'Build feature', createdBy: 'user' })
     );
     const result = parse<MesaTask>(
-      handleUpdateStatus(paths, { taskId: created.id, status: 'in_progress' })
+      handleUpdateStatus(ctx, { taskId: created.id, status: 'in_progress' })
     );
     expect(result.status).toBe('in_progress');
   });
 
   it('throws for invalid transition', () => {
     const created = parse<MesaTask>(
-      handleCreateTask(paths, { title: 'Build feature', createdBy: 'user' })
+      handleCreateTask(ctx, { title: 'Build feature', createdBy: 'user' })
     );
     expect(() =>
-      handleUpdateStatus(paths, { taskId: created.id, status: 'done' })
+      handleUpdateStatus(ctx, { taskId: created.id, status: 'done' })
     ).toThrow();
   });
 });
@@ -126,7 +131,7 @@ describe('handleUpdateStatus', () => {
 describe('handlePostMessage', () => {
   it('posts a message to a task', () => {
     const task = parse<MesaTask>(
-      handleCreateTask(paths, { title: 'Build feature', createdBy: 'user' })
+      handleCreateTask(ctx, { title: 'Build feature', createdBy: 'user' })
     );
     const result = parse<MesaMessage>(
       handlePostMessage(paths, {
@@ -144,7 +149,7 @@ describe('handlePostMessage', () => {
 
   it('posts a message with artifact references', () => {
     const task = parse<MesaTask>(
-      handleCreateTask(paths, { title: 'Build feature', createdBy: 'user' })
+      handleCreateTask(ctx, { title: 'Build feature', createdBy: 'user' })
     );
     const result = parse<MesaMessage>(
       handlePostMessage(paths, {
@@ -162,13 +167,13 @@ describe('handlePostMessage', () => {
 describe('handleRequestReview', () => {
   it('creates review request and updates status', () => {
     const task = parse<MesaTask>(
-      handleCreateTask(paths, { title: 'Build feature', createdBy: 'user' })
+      handleCreateTask(ctx, { title: 'Build feature', createdBy: 'user' })
     );
     // Move to in_progress first
-    handleUpdateStatus(paths, { taskId: task.id, status: 'in_progress' });
+    handleUpdateStatus(ctx, { taskId: task.id, status: 'in_progress' });
 
     const result = parse<{ message: MesaMessage; task: MesaTask }>(
-      handleRequestReview(paths, {
+      handleRequestReview(ctx, {
         taskId: task.id,
         from: 'agent-1',
         to: 'agent-2',
@@ -183,19 +188,19 @@ describe('handleRequestReview', () => {
 describe('handleSubmitReview', () => {
   it('submits approved review', () => {
     const task = parse<MesaTask>(
-      handleCreateTask(paths, { title: 'Build feature', createdBy: 'user' })
+      handleCreateTask(ctx, { title: 'Build feature', createdBy: 'user' })
     );
-    handleUpdateStatus(paths, { taskId: task.id, status: 'in_progress' });
-    handleRequestReview(paths, {
+    handleUpdateStatus(ctx, { taskId: task.id, status: 'in_progress' });
+    handleRequestReview(ctx, {
       taskId: task.id,
       from: 'agent-1',
       summary: 'Ready',
     });
     // Move to reviewing
-    handleUpdateStatus(paths, { taskId: task.id, status: 'reviewing' });
+    handleUpdateStatus(ctx, { taskId: task.id, status: 'reviewing' });
 
     const result = parse<{ message: MesaMessage; task: MesaTask }>(
-      handleSubmitReview(paths, {
+      handleSubmitReview(ctx, {
         taskId: task.id,
         from: 'agent-2',
         summary: 'Looks good',
@@ -208,18 +213,18 @@ describe('handleSubmitReview', () => {
 
   it('submits changes_requested review', () => {
     const task = parse<MesaTask>(
-      handleCreateTask(paths, { title: 'Build feature', createdBy: 'user' })
+      handleCreateTask(ctx, { title: 'Build feature', createdBy: 'user' })
     );
-    handleUpdateStatus(paths, { taskId: task.id, status: 'in_progress' });
-    handleRequestReview(paths, {
+    handleUpdateStatus(ctx, { taskId: task.id, status: 'in_progress' });
+    handleRequestReview(ctx, {
       taskId: task.id,
       from: 'agent-1',
       summary: 'Ready',
     });
-    handleUpdateStatus(paths, { taskId: task.id, status: 'reviewing' });
+    handleUpdateStatus(ctx, { taskId: task.id, status: 'reviewing' });
 
     const result = parse<{ message: MesaMessage; task: MesaTask }>(
-      handleSubmitReview(paths, {
+      handleSubmitReview(ctx, {
         taskId: task.id,
         from: 'agent-2',
         summary: 'Needs fixes',
@@ -233,7 +238,7 @@ describe('handleSubmitReview', () => {
 describe('handleAttachArtifact', () => {
   it('creates an artifact', () => {
     const task = parse<MesaTask>(
-      handleCreateTask(paths, { title: 'Build feature', createdBy: 'user' })
+      handleCreateTask(ctx, { title: 'Build feature', createdBy: 'user' })
     );
     const result = parse<MesaArtifact>(
       handleAttachArtifact(paths, {
@@ -272,7 +277,7 @@ describe('handleListArtifacts', () => {
 
   it('lists artifacts filtered by task', () => {
     const task = parse<MesaTask>(
-      handleCreateTask(paths, { title: 'Build feature', createdBy: 'user' })
+      handleCreateTask(ctx, { title: 'Build feature', createdBy: 'user' })
     );
     handleAttachArtifact(paths, {
       kind: 'implementation_summary',
@@ -296,7 +301,7 @@ describe('handleListArtifacts', () => {
 describe('handleListMessages', () => {
   it('lists all messages', () => {
     const task = parse<MesaTask>(
-      handleCreateTask(paths, { title: 'Build feature', createdBy: 'user' })
+      handleCreateTask(ctx, { title: 'Build feature', createdBy: 'user' })
     );
     handlePostMessage(paths, {
       taskId: task.id,
@@ -311,9 +316,9 @@ describe('handleListMessages', () => {
 
   it('filters messages by task', () => {
     const task1 = parse<MesaTask>(
-      handleCreateTask(paths, { title: 'Task 1', createdBy: 'user' })
+      handleCreateTask(ctx, { title: 'Task 1', createdBy: 'user' })
     );
-    handleCreateTask(paths, { title: 'Task 2', createdBy: 'user' });
+    handleCreateTask(ctx, { title: 'Task 2', createdBy: 'user' });
     const result = parse<MesaMessage[]>(
       handleListMessages(paths, { taskId: task1.id })
     );

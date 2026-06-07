@@ -1,5 +1,5 @@
 import {
-  createWorkspacePaths,
+  createRuntimeContext,
   createTask,
   getTask,
   listTasks,
@@ -12,7 +12,14 @@ import { printSuccess, printError, formatOutput } from '../output.js';
 
 export function runTask(args: ParsedArgs): void {
   const rootDir = process.cwd();
-  const paths = createWorkspacePaths(rootDir);
+  const ctx = createRuntimeContext({
+    rootDir,
+    actor: {
+      id: 'user:local',
+      type: 'user',
+      roles: ['owner'],
+    },
+  });
   const json = !!args.flags['json'];
 
   try {
@@ -23,9 +30,8 @@ export function runTask(args: ParsedArgs): void {
           console.log('Usage: mesa task create <title> [--assignee <agent>] [--reviewer <agent>] [--branch <name>]');
           return;
         }
-        const task = createTask(paths, {
+        const task = createTask(ctx, {
           title,
-          createdBy: 'user',
           assignedTo: typeof args.flags['assignee'] === 'string' ? args.flags['assignee'] : undefined,
           reviewer: typeof args.flags['reviewer'] === 'string' ? args.flags['reviewer'] : undefined,
           branch: typeof args.flags['branch'] === 'string' ? args.flags['branch'] : undefined,
@@ -36,7 +42,7 @@ export function runTask(args: ParsedArgs): void {
       }
 
       case 'list': {
-        const tasks = listTasks(paths);
+        const tasks = listTasks(ctx);
         if (json) {
           formatOutput(tasks, true);
         } else {
@@ -60,7 +66,7 @@ export function runTask(args: ParsedArgs): void {
           console.log('Usage: mesa task show <taskId>');
           return;
         }
-        const task = getTask(paths, taskId);
+        const task = getTask(ctx, taskId);
         formatOutput(task, json);
         return;
       }
@@ -73,7 +79,7 @@ export function runTask(args: ParsedArgs): void {
           console.log('  Statuses: todo, in_progress, ready_for_review, reviewing, changes_requested, approved, done');
           return;
         }
-        const task = updateTaskStatus(paths, taskId, newStatus as TaskStatus, 'user');
+        const task = updateTaskStatus(ctx, taskId, newStatus as TaskStatus);
         printSuccess(`Task ${task.id} status: ${task.status}`);
         if (json) formatOutput(task, true);
         return;
@@ -87,7 +93,7 @@ export function runTask(args: ParsedArgs): void {
           return;
         }
         const reviewer = args.positional[2];
-        const task = assignTask(paths, taskId, assignee, reviewer);
+        const task = assignTask(ctx, taskId, assignee, reviewer);
         printSuccess(`Task ${task.id} assigned to ${task.assignedTo}`);
         if (json) formatOutput(task, true);
         return;

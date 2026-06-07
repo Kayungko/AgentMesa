@@ -1,8 +1,11 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { currentProtocolVersion } from '@agentmesa/protocol';
-import { createWorkspacePaths } from '@agentmesa/core';
-import type { MesaWorkspacePaths } from '@agentmesa/core';
+import { createRuntimeContext, createWorkspacePaths } from '@agentmesa/core';
+import type {
+  MesaRuntimeContext,
+  MesaWorkspacePaths,
+} from '@agentmesa/core';
 import {
   createTaskInputSchema,
   listTasksInputSchema,
@@ -71,6 +74,60 @@ function wrapNoArgHandler(
   };
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function wrapRuntimeHandler<T extends Record<string, any>>(
+  rootDir: string,
+  actorId: (args: T) => string,
+  handler: (ctx: MesaRuntimeContext, args: T) => string
+) {
+  return async (args: T) => {
+    try {
+      const ctx = createAgentRuntimeContext(rootDir, actorId(args));
+      const result = handler(ctx, args);
+      return { content: [{ type: 'text' as const, text: result }] };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }],
+        isError: true,
+      };
+    }
+  };
+}
+
+function wrapRuntimeNoArgHandler(
+  rootDir: string,
+  handler: (ctx: MesaRuntimeContext) => string
+) {
+  return async () => {
+    try {
+      const result = handler(createAgentRuntimeContext(rootDir, 'agent:mcp'));
+      return { content: [{ type: 'text' as const, text: result }] };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }],
+        isError: true,
+      };
+    }
+  };
+}
+
+function createAgentRuntimeContext(
+  rootDir: string,
+  actorId: string
+): MesaRuntimeContext {
+  return createRuntimeContext({
+    rootDir,
+    actor: {
+      id: actorId,
+      type: 'agent',
+      roles: ['custom'],
+      client: 'mcp',
+    },
+  });
+}
+
 export function createMcpServer(rootDir: string): McpServer {
   const paths = createWorkspacePaths(rootDir);
 
@@ -83,22 +140,26 @@ export function createMcpServer(rootDir: string): McpServer {
   server.registerTool('mesa_create_task', {
     description: 'Create a new AgentMesa task',
     inputSchema: createTaskInputSchema,
-  }, wrapHandler(paths, handleCreateTask));
+  }, wrapRuntimeHandler(rootDir, (args) => args.createdBy, handleCreateTask));
 
   server.registerTool('mesa_list_tasks', {
     description: 'List all AgentMesa tasks',
     inputSchema: listTasksInputSchema,
-  }, wrapNoArgHandler(paths, handleListTasks));
+  }, wrapRuntimeNoArgHandler(rootDir, handleListTasks));
 
   server.registerTool('mesa_read_task', {
     description: 'Read a specific AgentMesa task by ID',
     inputSchema: readTaskInputSchema,
-  }, wrapHandler(paths, handleReadTask));
+  }, wrapRuntimeHandler(rootDir, () => 'agent:mcp', handleReadTask));
 
   server.registerTool('mesa_update_status', {
     description: 'Update the status of an AgentMesa task',
     inputSchema: updateStatusInputSchema,
-  }, wrapHandler(paths, handleUpdateStatus));
+  }, wrapRuntimeHandler(
+    rootDir,
+    (args) => args.updatedBy ?? 'agent:mcp',
+    handleUpdateStatus
+  ));
 
   // Message tools
   server.registerTool('mesa_post_message', {
@@ -109,12 +170,12 @@ export function createMcpServer(rootDir: string): McpServer {
   server.registerTool('mesa_request_review', {
     description: 'Request a review for a task, sets status to ready_for_review',
     inputSchema: requestReviewInputSchema,
-  }, wrapHandler(paths, handleRequestReview));
+  }, wrapRuntimeHandler(rootDir, (args) => args.from, handleRequestReview));
 
   server.registerTool('mesa_submit_review', {
     description: 'Submit a review result for a task, updates status to approved or changes_requested',
     inputSchema: submitReviewInputSchema,
-  }, wrapHandler(paths, handleSubmitReview));
+  }, wrapRuntimeHandler(rootDir, (args) => args.from, handleSubmitReview));
 
   server.registerTool('mesa_list_messages', {
     description: 'List messages, optionally filtered by task ID',

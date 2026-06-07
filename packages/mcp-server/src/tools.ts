@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { MesaWorkspacePaths } from '@agentmesa/core';
+import type { MesaRuntimeContext, MesaWorkspacePaths } from '@agentmesa/core';
 import {
   createTask,
   getTask,
@@ -106,7 +106,7 @@ export const listAgentsInputSchema = {};
 // --- Handler functions ---
 
 export function handleCreateTask(
-  paths: MesaWorkspacePaths,
+  ctx: MesaRuntimeContext,
   args: {
     title: string;
     createdBy: string;
@@ -128,9 +128,8 @@ export function handleCreateTask(
         }
       : undefined;
 
-  const task = createTask(paths, {
+  const task = createTask(ctx, {
     title: args.title,
-    createdBy: args.createdBy,
     assignedTo: args.assignedTo,
     reviewer: args.reviewer,
     meetingId: args.meetingId,
@@ -141,26 +140,21 @@ export function handleCreateTask(
   return JSON.stringify(task);
 }
 
-export function handleListTasks(paths: MesaWorkspacePaths): string {
-  const tasks = listTasks(paths);
+export function handleListTasks(ctx: MesaRuntimeContext): string {
+  const tasks = listTasks(ctx);
   return JSON.stringify(tasks);
 }
 
-export function handleReadTask(paths: MesaWorkspacePaths, args: { taskId: string }): string {
-  const task = getTask(paths, args.taskId);
+export function handleReadTask(ctx: MesaRuntimeContext, args: { taskId: string }): string {
+  const task = getTask(ctx, args.taskId);
   return JSON.stringify(task);
 }
 
 export function handleUpdateStatus(
-  paths: MesaWorkspacePaths,
+  ctx: MesaRuntimeContext,
   args: { taskId: string; status: string; updatedBy?: string }
 ): string {
-  const task = updateTaskStatus(
-    paths,
-    args.taskId,
-    args.status as TaskStatus,
-    args.updatedBy
-  );
+  const task = updateTaskStatus(ctx, args.taskId, args.status as TaskStatus);
   return JSON.stringify(task);
 }
 
@@ -187,7 +181,7 @@ export function handlePostMessage(
 }
 
 export function handleRequestReview(
-  paths: MesaWorkspacePaths,
+  ctx: MesaRuntimeContext,
   args: {
     taskId: string;
     from: string;
@@ -197,7 +191,7 @@ export function handleRequestReview(
   }
 ): string {
   // Post a review_request message
-  const message = appendMessage(paths, {
+  const message = appendMessage(ctx.paths, {
     taskId: args.taskId,
     from: args.from,
     to: args.to,
@@ -207,13 +201,13 @@ export function handleRequestReview(
   });
 
   // Update task status to ready_for_review
-  const task = updateTaskStatus(paths, args.taskId, 'ready_for_review', args.from);
+  const task = updateTaskStatus(ctx, args.taskId, 'ready_for_review');
 
   return JSON.stringify({ message, task });
 }
 
 export function handleSubmitReview(
-  paths: MesaWorkspacePaths,
+  ctx: MesaRuntimeContext,
   args: {
     taskId: string;
     from: string;
@@ -223,7 +217,7 @@ export function handleSubmitReview(
   }
 ): string {
   // Post a review_result message
-  const message = appendMessage(paths, {
+  const message = appendMessage(ctx.paths, {
     taskId: args.taskId,
     from: args.from,
     type: 'review_result',
@@ -235,7 +229,7 @@ export function handleSubmitReview(
   const nextStatus: TaskStatus =
     args.verdict === 'approved' ? 'approved' : 'changes_requested';
 
-  const task = updateTaskStatus(paths, args.taskId, nextStatus, args.from);
+  const task = updateTaskStatus(ctx, args.taskId, nextStatus);
 
   return JSON.stringify({ message, task });
 }

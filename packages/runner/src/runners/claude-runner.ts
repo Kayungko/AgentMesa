@@ -1,5 +1,5 @@
 import type { MesaWorkspacePaths } from '@agentmesa/core';
-import { getTask } from '@agentmesa/core';
+import { createRuntimeContext, getTask } from '@agentmesa/core';
 import type { RunOptions, RunResult } from '../types.js';
 import { AbstractRunner } from './base-runner.js';
 import { buildImplementPrompt, buildFixPrompt } from '../prompt-builder.js';
@@ -13,7 +13,16 @@ export class ClaudeRunner extends AbstractRunner {
     const { startTime } = this.prepareRun(options);
     const isDryRun = this.dryRun || options.dryRun || false;
 
-    const task = getTask(this.paths, options.taskId);
+    const ctx = createRuntimeContext({
+      rootDir: this.paths.rootDir,
+      actor: {
+        id: options.agentId,
+        type: 'agent',
+        roles: ['builder'],
+        client: 'claude-code',
+      },
+    });
+    const task = getTask(ctx, options.taskId);
     let prompt: string;
     const artifacts: string[] = [];
 

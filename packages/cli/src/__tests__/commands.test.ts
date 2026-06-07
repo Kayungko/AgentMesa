@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   initWorkspace,
-  createWorkspacePaths,
+  createRuntimeContext,
   createTask,
   listTasks,
   getTask,
@@ -15,13 +15,19 @@ import {
   listAgents,
 } from '@agentmesa/core';
 import type { MesaWorkspacePaths } from '@agentmesa/core';
+import type { MesaRuntimeContext } from '@agentmesa/core';
 
 let testDir: string;
 let paths: MesaWorkspacePaths;
+let ctx: MesaRuntimeContext;
 
 beforeEach(() => {
   testDir = mkdtempSync(join(tmpdir(), 'agentmesa-cli-test-'));
   paths = initWorkspace(testDir);
+  ctx = createRuntimeContext({
+    rootDir: testDir,
+    actor: { id: 'user:local', type: 'user', roles: ['owner'] },
+  });
 });
 
 afterEach(() => {
@@ -30,20 +36,20 @@ afterEach(() => {
 
 describe('CLI integration: task workflow', () => {
   it('creates and lists tasks', () => {
-    const task = createTask(paths, { title: 'Build feature', createdBy: 'user' });
+    const task = createTask(ctx, { title: 'Build feature' });
     expect(task.id).toMatch(/^task_/);
 
-    const tasks = listTasks(paths);
+    const tasks = listTasks(ctx);
     expect(tasks).toHaveLength(1);
     expect(tasks[0]!.title).toBe('Build feature');
   });
 
   it('updates task status through lifecycle', () => {
-    const task = createTask(paths, { title: 'Build feature', createdBy: 'user' });
-    const updated = updateTaskStatus(paths, task.id, 'in_progress');
+    const task = createTask(ctx, { title: 'Build feature' });
+    const updated = updateTaskStatus(ctx, task.id, 'in_progress');
     expect(updated.status).toBe('in_progress');
 
-    const fetched = getTask(paths, task.id);
+    const fetched = getTask(ctx, task.id);
     expect(fetched.status).toBe('in_progress');
   });
 

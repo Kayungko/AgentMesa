@@ -39,7 +39,7 @@ Create these documents first:
 
 ```txt
 docs/DOMAIN_MODEL.md
-docs/RUNTIME.md
+docs/RUNTIME_CONTEXT.md
 docs/TRANSPORTS.md
 docs/EVENTS.md
 docs/STORAGE.md
@@ -64,6 +64,21 @@ Acceptance:
 - Types and schemas cannot drift.
 
 ## Priority 3: Runtime Context
+
+Status: `in_progress`
+
+Current progress:
+
+- Added the shared `MesaRuntimeContext` and injectable runtime dependencies.
+- Migrated task create/read/list/status/assignment operations.
+- Migrated CLI task commands and required MCP/Desk/Runner task call sites.
+- Added default file storage, in-memory event store, allow-all policy, and console logger.
+
+Remaining before Priority 3 is complete:
+
+- Migrate task deletion.
+- Migrate meeting, message, artifact, agent registry, and lock services.
+- Remove remaining direct durable writes from migrated service boundaries.
 
 Direction:
 

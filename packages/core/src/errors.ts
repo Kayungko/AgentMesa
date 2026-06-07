@@ -7,6 +7,7 @@ export type MesaErrorCode =
   | 'WORKSPACE_NOT_FOUND'
   | 'WORKSPACE_ALREADY_EXISTS'
   | 'LOCK_ERROR'
+  | 'POLICY_DENIED'
   | 'VALIDATION_ERROR'
   | 'STORAGE_ERROR';
 
@@ -80,5 +81,15 @@ export class ValidationError extends MesaError {
   constructor(message: string) {
     super('VALIDATION_ERROR', message);
     this.name = 'ValidationError';
+  }
+}
+
+export class PolicyDeniedError extends MesaError {
+  constructor(action: string, resource: string, reason?: string) {
+    super(
+      'POLICY_DENIED',
+      `Policy denied "${action}" on "${resource}"${reason ? `: ${reason}` : ''}`
+    );
+    this.name = 'PolicyDeniedError';
   }
 }

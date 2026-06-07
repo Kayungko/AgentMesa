@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { currentProtocolVersion } from '@agentmesa/protocol';
 import { ensureDir, readJson, writeJson } from './storage.js';
 import { WorkspaceNotFoundError, WorkspaceAlreadyExistsError } from './errors.js';
+import type { MesaConfig } from './runtime/types.js';
 
 export interface MesaWorkspacePaths {
   rootDir: string;
@@ -14,13 +15,6 @@ export interface MesaWorkspacePaths {
   agentsDir: string;
   logsDir: string;
   locksDir: string;
-}
-
-export interface MesaConfig {
-  protocolVersion: string;
-  projectName?: string;
-  defaultBuilder?: string;
-  defaultReviewer?: string;
 }
 
 export function createWorkspacePaths(rootDir: string): MesaWorkspacePaths {

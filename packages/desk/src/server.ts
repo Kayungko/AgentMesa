@@ -1,6 +1,6 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import {
-  createWorkspacePaths,
+  createRuntimeContext,
   listTasks,
   getTask,
   listMeetings,
@@ -10,7 +10,7 @@ import {
   getArtifact,
   listAgents,
 } from '@agentmesa/core';
-import type { MesaWorkspacePaths } from '@agentmesa/core';
+import type { MesaRuntimeContext } from '@agentmesa/core';
 import { MesaError } from '@agentmesa/core';
 import { generateDashboardHtml } from './dashboard.js';
 
@@ -26,11 +26,18 @@ export class DeskServer {
   }
 
   async start(): Promise<void> {
-    const paths = createWorkspacePaths(this.rootDir);
+    const ctx = createRuntimeContext({
+      rootDir: this.rootDir,
+      actor: {
+        id: 'system:desk',
+        type: 'system',
+        roles: ['read_only'],
+      },
+    });
 
     return new Promise((resolve, reject) => {
       this.server = createServer((req, res) => {
-        this.handleRequest(req, res, paths).catch((err) => {
+        this.handleRequest(req, res, ctx).catch((err) => {
           this.sendError(res, 500, err instanceof Error ? err.message : 'Internal error');
         });
       });
@@ -72,7 +79,7 @@ export class DeskServer {
   private async handleRequest(
     req: IncomingMessage,
     res: ServerResponse,
-    paths: MesaWorkspacePaths
+    ctx: MesaRuntimeContext
   ): Promise<void> {
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
     const pathname = url.pathname;
@@ -90,7 +97,7 @@ export class DeskServer {
 
     // API routes
     if (pathname === '/api/tasks') {
-      const tasks = listTasks(paths);
+      const tasks = listTasks(ctx);
       this.sendJson(res, tasks);
       return;
     }
@@ -98,7 +105,7 @@ export class DeskServer {
     const taskMatch = pathname.match(/^\/api\/tasks\/([^/]+)$/);
     if (taskMatch) {
       try {
-        const task = getTask(paths, taskMatch[1]!);
+        const task = getTask(ctx, taskMatch[1]!);
         this.sendJson(res, task);
       } catch (err) {
         if (err instanceof MesaError && err.code === 'TASK_NOT_FOUND') {
@@ -111,7 +118,7 @@ export class DeskServer {
     }
 
     if (pathname === '/api/meetings') {
-      const meetings = listMeetings(paths);
+      const meetings = listMeetings(ctx.paths);
       this.sendJson(res, meetings);
       return;
     }
@@ -119,8 +126,8 @@ export class DeskServer {
     const meetingMatch = pathname.match(/^\/api\/meetings\/([^/]+)$/);
     if (meetingMatch) {
       try {
-        const meeting = getMeeting(paths, meetingMatch[1]!);
-        const messages = listMessages(paths).filter((m) => {
+        const meeting = getMeeting(ctx.paths, meetingMatch[1]!);
+        const messages = listMessages(ctx.paths).filter((m) => {
           return meeting.tasks.some((taskId) => m.taskId === taskId);
         });
         this.sendJson(res, { ...meeting, messages });
@@ -135,7 +142,7 @@ export class DeskServer {
     }
 
     if (pathname === '/api/artifacts') {
-      const artifacts = listArtifacts(paths);
+      const artifacts = listArtifacts(ctx.paths);
       this.sendJson(res, artifacts);
       return;
     }
@@ -143,7 +150,7 @@ export class DeskServer {
     const artifactMatch = pathname.match(/^\/api\/artifacts\/([^/]+)$/);
     if (artifactMatch) {
       try {
-        const artifact = getArtifact(paths, artifactMatch[1]!);
+        const artifact = getArtifact(ctx.paths, artifactMatch[1]!);
         this.sendJson(res, artifact);
       } catch (err) {
         if (err instanceof MesaError && err.code === 'ARTIFACT_NOT_FOUND') {
@@ -156,16 +163,16 @@ export class DeskServer {
     }
 
     if (pathname === '/api/agents') {
-      const agents = listAgents(paths);
+      const agents = listAgents(ctx.paths);
       this.sendJson(res, agents);
       return;
     }
 
     if (pathname === '/api/status') {
-      const tasks = listTasks(paths);
-      const meetings = listMeetings(paths);
-      const agents = listAgents(paths);
-      const artifacts = listArtifacts(paths);
+      const tasks = listTasks(ctx);
+      const meetings = listMeetings(ctx.paths);
+      const agents = listAgents(ctx.paths);
+      const artifacts = listArtifacts(ctx.paths);
 
       this.sendJson(res, {
         tasks: tasks.length,
