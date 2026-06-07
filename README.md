@@ -6,7 +6,17 @@ AgentMesa gives Claude Code, Codex, Cursor, Gemini CLI, and other AI coding agen
 
 中文定位：
 
-> AgentMesa 是一个插件优先的 AI 编程智能体协作会议层。它让 Claude Code、Codex 等 Agent 围绕同一个任务自动交接、讨论、评审、修复和交付。
+> AgentMesa 是一个插件优先的 AI 编程智能体协作会议层。它让 Claude Code、Codex、Cursor、Gemini CLI 等 Agent 跨各自客户端围绕同一个任务自动交接、讨论、评审、修复和交付。
+
+## Vision
+
+AgentMesa is not only a Claude Code + Codex bridge. Claude and Codex are the first proving pair.
+
+The long-term goal is broader:
+
+> Any capable AI agent should be able to join the same project meeting, understand shared task context, exchange structured messages, produce artifacts, and continue the workflow from its own client.
+
+See [Vision](docs/VISION.md).
 
 ## Why AgentMesa
 
@@ -54,6 +64,7 @@ AgentMesa is designed as a plugin-first system:
 ```txt
 AgentMesa/
   docs/
+    VISION.md
     PRODUCT.md
     ARCHITECTURE.md
     PROTOCOL.md
@@ -115,6 +126,7 @@ This repository is currently in the product and architecture design phase.
 
 See:
 
+- [Vision](docs/VISION.md)
 - [Product Design](docs/PRODUCT.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Protocol](docs/PROTOCOL.md)
