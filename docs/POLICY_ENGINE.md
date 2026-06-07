@@ -1,0 +1,278 @@
+# AgentMesa Policy Engine
+
+AgentMesa operates in a multi-agent environment where different agents with different capabilities need controlled access to shared project state. The policy engine is the gatekeeper that enforces what each actor can do, based on who they are, what role they have, and what they are actually capable of.
+
+## Policy Model
+
+Every actionable request is a structured permission check evaluated by the policy engine before execution proceeds:
+
+```
+(actor, action, resource, context) => allowed | denied | requires_approval
+```
+
+### Actor
+
+Who is acting. Never a bare string. Each actor type carries its own identity semantics:
+
+- **User** — the human chair. Represented as `user:<id>`. Always the highest authority. Can override requires_approval decisions.
+- **Agent** — a specific AI agent instance. Represented as `agent:<id>` with an associated `MesaAgentCapability` declaration and one or more assigned roles.
+- **System** — the Core runtime itself, performing internal operations like state projection, event compaction, or lock management. Represented as `system:core`.
+- **CI** — an automated CI connector (GitHub Actions, etc.). Represented as `ci:<connector_id>`. CI actors have narrower permissions by default.
+
+### Action
+
+What the actor wants to do. Concrete, auditable operations:
+
+| Action | Scope |
+|---|---|
+| `read_task` | Read a task's full state, messages, and artifacts |
+| `write_task` | Create or update task definition, description, acceptance criteria |
+| `change_status` | Transition a task to a new status |
+| `post_message` | Append a message to a meeting or task thread |
+| `create_artifact` | Produce a durable artifact (review, test result, doc, check output) |
+| `modify_source` | Write to source files in the workspace |
+| `run_command` | Execute a shell command via the runner |
+| `push_code` | Push commits to a remote |
+| `merge_pr` | Merge a pull request |
+| `manage_agents` | Register, configure, or remove agents |
+| `manage_meetings` | Create, configure, or close meetings |
+
+### Resource
+
+What the actor wants to act on. Typed and identified for precise rule matching:
+
+- `task:<id>` — a specific task.
+- `meeting:<id>` — a specific meeting.
+- `file:<glob_pattern>` — a file or set of files matching a pattern.
+- `command:<shell_string>` — a shell command the runner is about to execute.
+- `artifact:<id>` — a specific artifact.
+- `agent:<id>` — a specific agent (for manage_agents actions).
+
+### Context
+
+Additional constraints the decision may depend on:
+
+- `workspace` — the project root path. Commands and file access are scoped to this directory.
+- `taskState` — the current status of the task being acted on (e.g., reviewer can only change_status on a task currently in `in_review`).
+- `meetingPhase` — whether the meeting is active, paused, or closed.
+- `timeWindow` — optional time-based access restrictions.
+- `userPresent` — whether the human user is available for approval prompts.
+
+## Evaluation Rules
+
+1. Every check produces exactly one result: `allowed`, `denied`, or `requires_approval`.
+2. `denied` takes absolute priority. If any rule denies, the action is denied regardless of other rules that might allow it.
+3. Default is `denied` for unknown actors. An actor must be registered in the runtime and assigned at least one role.
+4. `requires_approval` means the action is not blocked, but the user must confirm before execution proceeds. If the user is not present, the action is treated as `denied` until the user returns.
+5. Policy decisions are deterministic: the same (actor, action, resource, context) at the same point in time always produces the same result.
+6. Roles grant permission to attempt; capabilities gate whether the attempt can actually succeed.
+
+## Actor/Action/Resource Model
+
+Every policy check is a triple `(actor, action, resource)` wrapped with `context`. The policy engine resolves this in layers:
+
+```
+1. Actor resolution   — who is this? registered? what roles? what capabilities?
+2. Role rule matching  — does any assigned role permit this action on this resource?
+3. Capability gating   — can this actor's declared capabilities actually execute this?
+4. Resource rule match — do file/command/resource-specific rules further constrain this?
+5. Context evaluation  — do runtime constraints (state, time, user presence) affect this?
+```
+
+The order matters. A denied actor never reaches role matching. A role mismatch never reaches capability gating. The first `denied` result terminates evaluation immediately.
+
+## Role-Based Capability Matrix
+
+Roles are the coarse-grained permission layer. Every actor is assigned one or more roles. The role determines which actions the actor may attempt. The matrix below defines the complete permission surface.
+
+| Action | chair | planner | builder | reviewer | tester | documenter | maintainer |
+|---|---|---|---|---|---|---|---|
+| `read_task` | Y | Y | Y | Y | Y | Y | Y |
+| `write_task` | Y | Y | Y | — | — | — | Y |
+| `change_status` | Y | — | Y | Y* | — | — | Y |
+| `post_message` | Y | Y | Y | Y | Y | Y | Y |
+| `create_artifact` | Y | — | Y | Y | Y | Y | Y |
+| `modify_source` | Y | — | Y | — | — | — | Y |
+| `run_command` | Y | — | Y | — | Y | — | Y |
+| `push_code` | Y | — | — | — | — | — | Y |
+| `merge_pr` | Y | — | — | — | — | — | — |
+| `manage_agents` | Y | — | — | — | — | — | Y |
+| `manage_meetings` | Y | Y | — | — | — | — | Y |
+
+`*` reviewer may only transition status to `approved` or `changes_requested`. Any other transition is denied.
+
+### Role Definitions
+
+- **chair** — full authority across all actions and resources. Typically the human user. The only role that can merge PRs and override requires_approval decisions.
+- **planner** — defines and organizes work. Reads and writes tasks, posts messages, manages meetings. Cannot touch source code or run commands. The architect role.
+- **builder** — the primary implementation role. Can read, write, change status, post messages, create artifacts, modify source, and run commands. Cannot push code or manage other agents.
+- **reviewer** — inspects and evaluates work. Reads tasks, posts messages, creates review artifacts, and changes status only to `approved` or `changes_requested`. Cannot modify source code under any circumstance.
+- **tester** — validates work through automated and manual testing. Reads tasks, posts messages, creates test artifacts, and runs commands. Cannot modify source code.
+- **documenter** — produces documentation artifacts. Reads tasks, posts messages, creates documentation artifacts. Cannot modify source code or run commands.
+- **maintainer** — builder capabilities plus `manage_agents` and `manage_meetings`. Can push code but cannot merge PRs. Typically a trusted automation role or lead developer.
+
+## Agent Capability Declaration
+
+Roles grant permission to attempt actions. Capabilities declare what an agent can actually do. Before assigning role-based work, the policy engine checks that the agent's declared capabilities support the required operations.
+
+```ts
+MesaAgentCapability {
+  supportedTransports:       ('file' | 'mcp' | 'http')[]
+  supportedArtifactKinds:    ('review_report' | 'test_result' | 'doc' | 'check_output')[]
+  canReviewCode:             boolean
+  canEditFiles:              boolean
+  canRunShell:               boolean
+  canUseMcp:                 boolean
+  canOpenPullRequest:        boolean
+  canReadPullRequest:        boolean
+  maxContextTokens?:          number
+}
+```
+
+### Capability Gating Rules
+
+| Role action requires | Capability must be true |
+|---|---|
+| `modify_source` | `canEditFiles` |
+| `run_command` | `canRunShell` |
+| `create_artifact` of kind `review_report` | `canReviewCode` AND `review_report` in `supportedArtifactKinds` |
+| `create_artifact` of kind `test_result` | `test_result` in `supportedArtifactKinds` |
+| `push_code` | `canOpenPullRequest` (push is gated by PR capability) |
+| Any MCP tool invocation | `canUseMcp` |
+| `post_message` via MCP | `canUseMcp` AND `'mcp'` in `supportedTransports` |
+
+Capability checks run after role checks. If a role permits `modify_source` but `canEditFiles` is false, the action is denied at the capability layer with reason `"agent capability mismatch: canEditFiles is false"`.
+
+`maxContextTokens` is advisory. If an agent declares a token limit and a task's context exceeds it, the orchestrator is expected to chunk or summarise rather than fail. The policy engine records a warning but does not deny the action.
+
+## File Access Policy
+
+File access is governed by pattern-based rules with role-scoped enforcement. Each rule is a tuple of `(glob_pattern, action, allowed_roles)`.
+
+### Default Write Rules
+
+| Pattern | Allowed Roles |
+|---|---|
+| `src/**` | builder, maintainer |
+| `lib/**` | builder, maintainer |
+| `packages/**` | builder, maintainer |
+| `**/*.test.*`, `**/*.spec.*`, `**/__tests__/**` | builder, tester, maintainer |
+| `docs/**`, `*.md` | builder, documenter, maintainer |
+| `.*rc`, `*.config.*`, `tsconfig*.json` | builder, maintainer |
+
+All roles can read any non-protected file. Read access is denied only for protected paths.
+
+### Protected Paths — Always Denied for Write
+
+```
+.env, .env.*, .env.*.*
+*.pem, *.key, *.pfx, *.p12
+id_rsa, id_rsa.*, id_ed25519, id_ecdsa*
+credentials.*, credentials/**
+secrets/**
+**/secrets/**
+```
+
+These paths are never writable by any agent, regardless of role. Only the chair (user) may write them. Attempts to read protected files by non-chair actors are also denied.
+
+### Managed Paths — Core Only
+
+```
+.agentmesa/**
+```
+
+`.agentmesa/` state files are managed exclusively by Core services. Individual agents read meeting and task state through Core APIs (`read_task`, `list_tasks`, etc.); they never write `.agentmesa/` directly. This prevents agents from corrupting shared meeting state, task projections, event logs, or the audit trail.
+
+## Command Policy
+
+Commands are classified into three tiers before the runner executes them. Classification happens by pattern matching against the full command string.
+
+### Safe Commands — Always Allowed
+
+```
+git status, git diff, git log, git stash list, git branch
+npm test, npm run build, npm run lint, npm run typecheck
+pnpm test, pnpm build, pnpm lint
+node --version, node -e "<safe_expr>"
+which, type, echo, pwd, ls, cat (non-secret paths)
+```
+
+These are read-only or locally-scoped build/test commands with no side effects beyond the workspace. Safe commands do not require the `run_command` action check to pass role-based rules — they are permitted as long as the actor is registered.
+
+### Blocked Commands — Never Allowed
+
+```
+rm -rf /, rm -rf ~, sudo, chmod 777, chown -R
+:(){ :|:& };:, $(...) with command substitution
+git push --force, git push --delete, git reset --hard, git clean -fdx
+curl <url> | bash, wget -O - | sh, eval, exec
+```
+
+Also blocked: any command targeting paths outside the workspace boundary, any command that reads files matching protected path patterns, and any command that attempts to modify `.agentmesa/` directly.
+
+### Approval Commands — Allowed Only With User Confirmation
+
+```
+npm install <pkg>, npm uninstall <pkg>, npm update <pkg>
+pnpm add <pkg>, pnpm remove <pkg>
+git push, git push -u origin <branch>
+git commit (creates a commit)
+npm publish, pnpm publish
+npx <pkg>, pnpm dlx <pkg>
+```
+
+The runner presents the full command string to the user and waits for explicit approval before executing. If the user is not present (headless CI mode), approval commands are treated as denied unless the CI actor has been explicitly granted the required permissions.
+
+## Policy Integration
+
+The policy engine is part of `MesaRuntimeContext`. Every state-changing operation flows through it:
+
+```
+ctx.policy.canPerform(actor, action, resource, context)
+```
+
+### Integration Points
+
+- **Core services** — `createTask`, `updateTaskStatus`, `appendMessage`, `attachArtifact`, and every other mutation calls `ctx.policy.canPerform()` before writing. If denied, the service throws a `PolicyDeniedError` with the decision reason.
+- **MCP tools** — each MCP tool handler (`mesa_create_task`, `mesa_request_review`, `mesa_update_status`, etc.) checks policy before accessing or mutating state. The MCP transport never bypasses Core.
+- **Runner** — before invoking any agent command, the runner checks command policy classification and file access policy against the agent's declared capabilities and assigned roles.
+- **Connectors** — external connectors (GitHub, CI) pass their actor identity through the same `ctx.policy.canPerform()` call. A GitHub PR connector acts as `ci:github`, not as the user who triggered the workflow.
+
+All checks are synchronous at the decision point. There is no cached permission result; every call re-evaluates against the current policy state.
+
+## Audit Log
+
+Every policy decision is recorded in an append-only audit log.
+
+**Format (JSONL, one decision per line):**
+```json
+{"timestamp":"2026-06-07T14:32:01.000Z","actor":"agent:builder_01","action":"modify_source","resource":"file:src/task.ts","decision":"allowed","reason":"builder role permits source modification"}
+{"timestamp":"2026-06-07T14:32:05.000Z","actor":"agent:reviewer_01","action":"modify_source","resource":"file:src/task.ts","decision":"denied","reason":"reviewer role does not permit modify_source"}
+{"timestamp":"2026-06-07T14:33:00.000Z","actor":"agent:builder_01","action":"run_command","resource":"command:npm install left-pad","decision":"requires_approval","reason":"dependency installation requires user confirmation"}
+```
+
+**Storage:** `.agentmesa/logs/audit.jsonl`
+
+**Query dimensions:**
+- By actor — all decisions for a specific agent or user.
+- By action — all `run_command` decisions across all actors.
+- By time range — decisions within a start/end window.
+- By decision — all `denied` or all `requires_approval` entries.
+- By resource — all decisions affecting a specific file or task.
+
+The audit log is append-only. It is never truncated or modified by any agent. Log rotation and archival are managed by Core. The audit log itself is a protected path — only the system actor may write to it.
+
+## Default Deny Summary
+
+| Layer | Default | Override Path |
+|---|---|---|
+| Unknown actor | `denied` | Register actor + assign at least one role |
+| Known actor, no matching role rule | `denied` | Add the required role or add an explicit allow rule |
+| Role match, capability mismatch | `denied` | Agent must declare the required capability |
+| Protected file path (secrets, keys) | `denied` | Never overridable by agents; chair only |
+| Managed path (.agentmesa/) | `denied` | Never overridable by agents; Core only |
+| Blocked command | `denied` | Never overridable |
+| Approval-tier command | `requires_approval` | User confirms in UI or API |
+| Safe command | `allowed` (if actor registered) | N/A |
+
+The policy engine enforces that an agent cannot escalate its own privileges. Only the chair (user) can modify role assignments, capability declarations, or policy rules. The system actor can modify policy state only during Core initialization — never in response to an agent request.
