@@ -1,7 +1,15 @@
 {
   "name": "@agentmesa/protocol",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
+  "license": "MIT",
+  "author": "AgentMesa Contributors",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/agentmesa/agentmesa",
+    "directory": "packages/protocol"
+  },
+  "keywords": ["agentmesa", "ai-agents", "claude-code", "codex", "mcp"],
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -16,6 +24,9 @@
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "tsup": "^8.3.5",

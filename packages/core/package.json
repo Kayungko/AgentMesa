@@ -1,7 +1,15 @@
 {
   "name": "@agentmesa/core",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
+  "license": "MIT",
+  "author": "AgentMesa Contributors",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/agentmesa/agentmesa",
+    "directory": "packages/core"
+  },
+  "keywords": ["agentmesa", "ai-agents", "claude-code", "codex", "mcp"],
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {

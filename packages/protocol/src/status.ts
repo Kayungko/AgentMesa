@@ -15,6 +15,8 @@ export const taskStatuses = [
 
 export type TaskStatus = (typeof taskStatuses)[number];
 
+const terminalStatuses: readonly TaskStatus[] = ['done', 'cancelled'];
+
 const allowedTransitions: Record<TaskStatus, TaskStatus[]> = {
   todo: ['in_progress', 'cancelled'],
   in_progress: ['ready_for_review', 'blocked', 'failed', 'cancelled'],
@@ -42,4 +44,12 @@ export function assertTaskStatusTransition(from: TaskStatus, to: TaskStatus): vo
   if (!canTransitionTaskStatus(from, to)) {
     throw new Error(`Invalid AgentMesa task status transition: ${from} -> ${to}`);
   }
+}
+
+export function getAllowedTransitions(from: TaskStatus): TaskStatus[] {
+  return [...allowedTransitions[from]];
+}
+
+export function isTerminalStatus(status: TaskStatus): boolean {
+  return terminalStatuses.includes(status);
 }
