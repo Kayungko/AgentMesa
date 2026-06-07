@@ -8,3 +8,5 @@ build/
 .agentmesa/state.sqlite
 .agentmesa/logs/
 .agentmesa/locks/
+*.tsbuildinfo
+.codegraph/

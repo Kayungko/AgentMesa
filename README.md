@@ -122,7 +122,45 @@ mesa status T-0001
 
 ## Status
 
-This repository is currently in the product and architecture design phase.
+AgentMesa is **feature-complete for the 0.1.0 release**. All phases 0-14 of development are done.
+
+- ✅ **Phase 0**: Design and Scope — product positioning, architecture, protocol, security model
+- ✅ **Phase 1**: Engineering Foundation — TypeScript monorepo, pnpm, CI, build system
+- ✅ **Phase 2**: Mesa Protocol — complete types, zod schemas, status lifecycle, fixtures (53 tests)
+- ✅ **Phase 3**: Mesa Core — workspace manager, task/meeting/message/artifact services, agent registry, locking (49 tests)
+- ✅ **Phase 4**: Mesa CLI — init, doctor, task/message/artifact/meeting/agent commands, JSON output (16 tests)
+- ✅ **Phase 5**: Git/Shell Connectors — git status/diff/log/branch, shell allowlist/runner (32 tests)
+- ✅ **Phase 6**: Mesa MCP Server — JSON-RPC transport, tool/resource handlers, agent integration (26 tests)
+- ✅ **Phase 7**: Mesa Runner — pluggable runners, prompt builders, output parsers, runner factory (32 tests)
+- ✅ **Phase 8**: Claude Code Plugin — CLAUDE.md generator, skills, hooks, MCP config, install orchestrator (19 tests)
+- ✅ **Phase 9**: Codex Skill/Plugin — AGENTS.md generator, review skill, review report template, MCP config, exec flow (32 tests)
+- ✅ **Phase 10**: Orchestrator — workflow engine, review/fix loop, multi-agent workflows, approval gates, resume/failure (27 tests)
+- ✅ **Phase 11**: Policy Engine — role capabilities, file access policy, command policy, secret protection, confirmation gates (64 tests)
+- ✅ **Phase 12**: GitHub/CI Integrations — PR linking, diff import, review export, CI import, discussion import (12 tests)
+- ✅ **Phase 13**: Mesa Desk — task board, meeting timeline, artifact viewer, diff viewer, agent status, policy settings (14 tests)
+- ✅ **Phase 14**: Packaging and 1.0 Release — npm packages, CLI binary, plugin packages, docs, examples
+
+**376 tests** across 13 packages, all passing. Typecheck and build clean.
+
+**Next up**: Preparing for 1.0 stable release.
+
+### Package Inventory
+
+| Package | Description |
+|---|---|
+| `@agentmesa/protocol` | Mesa Protocol types, zod schemas, status lifecycle, fixtures |
+| `@agentmesa/core` | Workspace manager, task/meeting/message/artifact services, storage, locking |
+| `@agentmesa/cli` | CLI with init, doctor, task/message/artifact/meeting/agent commands |
+| `@agentmesa/connector-git` | Git status, diff, log, branch, changed files connector |
+| `@agentmesa/connector-shell` | Command allowlist, safe execution, output capture connector |
+| `@agentmesa/connector-github` | PR linking, diff import, review export, CI import connector |
+| `@agentmesa/mcp-server` | MCP server with JSON-RPC transport, tool and resource handlers |
+| `@agentmesa/runner` | Pluggable agent runners, prompt builders, output parsers |
+| `@agentmesa/orchestrator` | Workflow engine, review/fix loop, multi-agent workflows, approval gates |
+| `@agentmesa/policy` | Role capabilities, file access policy, command policy, secret protection |
+| `@agentmesa/desk` | Visual monitor with task board, meeting timeline, artifact/diff viewer |
+| `@agentmesa/plugin-claude` | Claude Code plugin with CLAUDE.md, skills, hooks, MCP config generators |
+| `@agentmesa/plugin-codex` | Codex plugin with AGENTS.md, review skill, report template generators |
 
 See:
 
