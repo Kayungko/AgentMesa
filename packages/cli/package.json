@@ -1,20 +1,29 @@
 {
   "name": "@agentmesa/cli",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
+  "license": "MIT",
+  "author": "AgentMesa Contributors",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/agentmesa/agentmesa",
+    "directory": "packages/cli"
+  },
+  "keywords": ["agentmesa", "ai-agents", "claude-code", "codex", "mcp", "cli"],
   "bin": {
     "mesa": "dist/index.js"
   },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --banner:js='#!/usr/bin/env node'",
+    "build": "tsup src/index.ts --format esm --dts",
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@agentmesa/core": "workspace:*"
+    "@agentmesa/core": "workspace:*",
+    "@agentmesa/protocol": "workspace:*"
   },
   "devDependencies": {
     "tsup": "^8.3.5",
