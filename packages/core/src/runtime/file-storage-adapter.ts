@@ -3,6 +3,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname } from 'node:path';
@@ -28,6 +29,19 @@ export class FileStorageAdapter implements MesaStorageAdapter {
       writeFileSync(path, content, 'utf8');
     } catch (error) {
       throw new MesaError('STORAGE_ERROR', `Failed to write ${path}: ${String(error)}`);
+    }
+  }
+
+  delete(path: string): boolean {
+    if (!existsSync(path)) {
+      return false;
+    }
+
+    try {
+      unlinkSync(path);
+      return true;
+    } catch (error) {
+      throw new MesaError('STORAGE_ERROR', `Failed to delete ${path}: ${String(error)}`);
     }
   }
 

@@ -6,11 +6,28 @@ import {
   generateMessageId,
 } from '@agentmesa/protocol';
 import type { MesaMessage, CreateMessageInput } from '@agentmesa/protocol';
-import type { MesaWorkspacePaths } from '../workspace.js';
-import { readJson, writeJson, listJson } from '../storage.js';
+import type { MesaRuntimeContext } from '../runtime/types.js';
+import {
+  appendRuntimeEvent,
+  assertPolicy,
+  listJsonFromStorage,
+  readJsonFromStorage,
+  writeJsonToStorage,
+} from './runtime-service-utils.js';
 
-export function appendMessage(paths: MesaWorkspacePaths, input: CreateMessageInput): MesaMessage {
-  const validated = CreateMessageInputSchema.parse(input);
+export type CreateMessageRuntimeInput = Omit<CreateMessageInput, 'from'> & {
+  from?: string;
+};
+
+export function appendMessage(
+  ctx: MesaRuntimeContext,
+  input: CreateMessageRuntimeInput
+): MesaMessage {
+  assertPolicy(ctx, 'message.append', input.taskId ? `task:${input.taskId}` : 'message');
+  const validated = CreateMessageInputSchema.parse({
+    ...input,
+    from: ctx.actor.id,
+  });
 
   const message: MesaMessage = {
     protocolVersion: currentProtocolVersion,
@@ -26,26 +43,45 @@ export function appendMessage(paths: MesaWorkspacePaths, input: CreateMessageInp
   };
 
   const result = MesaMessageSchema.parse(message);
-  writeJson(join(paths.messagesDir, `${message.id}.json`), result);
+  writeMessage(ctx, result);
+
+  appendRuntimeEvent(ctx, {
+    meetingId: result.meetingId ?? result.taskId ?? 'workspace',
+    type: 'message_sent',
+    streamId: result.id,
+    streamType: 'message',
+    data: { message: result },
+  });
 
   return result;
 }
 
-export function getMessage(paths: MesaWorkspacePaths, messageId: string): MesaMessage {
-  const message = readJson<MesaMessage>(join(paths.messagesDir, `${messageId}.json`));
+export function getMessage(ctx: MesaRuntimeContext, messageId: string): MesaMessage {
+  const message = readJsonFromStorage<MesaMessage>(
+    ctx,
+    join(ctx.paths.messagesDir, `${messageId}.json`)
+  );
   if (!message) {
     return null as never;
   }
   return MesaMessageSchema.parse(message);
 }
 
-export function listMessages(paths: MesaWorkspacePaths): MesaMessage[] {
-  return listJson<MesaMessage>(paths.messagesDir)
+export function listMessages(ctx: MesaRuntimeContext): MesaMessage[] {
+  return listJsonFromStorage<MesaMessage>(ctx, ctx.paths.messagesDir)
     .map((m) => MesaMessageSchema.safeParse(m))
     .filter((r) => r.success)
     .map((r) => (r as { success: true; data: MesaMessage }).data);
 }
 
-export function getMessagesByTask(paths: MesaWorkspacePaths, taskId: string): MesaMessage[] {
-  return listMessages(paths).filter((m) => m.taskId === taskId);
+export function getMessagesByTask(ctx: MesaRuntimeContext, taskId: string): MesaMessage[] {
+  return listMessages(ctx).filter((m) => m.taskId === taskId);
+}
+
+function writeMessage(ctx: MesaRuntimeContext, message: MesaMessage): void {
+  writeJsonToStorage(
+    ctx,
+    join(ctx.paths.messagesDir, `${message.id}.json`),
+    message
+  );
 }

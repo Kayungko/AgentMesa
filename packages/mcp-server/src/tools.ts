@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { MesaRuntimeContext, MesaWorkspacePaths } from '@agentmesa/core';
+import type { MesaRuntimeContext } from '@agentmesa/core';
 import {
   createTask,
   getTask,
@@ -159,7 +159,7 @@ export function handleUpdateStatus(
 }
 
 export function handlePostMessage(
-  paths: MesaWorkspacePaths,
+  ctx: MesaRuntimeContext,
   args: {
     taskId: string;
     from: string;
@@ -169,9 +169,8 @@ export function handlePostMessage(
     artifactIds?: string[];
   }
 ): string {
-  const message = appendMessage(paths, {
+  const message = appendMessage(ctx, {
     taskId: args.taskId,
-    from: args.from,
     to: args.to,
     type: args.type as 'task_created' | 'handoff' | 'review_request' | 'review_result' | 'fix_request' | 'fix_done' | 'test_result' | 'decision' | 'status_changed',
     summary: args.summary,
@@ -191,9 +190,8 @@ export function handleRequestReview(
   }
 ): string {
   // Post a review_request message
-  const message = appendMessage(ctx.paths, {
+  const message = appendMessage(ctx, {
     taskId: args.taskId,
-    from: args.from,
     to: args.to,
     type: 'review_request',
     summary: args.summary,
@@ -217,9 +215,8 @@ export function handleSubmitReview(
   }
 ): string {
   // Post a review_result message
-  const message = appendMessage(ctx.paths, {
+  const message = appendMessage(ctx, {
     taskId: args.taskId,
-    from: args.from,
     type: 'review_result',
     summary: args.summary,
     artifactIds: args.artifactIds,
@@ -235,7 +232,7 @@ export function handleSubmitReview(
 }
 
 export function handleAttachArtifact(
-  paths: MesaWorkspacePaths,
+  ctx: MesaRuntimeContext,
   args: {
     kind: string;
     taskId?: string;
@@ -245,10 +242,9 @@ export function handleAttachArtifact(
     metadata?: Record<string, unknown>;
   }
 ): string {
-  const artifact = createArtifact(paths, {
+  const artifact = createArtifact(ctx, {
     kind: args.kind as ArtifactKind,
     taskId: args.taskId,
-    createdBy: args.createdBy,
     content: args.content,
     format: args.format as 'markdown' | 'json' | 'diff' | 'text' | undefined,
     metadata: args.metadata,
@@ -257,11 +253,11 @@ export function handleAttachArtifact(
 }
 
 export function handleListArtifacts(
-  paths: MesaWorkspacePaths,
+  ctx: MesaRuntimeContext,
   args: { taskId?: string; kind?: string }
 ): string {
   const artifacts = listArtifacts(
-    paths,
+    ctx,
     args.taskId,
     args.kind as ArtifactKind | undefined
   );
@@ -269,20 +265,20 @@ export function handleListArtifacts(
 }
 
 export function handleListMessages(
-  paths: MesaWorkspacePaths,
+  ctx: MesaRuntimeContext,
   args: { taskId?: string }
 ): string {
   const messages = args.taskId
-    ? getMessagesByTask(paths, args.taskId)
-    : listMessages(paths);
+    ? getMessagesByTask(ctx, args.taskId)
+    : listMessages(ctx);
   return JSON.stringify(messages);
 }
 
 export function handleCreateMeeting(
-  paths: MesaWorkspacePaths,
+  ctx: MesaRuntimeContext,
   args: { title: string; tasks?: string[]; agents?: string[] }
 ): string {
-  const meeting = createMeeting(paths, {
+  const meeting = createMeeting(ctx, {
     title: args.title,
     tasks: args.tasks,
     agents: args.agents,
@@ -290,16 +286,16 @@ export function handleCreateMeeting(
   return JSON.stringify(meeting);
 }
 
-export function handleListMeetings(paths: MesaWorkspacePaths): string {
-  const meetings = listMeetings(paths);
+export function handleListMeetings(ctx: MesaRuntimeContext): string {
+  const meetings = listMeetings(ctx);
   return JSON.stringify(meetings);
 }
 
 export function handleRegisterAgent(
-  paths: MesaWorkspacePaths,
+  ctx: MesaRuntimeContext,
   args: { id: string; name: string; client: string; roles: string[] }
 ): string {
-  const agent = registerAgent(paths, {
+  const agent = registerAgent(ctx, {
     id: args.id,
     name: args.name,
     client: args.client,
@@ -309,7 +305,7 @@ export function handleRegisterAgent(
   return JSON.stringify(agent);
 }
 
-export function handleListAgents(paths: MesaWorkspacePaths): string {
-  const agents = listAgents(paths);
+export function handleListAgents(ctx: MesaRuntimeContext): string {
+  const agents = listAgents(ctx);
   return JSON.stringify(agents);
 }

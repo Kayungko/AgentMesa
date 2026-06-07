@@ -1,5 +1,5 @@
 import type { MesaWorkspacePaths } from '@agentmesa/core';
-import { createArtifact } from '@agentmesa/core';
+import { createArtifact, createRuntimeContext } from '@agentmesa/core';
 import { gitDiff } from './git.js';
 
 export function createGitDiffArtifact(
@@ -10,11 +10,19 @@ export function createGitDiffArtifact(
   options?: { staged?: boolean; ref?: string }
 ): { artifactId: string; diff: string } {
   const diff = gitDiff(cwd, options);
+  const ctx = createRuntimeContext({
+    rootDir: paths.rootDir,
+    actor: {
+      id: agentId,
+      type: 'agent',
+      roles: ['custom'],
+      client: 'git',
+    },
+  });
 
-  const artifact = createArtifact(paths, {
+  const artifact = createArtifact(ctx, {
     kind: 'git_diff',
     taskId,
-    createdBy: agentId,
     content: diff,
     format: 'diff',
     metadata: {

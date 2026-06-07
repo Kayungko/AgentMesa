@@ -1,6 +1,6 @@
 import { execSync } from 'child_process';
 import type { MesaWorkspacePaths } from '@agentmesa/core';
-import { createArtifact } from '@agentmesa/core';
+import { createArtifact, createRuntimeContext } from '@agentmesa/core';
 import type { CIStatus } from './types.js';
 
 /**
@@ -46,10 +46,18 @@ export async function importCIResults(
   cwd: string
 ): Promise<{ artifactId: string }> {
   const results = getCIStatus(cwd);
+  const ctx = createRuntimeContext({
+    rootDir: paths.rootDir,
+    actor: {
+      id: agentId,
+      type: 'agent',
+      roles: ['custom'],
+      client: 'github',
+    },
+  });
 
-  const artifact = await createArtifact(paths, {
+  const artifact = await createArtifact(ctx, {
     taskId,
-    createdBy: agentId,
     kind: 'test_result',
     content: JSON.stringify(results, null, 2),
     format: 'json',

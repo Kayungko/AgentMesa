@@ -1,5 +1,5 @@
 import {
-  createWorkspacePaths,
+  createRuntimeContext,
   registerAgent,
   listAgents,
 } from '@agentmesa/core';
@@ -9,7 +9,14 @@ import { printSuccess, printError, formatOutput } from '../output.js';
 
 export function runAgent(args: ParsedArgs): void {
   const rootDir = process.cwd();
-  const paths = createWorkspacePaths(rootDir);
+  const ctx = createRuntimeContext({
+    rootDir,
+    actor: {
+      id: 'user:local',
+      type: 'user',
+      roles: ['owner'],
+    },
+  });
   const json = !!args.flags['json'];
 
   try {
@@ -29,14 +36,14 @@ export function runAgent(args: ParsedArgs): void {
           : (['builder'] as AgentRole[]);
 
         const client = typeof args.flags['client'] === 'string' ? args.flags['client'] : id;
-        const agent = registerAgent(paths, { id, name, client, status: 'available', roles });
+        const agent = registerAgent(ctx, { id, name, client, status: 'available', roles });
         printSuccess(`Registered agent: ${agent.id} (${agent.name})`);
         if (json) formatOutput(agent, true);
         return;
       }
 
       case 'list': {
-        const agents = listAgents(paths);
+        const agents = listAgents(ctx);
         if (json) {
           formatOutput(agents, true);
         } else {

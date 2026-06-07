@@ -1,29 +1,30 @@
 import { join } from 'node:path';
 import {
   MesaTaskSchema,
-  MesaEventSchema,
   CreateTaskInputSchema,
   currentProtocolVersion,
-  generateEventId,
   generateTaskId,
   canTransitionTaskStatus,
 } from '@agentmesa/protocol';
 import type {
-  MesaEvent,
   MesaTask,
   CreateTaskInput,
   TaskStatus,
 } from '@agentmesa/protocol';
-import type { MesaWorkspacePaths } from '../workspace.js';
 import type { MesaRuntimeContext } from '../runtime/types.js';
-import { readJson, deleteFile } from '../storage.js';
 import {
   TaskNotFoundError,
   InvalidStatusTransitionError,
-  PolicyDeniedError,
 } from '../errors.js';
 import { appendMessage } from './message-service.js';
 import { createMeeting } from './meeting-service.js';
+import {
+  appendRuntimeEvent,
+  assertPolicy,
+  listJsonFromStorage,
+  readJsonFromStorage,
+  writeJsonToStorage,
+} from './runtime-service-utils.js';
 
 export type CreateTaskRuntimeInput = Omit<CreateTaskInput, 'createdBy'> & {
   createdBy?: string;
@@ -41,7 +42,7 @@ export function createTask(
 
   const meetingId =
     validated.meetingId ??
-    createMeeting(ctx.paths, { title: `Meeting for ${validated.title}` }).id;
+    createMeeting(ctx, { title: `Meeting for ${validated.title}` }).id;
 
   const now = new Date().toISOString();
   const task: MesaTask = {
@@ -64,18 +65,18 @@ export function createTask(
   const result = MesaTaskSchema.parse(task);
   writeTask(ctx, result);
 
-  appendMessage(ctx.paths, {
+  appendMessage(ctx, {
     meetingId,
     taskId: task.id,
-    from: ctx.actor.id,
     type: 'task_created',
     summary: `Task "${task.title}" created`,
   });
 
-  appendTaskEvent(ctx, {
+  appendRuntimeEvent(ctx, {
     meetingId,
     type: 'task_created',
     streamId: task.id,
+    streamType: 'task',
     data: { task: result },
   });
 
@@ -83,21 +84,20 @@ export function createTask(
 }
 
 export function getTask(ctx: MesaRuntimeContext, taskId: string): MesaTask {
-  const content = ctx.storage.readText(join(ctx.paths.tasksDir, `${taskId}.json`));
-  if (content === null) {
+  const task = readJsonFromStorage<MesaTask>(
+    ctx,
+    join(ctx.paths.tasksDir, `${taskId}.json`)
+  );
+  if (!task) {
     throw new TaskNotFoundError(taskId);
   }
 
-  return MesaTaskSchema.parse(JSON.parse(content));
+  return MesaTaskSchema.parse(task);
 }
 
 export function listTasks(ctx: MesaRuntimeContext): MesaTask[] {
-  return ctx.storage
-    .list(ctx.paths.tasksDir)
-    .filter((fileName) => fileName.endsWith('.json'))
-    .map((fileName) => ctx.storage.readText(join(ctx.paths.tasksDir, fileName)))
-    .filter((content): content is string => content !== null)
-    .map((content) => MesaTaskSchema.safeParse(JSON.parse(content)))
+  return listJsonFromStorage<MesaTask>(ctx, ctx.paths.tasksDir)
+    .map((t) => MesaTaskSchema.safeParse(t))
     .filter((r) => r.success)
     .map((r) => (r as { success: true; data: MesaTask }).data);
 }
@@ -124,18 +124,18 @@ export function updateTaskStatus(
   const result = MesaTaskSchema.parse(updated);
   writeTask(ctx, result);
 
-  appendMessage(ctx.paths, {
+  appendMessage(ctx, {
     meetingId: task.meetingId,
     taskId,
-    from: ctx.actor.id,
     type: 'status_changed',
     summary: `Status changed: ${oldStatus} -> ${newStatus}`,
   });
 
-  appendTaskEvent(ctx, {
+  appendRuntimeEvent(ctx, {
     meetingId: task.meetingId,
     type: 'task_status_changed',
     streamId: taskId,
+    streamType: 'task',
     data: { oldStatus, newStatus },
   });
 
@@ -163,10 +163,11 @@ export function assignTask(
   const result = MesaTaskSchema.parse(updated);
   writeTask(ctx, result);
 
-  appendTaskEvent(ctx, {
+  appendRuntimeEvent(ctx, {
     meetingId: task.meetingId,
     type: 'task_assigned',
     streamId: taskId,
+    streamType: 'task',
     data: {
       assignedTo,
       reviewer: reviewer ?? task.reviewer,
@@ -176,48 +177,15 @@ export function assignTask(
   return result;
 }
 
-export function deleteTask(paths: MesaWorkspacePaths, taskId: string): boolean {
-  const filePath = join(paths.tasksDir, `${taskId}.json`);
-  if (!readJson(filePath)) {
+export function deleteTask(ctx: MesaRuntimeContext, taskId: string): boolean {
+  assertPolicy(ctx, 'task.delete', `task:${taskId}`);
+  const filePath = join(ctx.paths.tasksDir, `${taskId}.json`);
+  if (!ctx.storage.exists(filePath)) {
     throw new TaskNotFoundError(taskId);
   }
-  return deleteFile(filePath);
+  return ctx.storage.delete(filePath);
 }
 
 function writeTask(ctx: MesaRuntimeContext, task: MesaTask): void {
-  ctx.storage.writeText(
-    join(ctx.paths.tasksDir, `${task.id}.json`),
-    `${JSON.stringify(task, null, 2)}\n`
-  );
-}
-
-function assertPolicy(
-  ctx: MesaRuntimeContext,
-  action: string,
-  resource: string
-): void {
-  const decision = ctx.policy.can(ctx.actor, action, resource);
-  if (!decision.allowed) {
-    throw new PolicyDeniedError(action, resource, decision.reason);
-  }
-}
-
-function appendTaskEvent(
-  ctx: MesaRuntimeContext,
-  input: Pick<MesaEvent, 'meetingId' | 'type' | 'streamId' | 'data'>
-): void {
-  const sequence = ctx.eventStore.list({ streamId: input.streamId }).length;
-  const event = MesaEventSchema.parse({
-    protocolVersion: currentProtocolVersion,
-    id: generateEventId(),
-    meetingId: input.meetingId,
-    type: input.type,
-    streamId: input.streamId,
-    streamType: 'task',
-    data: input.data,
-    actor: ctx.actor.id,
-    sequence,
-    timestamp: new Date().toISOString(),
-  });
-  ctx.eventStore.append(event);
+  writeJsonToStorage(ctx, join(ctx.paths.tasksDir, `${task.id}.json`), task);
 }

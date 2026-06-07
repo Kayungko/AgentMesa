@@ -24,6 +24,7 @@ export interface MesaConfig {
 export interface MesaStorageAdapter {
   readText(path: string): string | null;
   writeText(path: string, content: string): void;
+  delete(path: string): boolean;
   exists(path: string): boolean;
   list(path: string): string[];
   ensureDirectory(path: string): void;

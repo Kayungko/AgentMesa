@@ -159,13 +159,13 @@ describe('assignTask', () => {
 describe('deleteTask', () => {
   it('deletes an existing task', () => {
     const task = createTask(ctx, { title: 'Build feature' });
-    const result = deleteTask(paths, task.id);
+    const result = deleteTask(ctx, task.id);
     expect(result).toBe(true);
     expect(() => getTask(ctx, task.id)).toThrow(TaskNotFoundError);
   });
 
   it('throws for non-existent task', () => {
-    expect(() => deleteTask(paths, 'T-9999')).toThrow(TaskNotFoundError);
+    expect(() => deleteTask(ctx, 'T-9999')).toThrow(TaskNotFoundError);
   });
 });
 

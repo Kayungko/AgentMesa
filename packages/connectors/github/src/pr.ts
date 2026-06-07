@@ -1,6 +1,6 @@
 import { execSync } from 'child_process';
 import type { MesaWorkspacePaths } from '@agentmesa/core';
-import { createArtifact } from '@agentmesa/core';
+import { createArtifact, createRuntimeContext } from '@agentmesa/core';
 import type { PullRequestInfo, PrDiffFile } from './types.js';
 
 /**
@@ -148,9 +148,18 @@ export async function linkPrToTask(
     kind: 'pr_summary',
   };
 
-  await createArtifact(paths, {
+  const ctx = createRuntimeContext({
+    rootDir: paths.rootDir,
+    actor: {
+      id: 'github-connector',
+      type: 'agent',
+      roles: ['custom'],
+      client: 'github',
+    },
+  });
+
+  await createArtifact(ctx, {
     taskId,
-    createdBy: 'github-connector',
     kind: 'pr_summary',
     content: JSON.stringify(prLink, null, 2),
     format: 'json',

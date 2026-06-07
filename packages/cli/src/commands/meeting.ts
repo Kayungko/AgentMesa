@@ -1,5 +1,5 @@
 import {
-  createWorkspacePaths,
+  createRuntimeContext,
   createMeeting,
   listMeetings,
   getMeeting,
@@ -9,7 +9,14 @@ import { printSuccess, printError, formatOutput } from '../output.js';
 
 export function runMeeting(args: ParsedArgs): void {
   const rootDir = process.cwd();
-  const paths = createWorkspacePaths(rootDir);
+  const ctx = createRuntimeContext({
+    rootDir,
+    actor: {
+      id: 'user:local',
+      type: 'user',
+      roles: ['owner'],
+    },
+  });
   const json = !!args.flags['json'];
 
   try {
@@ -20,14 +27,14 @@ export function runMeeting(args: ParsedArgs): void {
           console.log('Usage: mesa meeting create <title>');
           return;
         }
-        const meeting = createMeeting(paths, { title });
+        const meeting = createMeeting(ctx, { title });
         printSuccess(`Created meeting ${meeting.id}: ${meeting.title}`);
         if (json) formatOutput(meeting, true);
         return;
       }
 
       case 'list': {
-        const meetings = listMeetings(paths);
+        const meetings = listMeetings(ctx);
         if (json) {
           formatOutput(meetings, true);
         } else {
@@ -51,7 +58,7 @@ export function runMeeting(args: ParsedArgs): void {
           console.log('Usage: mesa meeting show <meetingId>');
           return;
         }
-        const meeting = getMeeting(paths, meetingId);
+        const meeting = getMeeting(ctx, meetingId);
         formatOutput(meeting, json);
         return;
       }

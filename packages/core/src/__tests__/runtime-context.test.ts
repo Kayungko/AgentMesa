@@ -67,6 +67,9 @@ describe('FileStorageAdapter', () => {
     expect(storage.exists(filePath)).toBe(true);
     expect(storage.readText(filePath)).toBe('hello');
     expect(storage.list(directory)).toContain('example.txt');
+    expect(storage.delete(filePath)).toBe(true);
+    expect(storage.exists(filePath)).toBe(false);
+    expect(storage.delete(filePath)).toBe(false);
     expect(storage.readText(join(directory, 'missing.txt'))).toBeNull();
   });
 });

@@ -118,7 +118,7 @@ export class DeskServer {
     }
 
     if (pathname === '/api/meetings') {
-      const meetings = listMeetings(ctx.paths);
+      const meetings = listMeetings(ctx);
       this.sendJson(res, meetings);
       return;
     }
@@ -126,8 +126,8 @@ export class DeskServer {
     const meetingMatch = pathname.match(/^\/api\/meetings\/([^/]+)$/);
     if (meetingMatch) {
       try {
-        const meeting = getMeeting(ctx.paths, meetingMatch[1]!);
-        const messages = listMessages(ctx.paths).filter((m) => {
+        const meeting = getMeeting(ctx, meetingMatch[1]!);
+        const messages = listMessages(ctx).filter((m) => {
           return meeting.tasks.some((taskId) => m.taskId === taskId);
         });
         this.sendJson(res, { ...meeting, messages });
@@ -142,7 +142,7 @@ export class DeskServer {
     }
 
     if (pathname === '/api/artifacts') {
-      const artifacts = listArtifacts(ctx.paths);
+      const artifacts = listArtifacts(ctx);
       this.sendJson(res, artifacts);
       return;
     }
@@ -150,7 +150,7 @@ export class DeskServer {
     const artifactMatch = pathname.match(/^\/api\/artifacts\/([^/]+)$/);
     if (artifactMatch) {
       try {
-        const artifact = getArtifact(ctx.paths, artifactMatch[1]!);
+        const artifact = getArtifact(ctx, artifactMatch[1]!);
         this.sendJson(res, artifact);
       } catch (err) {
         if (err instanceof MesaError && err.code === 'ARTIFACT_NOT_FOUND') {
@@ -163,16 +163,16 @@ export class DeskServer {
     }
 
     if (pathname === '/api/agents') {
-      const agents = listAgents(ctx.paths);
+      const agents = listAgents(ctx);
       this.sendJson(res, agents);
       return;
     }
 
     if (pathname === '/api/status') {
       const tasks = listTasks(ctx);
-      const meetings = listMeetings(ctx.paths);
-      const agents = listAgents(ctx.paths);
-      const artifacts = listArtifacts(ctx.paths);
+      const meetings = listMeetings(ctx);
+      const agents = listAgents(ctx);
+      const artifacts = listArtifacts(ctx);
 
       this.sendJson(res, {
         tasks: tasks.length,

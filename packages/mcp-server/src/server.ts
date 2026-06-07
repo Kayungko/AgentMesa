@@ -1,11 +1,8 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { currentProtocolVersion } from '@agentmesa/protocol';
-import { createRuntimeContext, createWorkspacePaths } from '@agentmesa/core';
-import type {
-  MesaRuntimeContext,
-  MesaWorkspacePaths,
-} from '@agentmesa/core';
+import { createRuntimeContext } from '@agentmesa/core';
+import type { MesaRuntimeContext } from '@agentmesa/core';
 import {
   createTaskInputSchema,
   listTasksInputSchema,
@@ -36,43 +33,6 @@ import {
   handleRegisterAgent,
   handleListAgents,
 } from './tools.js';
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function wrapHandler<T extends Record<string, any>>(
-  paths: MesaWorkspacePaths,
-  handler: (paths: MesaWorkspacePaths, args: T) => string
-) {
-  return async (args: T) => {
-    try {
-      const result = handler(paths, args);
-      return { content: [{ type: 'text' as const, text: result }] };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }],
-        isError: true,
-      };
-    }
-  };
-}
-
-function wrapNoArgHandler(
-  paths: MesaWorkspacePaths,
-  handler: (paths: MesaWorkspacePaths) => string
-) {
-  return async () => {
-    try {
-      const result = handler(paths);
-      return { content: [{ type: 'text' as const, text: result }] };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }],
-        isError: true,
-      };
-    }
-  };
-}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function wrapRuntimeHandler<T extends Record<string, any>>(
@@ -129,8 +89,6 @@ function createAgentRuntimeContext(
 }
 
 export function createMcpServer(rootDir: string): McpServer {
-  const paths = createWorkspacePaths(rootDir);
-
   const server = new McpServer({
     name: 'agentmesa',
     version: currentProtocolVersion,
@@ -165,7 +123,7 @@ export function createMcpServer(rootDir: string): McpServer {
   server.registerTool('mesa_post_message', {
     description: 'Post a message to an AgentMesa task',
     inputSchema: postMessageInputSchema,
-  }, wrapHandler(paths, handlePostMessage));
+  }, wrapRuntimeHandler(rootDir, (args) => args.from, handlePostMessage));
 
   server.registerTool('mesa_request_review', {
     description: 'Request a review for a task, sets status to ready_for_review',
@@ -180,40 +138,40 @@ export function createMcpServer(rootDir: string): McpServer {
   server.registerTool('mesa_list_messages', {
     description: 'List messages, optionally filtered by task ID',
     inputSchema: listMessagesInputSchema,
-  }, wrapHandler(paths, handleListMessages));
+  }, wrapRuntimeHandler(rootDir, () => 'agent:mcp', handleListMessages));
 
   // Artifact tools
   server.registerTool('mesa_attach_artifact', {
     description: 'Attach an artifact to an AgentMesa task',
     inputSchema: attachArtifactInputSchema,
-  }, wrapHandler(paths, handleAttachArtifact));
+  }, wrapRuntimeHandler(rootDir, (args) => args.createdBy, handleAttachArtifact));
 
   server.registerTool('mesa_list_artifacts', {
     description: 'List artifacts, optionally filtered by task ID or kind',
     inputSchema: listArtifactsInputSchema,
-  }, wrapHandler(paths, handleListArtifacts));
+  }, wrapRuntimeHandler(rootDir, () => 'agent:mcp', handleListArtifacts));
 
   // Meeting tools
   server.registerTool('mesa_create_meeting', {
     description: 'Create a new AgentMesa meeting',
     inputSchema: createMeetingInputSchema,
-  }, wrapHandler(paths, handleCreateMeeting));
+  }, wrapRuntimeHandler(rootDir, () => 'agent:mcp', handleCreateMeeting));
 
   server.registerTool('mesa_list_meetings', {
     description: 'List all AgentMesa meetings',
     inputSchema: listMeetingsInputSchema,
-  }, wrapNoArgHandler(paths, handleListMeetings));
+  }, wrapRuntimeNoArgHandler(rootDir, handleListMeetings));
 
   // Agent tools
   server.registerTool('mesa_register_agent', {
     description: 'Register an AI agent in AgentMesa',
     inputSchema: registerAgentInputSchema,
-  }, wrapHandler(paths, handleRegisterAgent));
+  }, wrapRuntimeHandler(rootDir, (args) => args.id, handleRegisterAgent));
 
   server.registerTool('mesa_list_agents', {
     description: 'List all registered AgentMesa agents',
     inputSchema: listAgentsInputSchema,
-  }, wrapNoArgHandler(paths, handleListAgents));
+  }, wrapRuntimeNoArgHandler(rootDir, handleListAgents));
 
   return server;
 }

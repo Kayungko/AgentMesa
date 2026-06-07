@@ -65,20 +65,26 @@ Acceptance:
 
 ## Priority 3: Runtime Context
 
-Status: `in_progress`
+Status: `complete_for_core_services`
 
 Current progress:
 
 - Added the shared `MesaRuntimeContext` and injectable runtime dependencies.
-- Migrated task create/read/list/status/assignment operations.
-- Migrated CLI task commands and required MCP/Desk/Runner task call sites.
+- Migrated task create/read/list/status/assignment/delete operations.
+- Migrated meeting, message, artifact, and agent registry service APIs to runtime context.
+- Migrated CLI task/meeting/message/artifact/agent commands to user runtime context.
+- Migrated MCP task/message/review/artifact/meeting/agent handlers to agent runtime context.
+- Migrated Desk read paths for task/meeting/message/artifact/agent to system runtime context.
+- Migrated Git/Shell/GitHub connector artifact writes through connector actor runtime contexts.
 - Added default file storage, in-memory event store, allow-all policy, and console logger.
+- Preserved EventStore as a non-persistent in-memory stub; Event-backed State has not started.
 
-Remaining before Priority 3 is complete:
+Deferred out of Priority 3:
 
-- Migrate task deletion.
-- Migrate meeting, message, artifact, agent registry, and lock services.
-- Remove remaining direct durable writes from migrated service boundaries.
+- Lock manager remains `paths`-based and moves to Storage Hardening with atomic and lock-aware writes.
+- Runner and Orchestrator full runtime lifecycles remain out of scope for this stage.
+- Protocol lacks a deletion event type, so `deleteTask` does not append a delete event yet.
+- Meeting status and meeting membership mutations currently update state through ctx storage but do not emit dedicated protocol events.
 
 Direction:
 

@@ -54,19 +54,19 @@ describe('CLI integration: task workflow', () => {
   });
 
   it('registers and lists agents', () => {
-    registerAgent(paths, { id: 'claude', name: 'Claude Code', client: 'claude-code', status: 'available', roles: ['builder'] });
-    registerAgent(paths, { id: 'codex', name: 'Codex', client: 'codex', status: 'available', roles: ['reviewer'] });
+    registerAgent(ctx, { id: 'claude', name: 'Claude Code', client: 'claude-code', status: 'available', roles: ['builder'] });
+    registerAgent(ctx, { id: 'codex', name: 'Codex', client: 'codex', status: 'available', roles: ['reviewer'] });
 
-    const agents = listAgents(paths);
+    const agents = listAgents(ctx);
     expect(agents).toHaveLength(2);
   });
 
   it('creates meetings', () => {
-    const meeting = createMeeting(paths, { title: 'Feature Review' });
+    const meeting = createMeeting(ctx, { title: 'Feature Review' });
     expect(meeting.id).toMatch(/^meeting_/);
     expect(meeting.status).toBe('open');
 
-    const meetings = listMeetings(paths);
+    const meetings = listMeetings(ctx);
     expect(meetings).toHaveLength(1);
   });
 });

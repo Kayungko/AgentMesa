@@ -1,5 +1,5 @@
 import {
-  createWorkspacePaths,
+  createRuntimeContext,
   listMessages,
   getMessagesByTask,
 } from '@agentmesa/core';
@@ -8,14 +8,21 @@ import { printError, formatOutput } from '../output.js';
 
 export function runMessage(args: ParsedArgs): void {
   const rootDir = process.cwd();
-  const paths = createWorkspacePaths(rootDir);
+  const ctx = createRuntimeContext({
+    rootDir,
+    actor: {
+      id: 'user:local',
+      type: 'user',
+      roles: ['owner'],
+    },
+  });
   const json = !!args.flags['json'];
 
   try {
     switch (args.subcommand) {
       case 'list': {
         const taskId = args.positional[0] ?? (typeof args.flags['task'] === 'string' ? args.flags['task'] : undefined);
-        const messages = taskId ? getMessagesByTask(paths, taskId) : listMessages(paths);
+        const messages = taskId ? getMessagesByTask(ctx, taskId) : listMessages(ctx);
         if (json) {
           formatOutput(messages, true);
         } else {

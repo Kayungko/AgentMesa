@@ -1,5 +1,5 @@
 import {
-  createWorkspacePaths,
+  createRuntimeContext,
   listArtifacts,
   getArtifact,
 } from '@agentmesa/core';
@@ -9,7 +9,14 @@ import { printError, formatOutput } from '../output.js';
 
 export function runArtifact(args: ParsedArgs): void {
   const rootDir = process.cwd();
-  const paths = createWorkspacePaths(rootDir);
+  const ctx = createRuntimeContext({
+    rootDir,
+    actor: {
+      id: 'user:local',
+      type: 'user',
+      roles: ['owner'],
+    },
+  });
   const json = !!args.flags['json'];
 
   try {
@@ -17,7 +24,7 @@ export function runArtifact(args: ParsedArgs): void {
       case 'list': {
         const taskId = args.positional[0] ?? (typeof args.flags['task'] === 'string' ? args.flags['task'] : undefined);
         const kind = typeof args.flags['kind'] === 'string' ? (args.flags['kind'] as ArtifactKind) : undefined;
-        const artifacts = listArtifacts(paths, taskId, kind);
+        const artifacts = listArtifacts(ctx, taskId, kind);
         if (json) {
           formatOutput(artifacts, true);
         } else {
@@ -41,7 +48,7 @@ export function runArtifact(args: ParsedArgs): void {
           console.log('Usage: mesa artifact show <artifactId>');
           return;
         }
-        const artifact = getArtifact(paths, artifactId);
+        const artifact = getArtifact(ctx, artifactId);
         formatOutput(artifact, json);
         return;
       }

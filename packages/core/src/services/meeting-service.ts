@@ -6,11 +6,18 @@ import {
   generateMeetingId,
 } from '@agentmesa/protocol';
 import type { MesaMeeting, CreateMeetingInput, MeetingStatus } from '@agentmesa/protocol';
-import type { MesaWorkspacePaths } from '../workspace.js';
-import { readJson, writeJson, listJson } from '../storage.js';
 import { MeetingNotFoundError } from '../errors.js';
+import type { MesaRuntimeContext } from '../runtime/types.js';
+import {
+  appendRuntimeEvent,
+  assertPolicy,
+  listJsonFromStorage,
+  readJsonFromStorage,
+  writeJsonToStorage,
+} from './runtime-service-utils.js';
 
-export function createMeeting(paths: MesaWorkspacePaths, input: CreateMeetingInput): MesaMeeting {
+export function createMeeting(ctx: MesaRuntimeContext, input: CreateMeetingInput): MesaMeeting {
+  assertPolicy(ctx, 'meeting.create', 'meeting');
   const validated = CreateMeetingInputSchema.parse(input);
 
   const now = new Date().toISOString();
@@ -26,32 +33,44 @@ export function createMeeting(paths: MesaWorkspacePaths, input: CreateMeetingInp
   };
 
   const result = MesaMeetingSchema.parse(meeting);
-  writeJson(join(paths.meetingsDir, `${meeting.id}.json`), result);
+  writeMeeting(ctx, result);
+
+  appendRuntimeEvent(ctx, {
+    meetingId: result.id,
+    type: 'meeting_created',
+    streamId: result.id,
+    streamType: 'meeting',
+    data: { meeting: result },
+  });
 
   return result;
 }
 
-export function getMeeting(paths: MesaWorkspacePaths, meetingId: string): MesaMeeting {
-  const meeting = readJson<MesaMeeting>(join(paths.meetingsDir, `${meetingId}.json`));
+export function getMeeting(ctx: MesaRuntimeContext, meetingId: string): MesaMeeting {
+  const meeting = readJsonFromStorage<MesaMeeting>(
+    ctx,
+    join(ctx.paths.meetingsDir, `${meetingId}.json`)
+  );
   if (!meeting) {
     throw new MeetingNotFoundError(meetingId);
   }
   return MesaMeetingSchema.parse(meeting);
 }
 
-export function listMeetings(paths: MesaWorkspacePaths): MesaMeeting[] {
-  return listJson<MesaMeeting>(paths.meetingsDir)
+export function listMeetings(ctx: MesaRuntimeContext): MesaMeeting[] {
+  return listJsonFromStorage<MesaMeeting>(ctx, ctx.paths.meetingsDir)
     .map((m) => MesaMeetingSchema.safeParse(m))
     .filter((r) => r.success)
     .map((r) => (r as { success: true; data: MesaMeeting }).data);
 }
 
 export function updateMeetingStatus(
-  paths: MesaWorkspacePaths,
+  ctx: MesaRuntimeContext,
   meetingId: string,
   status: MeetingStatus
 ): MesaMeeting {
-  const meeting = getMeeting(paths, meetingId);
+  assertPolicy(ctx, 'meeting.updateStatus', `meeting:${meetingId}`);
+  const meeting = getMeeting(ctx, meetingId);
 
   const updated: MesaMeeting = {
     ...meeting,
@@ -60,17 +79,18 @@ export function updateMeetingStatus(
   };
 
   const result = MesaMeetingSchema.parse(updated);
-  writeJson(join(paths.meetingsDir, `${meetingId}.json`), result);
+  writeMeeting(ctx, result);
 
   return result;
 }
 
 export function addTaskToMeeting(
-  paths: MesaWorkspacePaths,
+  ctx: MesaRuntimeContext,
   meetingId: string,
   taskId: string
 ): MesaMeeting {
-  const meeting = getMeeting(paths, meetingId);
+  assertPolicy(ctx, 'meeting.addTask', `meeting:${meetingId}`);
+  const meeting = getMeeting(ctx, meetingId);
 
   if (meeting.tasks.includes(taskId)) {
     return meeting;
@@ -83,17 +103,18 @@ export function addTaskToMeeting(
   };
 
   const result = MesaMeetingSchema.parse(updated);
-  writeJson(join(paths.meetingsDir, `${meetingId}.json`), result);
+  writeMeeting(ctx, result);
 
   return result;
 }
 
 export function addAgentToMeeting(
-  paths: MesaWorkspacePaths,
+  ctx: MesaRuntimeContext,
   meetingId: string,
   agentId: string
 ): MesaMeeting {
-  const meeting = getMeeting(paths, meetingId);
+  assertPolicy(ctx, 'meeting.addAgent', `meeting:${meetingId}`);
+  const meeting = getMeeting(ctx, meetingId);
 
   if (meeting.agents.includes(agentId)) {
     return meeting;
@@ -106,7 +127,23 @@ export function addAgentToMeeting(
   };
 
   const result = MesaMeetingSchema.parse(updated);
-  writeJson(join(paths.meetingsDir, `${meetingId}.json`), result);
+  writeMeeting(ctx, result);
+
+  appendRuntimeEvent(ctx, {
+    meetingId,
+    type: 'agent_joined',
+    streamId: meetingId,
+    streamType: 'meeting',
+    data: { agentId },
+  });
 
   return result;
+}
+
+function writeMeeting(ctx: MesaRuntimeContext, meeting: MesaMeeting): void {
+  writeJsonToStorage(
+    ctx,
+    join(ctx.paths.meetingsDir, `${meeting.id}.json`),
+    meeting
+  );
 }

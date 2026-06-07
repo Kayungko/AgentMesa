@@ -1,5 +1,5 @@
 import type { MesaWorkspacePaths } from '@agentmesa/core';
-import { createArtifact } from '@agentmesa/core';
+import { createArtifact, createRuntimeContext } from '@agentmesa/core';
 import type { PullRequestInfo, CIStatus } from './types.js';
 
 /**
@@ -12,9 +12,9 @@ export async function createPrDiffArtifact(
   diff: string,
   prNumber: number
 ): Promise<string> {
-  const artifact = await createArtifact(paths, {
+  const ctx = createGithubContext(paths, agentId);
+  const artifact = await createArtifact(ctx, {
     taskId,
-    createdBy: agentId,
     kind: 'git_diff',
     content: diff,
     format: 'diff',
@@ -33,6 +33,7 @@ export async function createPrSummaryArtifact(
   agentId: string,
   pr: PullRequestInfo
 ): Promise<string> {
+  const ctx = createGithubContext(paths, agentId);
   const summary = {
     number: pr.number,
     title: pr.title,
@@ -45,9 +46,8 @@ export async function createPrSummaryArtifact(
     summaryAt: new Date().toISOString(),
   };
 
-  const artifact = await createArtifact(paths, {
+  const artifact = await createArtifact(ctx, {
     taskId,
-    createdBy: agentId,
     kind: 'pr_summary',
     content: JSON.stringify(summary, null, 2),
     format: 'json',
@@ -66,9 +66,9 @@ export async function createCIResultArtifact(
   agentId: string,
   results: CIStatus[]
 ): Promise<string> {
-  const artifact = await createArtifact(paths, {
+  const ctx = createGithubContext(paths, agentId);
+  const artifact = await createArtifact(ctx, {
     taskId,
-    createdBy: agentId,
     kind: 'test_result',
     content: JSON.stringify(results, null, 2),
     format: 'json',
@@ -76,4 +76,16 @@ export async function createCIResultArtifact(
   });
 
   return artifact.id;
+}
+
+function createGithubContext(paths: MesaWorkspacePaths, agentId: string) {
+  return createRuntimeContext({
+    rootDir: paths.rootDir,
+    actor: {
+      id: agentId,
+      type: 'agent',
+      roles: ['custom'],
+      client: 'github',
+    },
+  });
 }

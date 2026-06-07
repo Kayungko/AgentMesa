@@ -6,12 +6,29 @@ import {
   generateArtifactId,
 } from '@agentmesa/protocol';
 import type { MesaArtifact, CreateArtifactInput, ArtifactKind } from '@agentmesa/protocol';
-import type { MesaWorkspacePaths } from '../workspace.js';
-import { readJson, writeJson, listJson } from '../storage.js';
 import { ArtifactNotFoundError } from '../errors.js';
+import type { MesaRuntimeContext } from '../runtime/types.js';
+import {
+  appendRuntimeEvent,
+  assertPolicy,
+  listJsonFromStorage,
+  readJsonFromStorage,
+  writeJsonToStorage,
+} from './runtime-service-utils.js';
 
-export function createArtifact(paths: MesaWorkspacePaths, input: CreateArtifactInput): MesaArtifact {
-  const validated = CreateArtifactInputSchema.parse(input);
+export type CreateArtifactRuntimeInput = Omit<CreateArtifactInput, 'createdBy'> & {
+  createdBy?: string;
+};
+
+export function createArtifact(
+  ctx: MesaRuntimeContext,
+  input: CreateArtifactRuntimeInput
+): MesaArtifact {
+  assertPolicy(ctx, 'artifact.create', input.taskId ? `task:${input.taskId}` : 'artifact');
+  const validated = CreateArtifactInputSchema.parse({
+    ...input,
+    createdBy: ctx.actor.id,
+  });
 
   const artifact: MesaArtifact = {
     protocolVersion: currentProtocolVersion,
@@ -29,13 +46,24 @@ export function createArtifact(paths: MesaWorkspacePaths, input: CreateArtifactI
   };
 
   const result = MesaArtifactSchema.parse(artifact);
-  writeJson(join(paths.artifactsDir, `${artifact.id}.json`), result);
+  writeArtifact(ctx, result);
+
+  appendRuntimeEvent(ctx, {
+    meetingId: result.taskId ?? 'workspace',
+    type: 'artifact_created',
+    streamId: result.id,
+    streamType: 'artifact',
+    data: { artifact: result },
+  });
 
   return result;
 }
 
-export function getArtifact(paths: MesaWorkspacePaths, artifactId: string): MesaArtifact {
-  const artifact = readJson<MesaArtifact>(join(paths.artifactsDir, `${artifactId}.json`));
+export function getArtifact(ctx: MesaRuntimeContext, artifactId: string): MesaArtifact {
+  const artifact = readJsonFromStorage<MesaArtifact>(
+    ctx,
+    join(ctx.paths.artifactsDir, `${artifactId}.json`)
+  );
   if (!artifact) {
     throw new ArtifactNotFoundError(artifactId);
   }
@@ -43,11 +71,11 @@ export function getArtifact(paths: MesaWorkspacePaths, artifactId: string): Mesa
 }
 
 export function listArtifacts(
-  paths: MesaWorkspacePaths,
+  ctx: MesaRuntimeContext,
   taskId?: string,
   kind?: ArtifactKind
 ): MesaArtifact[] {
-  let artifacts = listJson<MesaArtifact>(paths.artifactsDir)
+  let artifacts = listJsonFromStorage<MesaArtifact>(ctx, ctx.paths.artifactsDir)
     .map((a) => MesaArtifactSchema.safeParse(a))
     .filter((r) => r.success)
     .map((r) => (r as { success: true; data: MesaArtifact }).data);
@@ -60,4 +88,12 @@ export function listArtifacts(
   }
 
   return artifacts;
+}
+
+function writeArtifact(ctx: MesaRuntimeContext, artifact: MesaArtifact): void {
+  writeJsonToStorage(
+    ctx,
+    join(ctx.paths.artifactsDir, `${artifact.id}.json`),
+    artifact
+  );
 }

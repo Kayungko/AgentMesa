@@ -1,5 +1,5 @@
 import type { MesaWorkspacePaths } from '@agentmesa/core';
-import { createArtifact } from '@agentmesa/core';
+import { createArtifact, createRuntimeContext } from '@agentmesa/core';
 import type { CheckResult } from './runner.js';
 
 export function createCheckResultArtifact(
@@ -20,11 +20,19 @@ export function createCheckResultArtifact(
   ]
     .filter(Boolean)
     .join('\n');
+  const ctx = createRuntimeContext({
+    rootDir: paths.rootDir,
+    actor: {
+      id: agentId,
+      type: 'agent',
+      roles: ['custom'],
+      client: 'shell',
+    },
+  });
 
-  const artifact = createArtifact(paths, {
+  const artifact = createArtifact(ctx, {
     kind: 'test_result',
     taskId,
-    createdBy: agentId,
     content,
     format: 'markdown',
     metadata: {

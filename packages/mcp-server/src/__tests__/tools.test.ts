@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createRuntimeContext, initWorkspace } from '@agentmesa/core';
-import type { MesaRuntimeContext, MesaWorkspacePaths } from '@agentmesa/core';
+import type { MesaRuntimeContext } from '@agentmesa/core';
 import type { MesaTask, MesaMessage, MesaArtifact, MesaMeeting, MesaAgent } from '@agentmesa/protocol';
 import {
   handleCreateTask,
@@ -23,12 +23,11 @@ import {
 } from '../tools.js';
 
 let testDir: string;
-let paths: MesaWorkspacePaths;
 let ctx: MesaRuntimeContext;
 
 beforeEach(() => {
   testDir = mkdtempSync(join(tmpdir(), 'agentmesa-mcp-test-'));
-  paths = initWorkspace(testDir);
+  initWorkspace(testDir);
   ctx = createRuntimeContext({
     rootDir: testDir,
     actor: { id: 'user', type: 'agent', roles: ['custom'], client: 'mcp' },
@@ -134,7 +133,7 @@ describe('handlePostMessage', () => {
       handleCreateTask(ctx, { title: 'Build feature', createdBy: 'user' })
     );
     const result = parse<MesaMessage>(
-      handlePostMessage(paths, {
+      handlePostMessage(ctx, {
         taskId: task.id,
         from: 'agent-1',
         type: 'handoff',
@@ -142,7 +141,7 @@ describe('handlePostMessage', () => {
       })
     );
     expect(result.taskId).toBe(task.id);
-    expect(result.from).toBe('agent-1');
+    expect(result.from).toBe('user');
     expect(result.type).toBe('handoff');
     expect(result.summary).toBe('Handing off to reviewer');
   });
@@ -152,7 +151,7 @@ describe('handlePostMessage', () => {
       handleCreateTask(ctx, { title: 'Build feature', createdBy: 'user' })
     );
     const result = parse<MesaMessage>(
-      handlePostMessage(paths, {
+      handlePostMessage(ctx, {
         taskId: task.id,
         from: 'agent-1',
         type: 'review_request',
@@ -241,7 +240,7 @@ describe('handleAttachArtifact', () => {
       handleCreateTask(ctx, { title: 'Build feature', createdBy: 'user' })
     );
     const result = parse<MesaArtifact>(
-      handleAttachArtifact(paths, {
+      handleAttachArtifact(ctx, {
         kind: 'implementation_summary',
         taskId: task.id,
         createdBy: 'agent-1',
@@ -257,7 +256,7 @@ describe('handleAttachArtifact', () => {
 
   it('creates artifact with metadata', () => {
     const result = parse<MesaArtifact>(
-      handleAttachArtifact(paths, {
+      handleAttachArtifact(ctx, {
         kind: 'review_report',
         createdBy: 'agent-2',
         content: 'Review findings',
@@ -271,7 +270,7 @@ describe('handleAttachArtifact', () => {
 
 describe('handleListArtifacts', () => {
   it('returns empty array when no artifacts', () => {
-    const result = parse<MesaArtifact[]>(handleListArtifacts(paths, {}));
+    const result = parse<MesaArtifact[]>(handleListArtifacts(ctx, {}));
     expect(result).toEqual([]);
   });
 
@@ -279,19 +278,19 @@ describe('handleListArtifacts', () => {
     const task = parse<MesaTask>(
       handleCreateTask(ctx, { title: 'Build feature', createdBy: 'user' })
     );
-    handleAttachArtifact(paths, {
+    handleAttachArtifact(ctx, {
       kind: 'implementation_summary',
       taskId: task.id,
       createdBy: 'agent-1',
       content: 'Summary 1',
     });
-    handleAttachArtifact(paths, {
+    handleAttachArtifact(ctx, {
       kind: 'review_report',
       createdBy: 'agent-2',
       content: 'Report without task',
     });
     const result = parse<MesaArtifact[]>(
-      handleListArtifacts(paths, { taskId: task.id })
+      handleListArtifacts(ctx, { taskId: task.id })
     );
     expect(result).toHaveLength(1);
     expect(result[0]!.taskId).toBe(task.id);
@@ -303,14 +302,14 @@ describe('handleListMessages', () => {
     const task = parse<MesaTask>(
       handleCreateTask(ctx, { title: 'Build feature', createdBy: 'user' })
     );
-    handlePostMessage(paths, {
+    handlePostMessage(ctx, {
       taskId: task.id,
       from: 'agent-1',
       type: 'handoff',
       summary: 'Handing off',
     });
     // createTask also creates a task_created message
-    const allMessages = parse<MesaMessage[]>(handleListMessages(paths, {}));
+    const allMessages = parse<MesaMessage[]>(handleListMessages(ctx, {}));
     expect(allMessages.length).toBeGreaterThanOrEqual(2);
   });
 
@@ -320,7 +319,7 @@ describe('handleListMessages', () => {
     );
     handleCreateTask(ctx, { title: 'Task 2', createdBy: 'user' });
     const result = parse<MesaMessage[]>(
-      handleListMessages(paths, { taskId: task1.id })
+      handleListMessages(ctx, { taskId: task1.id })
     );
     expect(result.every((m) => m.taskId === task1.id)).toBe(true);
   });
@@ -329,7 +328,7 @@ describe('handleListMessages', () => {
 describe('handleCreateMeeting', () => {
   it('creates a meeting', () => {
     const result = parse<MesaMeeting>(
-      handleCreateMeeting(paths, { title: 'Sprint Planning' })
+      handleCreateMeeting(ctx, { title: 'Sprint Planning' })
     );
     expect(result.id).toMatch(/^meeting_/);
     expect(result.title).toBe('Sprint Planning');
@@ -338,7 +337,7 @@ describe('handleCreateMeeting', () => {
 
   it('creates a meeting with tasks and agents', () => {
     const result = parse<MesaMeeting>(
-      handleCreateMeeting(paths, {
+      handleCreateMeeting(ctx, {
         title: 'Feature Review',
         tasks: ['T-0001'],
         agents: ['agent-1', 'agent-2'],
@@ -351,14 +350,14 @@ describe('handleCreateMeeting', () => {
 
 describe('handleListMeetings', () => {
   it('returns empty array when no meetings', () => {
-    const result = parse<MesaMeeting[]>(handleListMeetings(paths));
+    const result = parse<MesaMeeting[]>(handleListMeetings(ctx));
     expect(result).toEqual([]);
   });
 
   it('lists all meetings', () => {
-    handleCreateMeeting(paths, { title: 'Meeting 1' });
-    handleCreateMeeting(paths, { title: 'Meeting 2' });
-    const result = parse<MesaMeeting[]>(handleListMeetings(paths));
+    handleCreateMeeting(ctx, { title: 'Meeting 1' });
+    handleCreateMeeting(ctx, { title: 'Meeting 2' });
+    const result = parse<MesaMeeting[]>(handleListMeetings(ctx));
     expect(result).toHaveLength(2);
   });
 });
@@ -366,7 +365,7 @@ describe('handleListMeetings', () => {
 describe('handleRegisterAgent', () => {
   it('registers an agent', () => {
     const result = parse<MesaAgent>(
-      handleRegisterAgent(paths, {
+      handleRegisterAgent(ctx, {
         id: 'agent-claude-001',
         name: 'Claude Code',
         client: 'claude-code',
@@ -382,24 +381,24 @@ describe('handleRegisterAgent', () => {
 
 describe('handleListAgents', () => {
   it('returns empty array when no agents', () => {
-    const result = parse<MesaAgent[]>(handleListAgents(paths));
+    const result = parse<MesaAgent[]>(handleListAgents(ctx));
     expect(result).toEqual([]);
   });
 
   it('lists all registered agents', () => {
-    handleRegisterAgent(paths, {
+    handleRegisterAgent(ctx, {
       id: 'agent-1',
       name: 'Agent 1',
       client: 'client-1',
       roles: ['builder'],
     });
-    handleRegisterAgent(paths, {
+    handleRegisterAgent(ctx, {
       id: 'agent-2',
       name: 'Agent 2',
       client: 'client-2',
       roles: ['reviewer'],
     });
-    const result = parse<MesaAgent[]>(handleListAgents(paths));
+    const result = parse<MesaAgent[]>(handleListAgents(ctx));
     expect(result).toHaveLength(2);
   });
 });
