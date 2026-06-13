@@ -11,6 +11,7 @@ import { runAgent } from './commands/agent.js';
 import { runEvents, runTimeline } from './commands/events.js';
 import { runTransports } from './commands/transports.js';
 import { runRebuild } from './commands/rebuild.js';
+import { runPolicyCheck, runPolicyInspect } from './commands/policy.js';
 
 const args = parseArgs(process.argv);
 
@@ -64,6 +65,16 @@ switch (args.command) {
     runRebuild(args);
     break;
 
+  case 'policy':
+    if (args.subcommand === 'check') {
+      runPolicyCheck(args);
+    } else if (args.subcommand === 'inspect') {
+      runPolicyInspect(args);
+    } else {
+      runPolicyInspect(args);
+    }
+    break;
+
   case 'help':
   default:
     printHelp();
@@ -101,6 +112,9 @@ Inspection Commands:
   timeline task <id>           Show task event timeline + projection
   timeline meeting <id>        Show meeting event timeline + projection
   transports                  List available transports and capabilities
+  policy check <action> <res>  Check if action is allowed for an actor
+                   --actor <id> --role <role>
+  policy inspect              Show role capability matrix
 
 Flags:
   --json        Output in JSON format (safe for local AI consumption)
