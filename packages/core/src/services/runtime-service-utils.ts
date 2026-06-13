@@ -60,6 +60,9 @@ export function appendRuntimeEvent(
     data?: Record<string, unknown>;
   }
 ): void {
+  // TODO: sequence is not concurrency-safe — derived from list().length before append.
+  // Multi-client concurrent writes require the EventStore to atomically allocate
+  // sequence inside the append call (locked increment). Safe for single-client use today.
   const sequence = ctx.eventStore.list({ streamId: input.streamId }).length;
   const event: MesaEvent = MesaEventSchema.parse({
     protocolVersion: currentProtocolVersion,

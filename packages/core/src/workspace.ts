@@ -15,6 +15,11 @@ export interface MesaWorkspacePaths {
   agentsDir: string;
   logsDir: string;
   locksDir: string;
+  eventsDir: string;
+  projectionsDir: string;
+  taskProjectionsDir: string;
+  meetingProjectionsDir: string;
+  agentProjectionsDir: string;
 }
 
 export function createWorkspacePaths(rootDir: string): MesaWorkspacePaths {
@@ -30,6 +35,11 @@ export function createWorkspacePaths(rootDir: string): MesaWorkspacePaths {
     agentsDir: join(mesaDir, 'agents'),
     logsDir: join(mesaDir, 'logs'),
     locksDir: join(mesaDir, 'locks'),
+    eventsDir: join(mesaDir, 'events'),
+    projectionsDir: join(mesaDir, 'projections'),
+    taskProjectionsDir: join(mesaDir, 'projections', 'tasks'),
+    meetingProjectionsDir: join(mesaDir, 'projections', 'meetings'),
+    agentProjectionsDir: join(mesaDir, 'projections', 'agents'),
   };
 }
 
@@ -53,6 +63,11 @@ export function initWorkspace(rootDir: string): MesaWorkspacePaths {
   ensureDir(paths.agentsDir);
   ensureDir(paths.logsDir);
   ensureDir(paths.locksDir);
+  ensureDir(paths.eventsDir);
+  ensureDir(paths.projectionsDir);
+  ensureDir(paths.taskProjectionsDir);
+  ensureDir(paths.meetingProjectionsDir);
+  ensureDir(paths.agentProjectionsDir);
 
   const config: MesaConfig = {
     protocolVersion: currentProtocolVersion,
