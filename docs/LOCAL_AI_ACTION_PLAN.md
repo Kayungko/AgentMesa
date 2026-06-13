@@ -155,6 +155,18 @@ Acceptance:
 
 ## Priority 6: Transport Layer
 
+Status: `transport_abstraction_done`
+
+- `TransportCapabilitiesSchema` in protocol: structured capabilities (canCreateTasks, canReadTasks, etc.) replacing loose `string[]`.
+- `MesaTransportSchema` updated to use structured capabilities.
+- `MesaTransport` interface in core types with `{ name, type, capabilities, version, isAvailable() }`.
+- `FileTransport`: always-available reference implementation with full read/write capabilities.
+- Transport registry in `MesaRuntimeContext.transports`; custom transports injectable via options.
+- `findTransportsByType` / `getAvailableTransports` query helpers.
+- MCP server treated as one transport implementation, not the center.
+- Core runtime has zero dependency on any specific client transport.
+- HTTP, WebSocket, GitHub, CI transports remain design intent.
+
 Direction:
 
 - Define Mesa Transport as a product-level abstraction.

@@ -264,14 +264,34 @@ export const fixtureClient: MesaClient = {
 export const fixtureTransportFile: MesaTransport = {
   name: 'File Transport',
   type: 'file',
-  capabilities: ['read', 'write', 'watch'],
-  version: '0.1.0',
+  capabilities: {
+    canCreateTasks: true,
+    canReadTasks: true,
+    canUpdateTaskStatus: true,
+    canPostMessages: true,
+    canAttachArtifacts: true,
+    canCreateMeetings: true,
+    canRegisterAgents: true,
+    supportsPush: false,
+    supportsBidirectional: false,
+  },
+  version: '0.2.0',
 };
 
 export const fixtureTransportMcp: MesaTransport = {
   name: 'MCP Transport',
   type: 'mcp',
-  capabilities: ['tools', 'resources', 'prompts'],
+  capabilities: {
+    canCreateTasks: true,
+    canReadTasks: true,
+    canUpdateTaskStatus: true,
+    canPostMessages: true,
+    canAttachArtifacts: true,
+    canCreateMeetings: true,
+    canRegisterAgents: true,
+    supportsPush: false,
+    supportsBidirectional: false,
+  },
   version: '2024-11-05',
 };
 

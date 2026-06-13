@@ -125,6 +125,22 @@ Bridges CI pipeline results into AgentMesa tasks.
 
 **Availability:** when a CI job is configured to call the Mesa HTTP endpoint or write artifacts to `.agentmesa/`.
 
+## Implementation Status
+
+| Component | Status |
+|---|---|
+| `TransportCapabilitiesSchema` (protocol) | **Done.** Structured schema with `canCreateTasks`, `canReadTasks`, `canUpdateTaskStatus`, `canPostMessages`, `canAttachArtifacts`, `canCreateMeetings`, `canRegisterAgents`, `supportsPush`, `supportsBidirectional`. |
+| `MesaTransportSchema` (protocol) | **Done.** Updated to use `TransportCapabilitiesSchema` instead of loose `string[]`. |
+| `MesaTransport` interface (core) | **Done.** `{ name, type, capabilities, version, isAvailable() }` in `MesaRuntimeContext.transports`. |
+| `FileTransport` (core) | **Done.** Always-available transport with full read/write capabilities. |
+| `createDefaultTransports` (core) | **Done.** Bootstraps `[FileTransport]`. Custom transports injectable via `CreateRuntimeContextOptions.transports`. |
+| `findTransportsByType` / `getAvailableTransports` (core) | **Done.** Registry query helpers. |
+| MCP transport | **Done** (mcp-server). `StdioServerTransport` maps MCP tools to Core services. Treated as one transport implementation, not the center. |
+| HTTP transport | **Design intent.** |
+| WebSocket transport | **Design intent.** |
+| GitHub transport | **Design intent.** |
+| CI transport | **Design intent.** |
+
 ## Transport Selection
 
 The runtime evaluates available transports at startup:

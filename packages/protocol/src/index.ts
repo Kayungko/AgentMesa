@@ -14,6 +14,7 @@ export type {
   MesaEvent,
   MesaClient,
   MesaTransport,
+  MesaTransportCapabilities,
   MesaAgentRun,
   MesaCheckResult,
   MesaRepository,

@@ -22,6 +22,7 @@ import type {
   MesaEventSchema,
   MesaClientSchema,
   MesaTransportSchema,
+  TransportCapabilitiesSchema,
   MesaAgentRunSchema,
   MesaCheckResultSchema,
   MesaRepositorySchema,
@@ -172,6 +173,7 @@ export type MesaDecision = z.infer<typeof MesaDecisionSchema>;
 export type MesaEvent = z.infer<typeof MesaEventSchema>;
 export type MesaClient = z.infer<typeof MesaClientSchema>;
 export type MesaTransport = z.infer<typeof MesaTransportSchema>;
+export type MesaTransportCapabilities = z.infer<typeof TransportCapabilitiesSchema>;
 export type MesaAgentRun = z.infer<typeof MesaAgentRunSchema>;
 export type MesaCheckResult = z.infer<typeof MesaCheckResultSchema>;
 export type MesaRepository = z.infer<typeof MesaRepositorySchema>;

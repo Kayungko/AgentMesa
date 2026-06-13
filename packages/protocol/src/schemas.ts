@@ -346,10 +346,22 @@ export const MesaClientSchema = z.object({
 
 // --- Transport ---
 
+export const TransportCapabilitiesSchema = z.object({
+  canCreateTasks: z.boolean().default(false),
+  canReadTasks: z.boolean().default(true),
+  canUpdateTaskStatus: z.boolean().default(false),
+  canPostMessages: z.boolean().default(false),
+  canAttachArtifacts: z.boolean().default(false),
+  canCreateMeetings: z.boolean().default(false),
+  canRegisterAgents: z.boolean().default(false),
+  supportsPush: z.boolean().default(false),
+  supportsBidirectional: z.boolean().default(false),
+});
+
 export const MesaTransportSchema = z.object({
   name: z.string().min(1),
   type: transportKindSchema,
-  capabilities: z.array(z.string()).default([]),
+  capabilities: TransportCapabilitiesSchema.default({}),
   version: z.string().optional(),
 });
 

@@ -11,6 +11,7 @@ import {
   MesaEventSchema,
   MesaClientSchema,
   MesaTransportSchema,
+  TransportCapabilitiesSchema,
   MesaAgentRunSchema,
   MesaCheckResultSchema,
   MesaRepositorySchema,
@@ -533,7 +534,7 @@ describe('MesaTransportSchema', () => {
     const result = MesaTransportSchema.safeParse({
       name: 'MCP Transport',
       type: 'mcp',
-      capabilities: ['tools', 'resources'],
+      capabilities: { canCreateTasks: true, canReadTasks: true },
       version: '2024-11-05',
     });
     expect(result.success).toBe(true);
@@ -546,7 +547,8 @@ describe('MesaTransportSchema', () => {
     });
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.capabilities).toEqual([]);
+      expect(result.data.capabilities.canReadTasks).toBe(true);
+      expect(result.data.capabilities.canCreateTasks).toBe(false);
     }
   });
 
@@ -556,6 +558,44 @@ describe('MesaTransportSchema', () => {
       type: 'invalid',
     });
     expect(result.success).toBe(false);
+  });
+});
+
+describe('TransportCapabilitiesSchema', () => {
+  it('all fields default to false except canReadTasks', () => {
+    const result = TransportCapabilitiesSchema.safeParse({});
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.canReadTasks).toBe(true);
+      expect(result.data.canCreateTasks).toBe(false);
+      expect(result.data.supportsPush).toBe(false);
+    }
+  });
+
+  it('file transport has all write capabilities', () => {
+    const result = TransportCapabilitiesSchema.safeParse({
+      canCreateTasks: true,
+      canReadTasks: true,
+      canUpdateTaskStatus: true,
+      canPostMessages: true,
+      canAttachArtifacts: true,
+      canCreateMeetings: true,
+      canRegisterAgents: true,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('push-only transport (WebSocket) has limited capabilities', () => {
+    const result = TransportCapabilitiesSchema.safeParse({
+      supportsPush: true,
+      supportsBidirectional: true,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.canReadTasks).toBe(true);
+      expect(result.data.canCreateTasks).toBe(false);
+      expect(result.data.supportsPush).toBe(true);
+    }
   });
 });
 

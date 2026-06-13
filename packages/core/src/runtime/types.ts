@@ -1,7 +1,9 @@
 import type {
   AgentRole,
   MesaEvent,
+  MesaTransportCapabilities,
   PermissionLevel,
+  TransportKind,
 } from '@agentmesa/protocol';
 import type { MesaWorkspacePaths } from '../workspace.js';
 
@@ -60,6 +62,16 @@ export interface MesaLogger {
   error(message: string, meta?: Record<string, unknown>): void;
 }
 
+// --- Transport ---
+
+export interface MesaTransport {
+  readonly name: string;
+  readonly type: TransportKind;
+  readonly capabilities: MesaTransportCapabilities;
+  readonly version: string;
+  isAvailable(): boolean;
+}
+
 export interface MesaRuntimeContext {
   readonly rootDir: string;
   readonly paths: MesaWorkspacePaths;
@@ -69,6 +81,7 @@ export interface MesaRuntimeContext {
   readonly eventStore: MesaEventStore;
   readonly policy: MesaPolicyEngine;
   readonly logger: MesaLogger;
+  readonly transports: MesaTransport[];
 }
 
 export interface CreateRuntimeContextOptions {
@@ -78,4 +91,5 @@ export interface CreateRuntimeContextOptions {
   eventStore?: MesaEventStore;
   policy?: MesaPolicyEngine;
   logger?: MesaLogger;
+  transports?: MesaTransport[];
 }

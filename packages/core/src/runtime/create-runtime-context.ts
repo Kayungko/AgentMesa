@@ -7,6 +7,7 @@ import { FileEventStore } from './file-event-store.js';
 import { FileStorageAdapter } from './file-storage-adapter.js';
 import { createConsoleLogger } from './logger.js';
 import { AllowAllMesaPolicyEngine } from './policy.js';
+import { createDefaultTransports } from './transports.js';
 import type {
   CreateRuntimeContextOptions,
   MesaConfig,
@@ -51,6 +52,7 @@ export function createRuntimeContext(
     eventStore: options.eventStore ?? new FileEventStore(paths.eventsDir),
     policy: options.policy ?? new AllowAllMesaPolicyEngine(),
     logger: options.logger ?? createConsoleLogger(options.actor),
+    transports: options.transports ?? createDefaultTransports(),
   };
 }
 
