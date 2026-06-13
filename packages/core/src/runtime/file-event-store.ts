@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { MesaEventSchema } from '@agentmesa/protocol';
 import type { MesaEvent } from '@agentmesa/protocol';
 import { MesaError } from '../errors.js';
 import type { MesaEventFilter, MesaEventStore } from './types.js';
@@ -12,7 +13,7 @@ export class FileEventStore implements MesaEventStore {
   }
 
   append(event: MesaEvent): void {
-    mkdirSync(join(this.filePath, '..'), { recursive: true });
+    mkdirSync(dirname(this.filePath), { recursive: true });
     appendFileSync(this.filePath, `${JSON.stringify(event)}\n`, 'utf-8');
   }
 
@@ -26,14 +27,23 @@ export class FileEventStore implements MesaEventStore {
 
     for (const line of lines) {
       if (line === '') continue;
+      let raw: unknown;
       try {
-        events.push(JSON.parse(line) as MesaEvent);
+        raw = JSON.parse(line);
       } catch {
         throw new MesaError(
           'STORAGE_ERROR',
-          `Corrupted event line in ${this.filePath}: ${line.slice(0, 120)}`,
+          `Corrupted event line in ${this.filePath}: invalid JSON — ${line.slice(0, 120)}`,
         );
       }
+      const result = MesaEventSchema.safeParse(raw);
+      if (!result.success) {
+        throw new MesaError(
+          'STORAGE_ERROR',
+          `Invalid event in ${this.filePath}: ${result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`,
+        );
+      }
+      events.push(result.data);
     }
 
     if (!filter) {

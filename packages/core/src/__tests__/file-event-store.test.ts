@@ -110,4 +110,24 @@ describe('FileEventStore.list edge cases', () => {
     expect(() => store.list()).toThrow(MesaError);
     expect(() => store.list()).toThrow('Corrupted event line');
   });
+
+  it('throws MesaError on valid JSON that fails MesaEventSchema', () => {
+    appendFileSync(
+      join(testDir, 'events.jsonl'),
+      `${JSON.stringify(makeEvent({ id: 'ok' }))}\n${JSON.stringify({ type: 'nope', extra: true })}\n`,
+      'utf-8',
+    );
+    expect(() => store.list()).toThrow(MesaError);
+    expect(() => store.list()).toThrow('Invalid event');
+  });
+
+  it('rejects an event missing required fields', () => {
+    appendFileSync(
+      join(testDir, 'events.jsonl'),
+      JSON.stringify({ id: 'event_x', type: 'task_created' }) + '\n',
+      'utf-8',
+    );
+    expect(() => store.list()).toThrow(MesaError);
+    expect(() => store.list()).toThrow('Invalid event');
+  });
 });
