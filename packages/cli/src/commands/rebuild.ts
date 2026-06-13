@@ -12,7 +12,7 @@ export function runRebuild(args: ParsedArgs): void {
     actor: { id: 'user:local', type: 'user', roles: ['owner'] },
   });
   const json = !!args.flags['json'];
-  const clean = args.flags.clean !== false; // default true
+  const clean = args.flags['no-clean'] !== true;
 
   try {
     const result = rebuildAllProjections(ctx, { clean });

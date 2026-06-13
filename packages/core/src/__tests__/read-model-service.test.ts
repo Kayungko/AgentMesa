@@ -12,6 +12,7 @@ import {
 } from '../index.js';
 import type { MesaRuntimeContext, ReadModelMode } from '../index.js';
 import { FileStorageAdapter } from '../runtime/file-storage-adapter.js';
+import { MesaError } from '../errors.js';
 import {
   getTaskReadModel,
   listTaskReadModels,
@@ -116,6 +117,51 @@ describe('read-model-service: tasks (hybrid default)', () => {
     const results = listTaskReadModels(ctx);
     expect(results).toHaveLength(1);
     expect(results[0]!.title).toBe('Only legacy');
+  });
+
+  it('warns and falls back to legacy when projection corrupted (hybrid mode)', () => {
+    const dir = makeCleanDir();
+    const ctx = makeContext(dir);
+    const task = createTask(ctx, { title: 'Hybrid corrupted' });
+    rebuildAllProjections(ctx);
+
+    const projPath = join(ctx.paths.taskProjectionsDir, `${task.id}.json`);
+    ctx.storage.writeText(projPath, 'corrupted json {{{');
+
+    const hybridCtx = createRuntimeContext({
+      rootDir: dir,
+      actor: ctx.actor,
+      storage: ctx.storage,
+    });
+    const warnSpy = vi.spyOn(hybridCtx.logger, 'warn');
+
+    const result = getTaskReadModel(hybridCtx, task.id);
+    expect(result).not.toBeNull();
+    expect(result!.id).toBe(task.id);
+    expect(result!.title).toBe('Hybrid corrupted');
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('projection corrupted'));
+  });
+
+  it('list warns and falls back when projections corrupted (hybrid mode)', () => {
+    const dir = makeCleanDir();
+    const ctx = makeContext(dir);
+    const task = createTask(ctx, { title: 'List corrupted' });
+    rebuildAllProjections(ctx);
+
+    const projPath = join(ctx.paths.taskProjectionsDir, `${task.id}.json`);
+    ctx.storage.writeText(projPath, 'not valid json at all');
+
+    const hybridCtx = createRuntimeContext({
+      rootDir: dir,
+      actor: ctx.actor,
+      storage: ctx.storage,
+    });
+    const warnSpy = vi.spyOn(hybridCtx.logger, 'warn');
+
+    const results = listTaskReadModels(hybridCtx);
+    expect(results).toHaveLength(1);
+    expect(results[0]!.id).toBe(task.id);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('projections corrupted'));
   });
 });
 
@@ -226,6 +272,19 @@ describe('read-model-service: projection-only mode', () => {
     const projCtx = switchMode(ctx, 'projection');
     expect(listTaskReadModels(projCtx)).toHaveLength(2);
   });
+
+  it('throws MesaError when projection is corrupted (projection mode)', () => {
+    const dir = makeCleanDir();
+    const ctx = makeContext(dir);
+    const task = createTask(ctx, { title: 'Corrupted' });
+    rebuildAllProjections(ctx);
+
+    const projPath = join(ctx.paths.taskProjectionsDir, `${task.id}.json`);
+    ctx.storage.writeText(projPath, '{ not valid json }');
+
+    const projCtx = switchMode(ctx, 'projection');
+    expect(() => getTaskReadModel(projCtx, task.id)).toThrow(MesaError);
+  });
 });
 
 describe('read-model-service: legacy-only mode', () => {
@@ -249,5 +308,21 @@ describe('read-model-service: legacy-only mode', () => {
 
     const legacyCtx = switchMode(ctx, 'legacy');
     expect(listTaskReadModels(legacyCtx)).toHaveLength(1);
+  });
+
+  it('does not read projections (corrupted projection does not matter)', () => {
+    const dir = makeCleanDir();
+    const ctx = makeContext(dir);
+    const task = createTask(ctx, { title: 'Legacy untouched' });
+    rebuildAllProjections(ctx);
+
+    const projPath = join(ctx.paths.taskProjectionsDir, `${task.id}.json`);
+    ctx.storage.writeText(projPath, 'garbage {{{');
+
+    const legacyCtx = switchMode(ctx, 'legacy');
+    const result = getTaskReadModel(legacyCtx, task.id);
+    expect(result).not.toBeNull();
+    expect(result!.id).toBe(task.id);
+    expect(result!.title).toBe('Legacy untouched');
   });
 });

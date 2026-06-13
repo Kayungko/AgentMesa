@@ -1,3 +1,4 @@
+import { MesaError } from '../errors.js';
 import type { ReadModelMode, MesaRuntimeContext } from '../runtime/types.js';
 import { getTask, listTasks } from './task-service.js';
 import { getMeeting, listMeetings } from './meeting-service.js';
@@ -15,15 +16,47 @@ function readMode(ctx: MesaRuntimeContext): ReadModelMode {
   return ctx.config.readModel!.mode!;
 }
 
+function tryGetProjection<T>(
+  ctx: MesaRuntimeContext,
+  getFn: () => T,
+  fallbackLabel: string,
+): T | null {
+  try {
+    return getFn();
+  } catch (err) {
+    if (err instanceof MesaError) {
+      ctx.logger.warn(`${fallbackLabel} projection corrupted, falling back to legacy: ${err.message}`);
+      return null;
+    }
+    throw err;
+  }
+}
+
+function tryListProjections<T>(
+  ctx: MesaRuntimeContext,
+  listFn: () => T[],
+  fallbackLabel: string,
+): T[] | null {
+  try {
+    return listFn();
+  } catch (err) {
+    if (err instanceof MesaError) {
+      ctx.logger.warn(`${fallbackLabel} projections corrupted, falling back to legacy: ${err.message}`);
+      return null;
+    }
+    throw err;
+  }
+}
+
 export function getTaskReadModel(ctx: MesaRuntimeContext, taskId: string): Record<string, unknown> | null {
   const mode = readMode(ctx);
 
   if (mode === 'projection') {
-    return getTaskProjection(ctx, taskId, { strict: false });
+    return getTaskProjection(ctx, taskId); // strict:true by default
   }
 
   if (mode === 'hybrid') {
-    const proj = getTaskProjection(ctx, taskId, { strict: false });
+    const proj = tryGetProjection(ctx, () => getTaskProjection(ctx, taskId), 'task');
     if (proj !== null) return proj;
   }
 
@@ -39,12 +72,12 @@ export function listTaskReadModels(ctx: MesaRuntimeContext): Record<string, unkn
   const mode = readMode(ctx);
 
   if (mode === 'projection') {
-    return listTaskProjections(ctx, { strict: false });
+    return listTaskProjections(ctx); // strict:true by default
   }
 
   if (mode === 'hybrid') {
-    const projs = listTaskProjections(ctx, { strict: false });
-    if (projs.length > 0) return projs;
+    const projs = tryListProjections(ctx, () => listTaskProjections(ctx), 'task');
+    if (projs !== null && projs.length > 0) return projs;
   }
 
   // legacy (or hybrid fallback when no projections exist)
@@ -55,11 +88,11 @@ export function getMeetingReadModel(ctx: MesaRuntimeContext, meetingId: string):
   const mode = readMode(ctx);
 
   if (mode === 'projection') {
-    return getMeetingProjection(ctx, meetingId, { strict: false });
+    return getMeetingProjection(ctx, meetingId); // strict:true by default
   }
 
   if (mode === 'hybrid') {
-    const proj = getMeetingProjection(ctx, meetingId, { strict: false });
+    const proj = tryGetProjection(ctx, () => getMeetingProjection(ctx, meetingId), 'meeting');
     if (proj !== null) return proj;
   }
 
@@ -74,12 +107,12 @@ export function listMeetingReadModels(ctx: MesaRuntimeContext): Record<string, u
   const mode = readMode(ctx);
 
   if (mode === 'projection') {
-    return listMeetingProjections(ctx, { strict: false });
+    return listMeetingProjections(ctx); // strict:true by default
   }
 
   if (mode === 'hybrid') {
-    const projs = listMeetingProjections(ctx, { strict: false });
-    if (projs.length > 0) return projs;
+    const projs = tryListProjections(ctx, () => listMeetingProjections(ctx), 'meeting');
+    if (projs !== null && projs.length > 0) return projs;
   }
 
   return listMeetings(ctx) as unknown as Record<string, unknown>[];
@@ -89,11 +122,11 @@ export function getAgentReadModel(ctx: MesaRuntimeContext, agentId: string): Rec
   const mode = readMode(ctx);
 
   if (mode === 'projection') {
-    return getAgentProjection(ctx, agentId, { strict: false });
+    return getAgentProjection(ctx, agentId); // strict:true by default
   }
 
   if (mode === 'hybrid') {
-    const proj = getAgentProjection(ctx, agentId, { strict: false });
+    const proj = tryGetProjection(ctx, () => getAgentProjection(ctx, agentId), 'agent');
     if (proj !== null) return proj;
   }
 
@@ -108,12 +141,12 @@ export function listAgentReadModels(ctx: MesaRuntimeContext): Record<string, unk
   const mode = readMode(ctx);
 
   if (mode === 'projection') {
-    return listAgentProjections(ctx, { strict: false });
+    return listAgentProjections(ctx); // strict:true by default
   }
 
   if (mode === 'hybrid') {
-    const projs = listAgentProjections(ctx, { strict: false });
-    if (projs.length > 0) return projs;
+    const projs = tryListProjections(ctx, () => listAgentProjections(ctx), 'agent');
+    if (projs !== null && projs.length > 0) return projs;
   }
 
   return listAgents(ctx) as unknown as Record<string, unknown>[];

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { ZodIssue } from 'zod';
 import { MesaError } from '../errors.js';
 
 // --- Meta ---
@@ -60,12 +61,18 @@ export type AgentProjection = z.infer<typeof AgentProjectionSchema>;
 
 // --- Parse helpers ---
 
+function formatZodIssues(issues: ZodIssue[]): string {
+  return issues
+    .map((issue: ZodIssue) => `${issue.path.join('.')}: ${issue.message}`)
+    .join('; ');
+}
+
 export function parseTaskProjection(raw: unknown): TaskProjection {
   const result = TaskProjectionSchema.safeParse(raw);
   if (!result.success) {
     throw new MesaError(
       'VALIDATION_ERROR',
-      `Invalid task projection: ${result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`,
+      `Invalid task projection: ${formatZodIssues(result.error.issues)}`,
     );
   }
   return result.data;
@@ -76,7 +83,7 @@ export function parseMeetingProjection(raw: unknown): MeetingProjection {
   if (!result.success) {
     throw new MesaError(
       'VALIDATION_ERROR',
-      `Invalid meeting projection: ${result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`,
+      `Invalid meeting projection: ${formatZodIssues(result.error.issues)}`,
     );
   }
   return result.data;
@@ -87,7 +94,7 @@ export function parseAgentProjection(raw: unknown): AgentProjection {
   if (!result.success) {
     throw new MesaError(
       'VALIDATION_ERROR',
-      `Invalid agent projection: ${result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`,
+      `Invalid agent projection: ${formatZodIssues(result.error.issues)}`,
     );
   }
   return result.data;
