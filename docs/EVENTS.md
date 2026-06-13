@@ -39,7 +39,8 @@ Projection freshness checks:
 - `getTaskReadModel(ctx, id)` / `getMeetingReadModel(ctx, id)` / `getAgentReadModel(ctx, id)`
   return the current entity state as `Record<string, unknown>` (or `null` if not found).
 - `listTaskReadModels(ctx)` / `listMeetingReadModels(ctx)` / `listAgentReadModels(ctx)`
-  return all entities of that type.
+  return all entities of that type. Projection mode throws `MesaError` if any projection
+  is stale; hybrid mode warns and falls back to legacy if any projection is stale.
 - The read mode is controlled by `config.readModel.mode`:
   - `projection`: strict mode — missing/stale/corrupt projections throw `MesaError` (no legacy fallback). Error messages prompt "Run mesa rebuild".
   - `hybrid` (default): compatibility migration mode — returns fresh projection when available; warns and falls back to legacy on missing, stale, or corrupted projections.
@@ -56,10 +57,10 @@ rebuiltAt, lastEventId, lastSequence). Existing services still read from `.agent
 etc. — projections are not yet the authoritative read path. Events are a durable audit log,
 but not yet the sole source of truth.
 
-**Known limits:** Incremental rebuild (replaying only new events since last build) and
-staleness auto-detection on read are not yet implemented. Projections must be rebuilt
-explicitly via `rebuildAllProjections` or the `mesa rebuild` CLI command (supports `--json`
-for programmatic consumption and `--no-clean` to skip stale projection removal).
+**Known limits:** Incremental rebuild (replaying only new events since last build) is not
+yet implemented. Projections must be rebuilt explicitly via `rebuildAllProjections` or the
+`mesa rebuild` CLI command (supports `--json` for programmatic consumption and `--no-clean`
+to skip stale projection removal).
 
 The `mesa doctor` command detects stale projections (via `isTaskProjectionFresh` etc.) and
 reports them as fixable warnings with a recommendation to run `mesa rebuild`. It does not

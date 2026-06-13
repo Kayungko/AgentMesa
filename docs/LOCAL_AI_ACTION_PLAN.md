@@ -100,7 +100,7 @@ Acceptance:
 
 ## Priority 4: Event-Backed State
 
-Status: `read_path_hardened` (+ strict projection mode, freshness enforcement, warn+fallback hybrid)
+Status: `read_path_hardened` (+ strict projection mode, freshness enforcement on both GET and LIST, warn+fallback hybrid)
 
 - FileEventStore: append-only JSONL at `.agentmesa/events/events.jsonl`, validates against MesaEventSchema.
 - Default `MesaRuntimeContext` eventStore is `FileEventStore`; events survive process exit.
@@ -114,10 +114,10 @@ Status: `read_path_hardened` (+ strict projection mode, freshness enforcement, w
 - Meeting seed tasks/agents are preserved during rebuild (reads both `meeting.tasks`/`meeting.agents` and future alias fields).
 - Deleted/archived tasks produce tombstone projections (not removed).
 - Projections validate required fields before writing (id, type, _meta, taskIds/agentIds for meetings).
-- **Authoritative read model:** `read-model-service.ts` provides `get*ReadModel` / `list*ReadModels`. Config `readModel.mode` controls `hybrid` (default, projection + legacy fallback), `projection`-only, or `legacy`-only reads.
+- **Authoritative read model:** `read-model-service.ts` provides `get*ReadModel` / `list*ReadModels`. Config `readModel.mode` controls `hybrid` (default, projection + legacy fallback), `projection`-only, or `legacy`-only reads. Both GET and LIST enforce freshness: projection mode throws on any stale, hybrid mode warns and falls back to legacy.
 - **CLI migration complete:** `mesa task/meeting/agent list/show` use read-model-service. `mesa agent show <id>` added. `mesa rebuild` command available.
 - **Doctor alignment:** `mesa doctor` detects stale projections (freshness check) and reports fixable warnings.
-- **Read-model mode hardening complete:** `projection` mode throws `MesaError` on missing/stale/corrupt projections (no fallback). `hybrid` mode warns and falls back to legacy on missing/stale/corrupt projections. `legacy` mode never reads projections. Error messages prompt "Run mesa rebuild".
+- **Read-model mode hardening complete:** `projection` mode throws `MesaError` on missing/stale/corrupt projections in both GET and LIST (no fallback). `hybrid` mode warns and falls back to legacy on missing/stale/corrupt projections for both GET and LIST. `legacy` mode never reads projections. Error messages prompt "Run mesa rebuild".
 - Incremental rebuild is not yet implemented.
 
 Direction:

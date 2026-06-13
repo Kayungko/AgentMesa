@@ -103,12 +103,30 @@ export function listTaskReadModels(ctx: MesaRuntimeContext): Record<string, unkn
   const mode = readMode(ctx);
 
   if (mode === 'projection') {
-    return listTaskProjections(ctx);
+    const projs = listTaskProjections(ctx);
+    for (const p of projs) {
+      const id = p.id as string;
+      if (!isTaskProjectionFresh(ctx, id)) {
+        throw new MesaError('PROJECTION_STALE', `Stale projection for task "${id}". Run "mesa rebuild".`);
+      }
+    }
+    return projs;
   }
 
   if (mode === 'hybrid') {
     const projs = tryListProjections(ctx, () => listTaskProjections(ctx), 'task');
-    if (projs !== null && projs.length > 0) return projs;
+    if (projs !== null && projs.length > 0) {
+      let anyStale = false;
+      for (const p of projs) {
+        const id = p.id as string;
+        if (!isTaskProjectionFresh(ctx, id)) {
+          anyStale = true;
+          break;
+        }
+      }
+      if (!anyStale) return projs;
+      ctx.logger.warn('task projections contain stale entries, falling back to legacy. Run "mesa rebuild".');
+    }
   }
 
   return listTasks(ctx) as unknown as Record<string, unknown>[];
@@ -133,12 +151,30 @@ export function listMeetingReadModels(ctx: MesaRuntimeContext): Record<string, u
   const mode = readMode(ctx);
 
   if (mode === 'projection') {
-    return listMeetingProjections(ctx);
+    const projs = listMeetingProjections(ctx);
+    for (const p of projs) {
+      const id = p.id as string;
+      if (!isMeetingProjectionFresh(ctx, id)) {
+        throw new MesaError('PROJECTION_STALE', `Stale projection for meeting "${id}". Run "mesa rebuild".`);
+      }
+    }
+    return projs;
   }
 
   if (mode === 'hybrid') {
     const projs = tryListProjections(ctx, () => listMeetingProjections(ctx), 'meeting');
-    if (projs !== null && projs.length > 0) return projs;
+    if (projs !== null && projs.length > 0) {
+      let anyStale = false;
+      for (const p of projs) {
+        const id = p.id as string;
+        if (!isMeetingProjectionFresh(ctx, id)) {
+          anyStale = true;
+          break;
+        }
+      }
+      if (!anyStale) return projs;
+      ctx.logger.warn('meeting projections contain stale entries, falling back to legacy. Run "mesa rebuild".');
+    }
   }
 
   return listMeetings(ctx) as unknown as Record<string, unknown>[];
@@ -163,12 +199,30 @@ export function listAgentReadModels(ctx: MesaRuntimeContext): Record<string, unk
   const mode = readMode(ctx);
 
   if (mode === 'projection') {
-    return listAgentProjections(ctx);
+    const projs = listAgentProjections(ctx);
+    for (const p of projs) {
+      const id = p.id as string;
+      if (!isAgentProjectionFresh(ctx, id)) {
+        throw new MesaError('PROJECTION_STALE', `Stale projection for agent "${id}". Run "mesa rebuild".`);
+      }
+    }
+    return projs;
   }
 
   if (mode === 'hybrid') {
     const projs = tryListProjections(ctx, () => listAgentProjections(ctx), 'agent');
-    if (projs !== null && projs.length > 0) return projs;
+    if (projs !== null && projs.length > 0) {
+      let anyStale = false;
+      for (const p of projs) {
+        const id = p.id as string;
+        if (!isAgentProjectionFresh(ctx, id)) {
+          anyStale = true;
+          break;
+        }
+      }
+      if (!anyStale) return projs;
+      ctx.logger.warn('agent projections contain stale entries, falling back to legacy. Run "mesa rebuild".');
+    }
   }
 
   return listAgents(ctx) as unknown as Record<string, unknown>[];

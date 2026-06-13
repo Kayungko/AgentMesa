@@ -10,6 +10,7 @@ import {
   registerAgent,
   rebuildAllProjections,
   updateTaskStatus,
+  updateMeetingStatus,
 } from '../index.js';
 import type { MesaRuntimeContext, ReadModelMode } from '../index.js';
 import { FileStorageAdapter } from '../runtime/file-storage-adapter.js';
@@ -193,6 +194,21 @@ describe('read-model-service: tasks (hybrid default)', () => {
     expect(result!.id).toBe(task.id);
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('projection stale'));
   });
+
+  it('warns and falls back to legacy when listing and any projection is stale (hybrid mode, tasks)', () => {
+    const dir = makeCleanDir();
+    const ctx = makeContext(dir);
+    const task = createTask(ctx, { title: 'List stale task' });
+    rebuildAllProjections(ctx);
+    updateTaskStatus(ctx, task.id, 'in_progress');
+
+    const warnSpy = vi.spyOn(ctx.logger, 'warn');
+
+    const results = listTaskReadModels(ctx);
+    expect(results).toHaveLength(1);
+    expect(results[0]!.id).toBe(task.id);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('stale entries'));
+  });
 });
 
 describe('read-model-service: meetings (hybrid default)', () => {
@@ -231,6 +247,21 @@ describe('read-model-service: meetings (hybrid default)', () => {
 
     expect(listMeetingReadModels(ctx)).toHaveLength(2);
   });
+
+  it('warns and falls back to legacy when listing and any projection is stale (hybrid mode, meetings)', () => {
+    const dir = makeCleanDir();
+    const ctx = makeContext(dir);
+    const meeting = createMeeting(ctx, { title: 'List stale meeting' });
+    rebuildAllProjections(ctx);
+    updateMeetingStatus(ctx, meeting.id, 'active');
+
+    const warnSpy = vi.spyOn(ctx.logger, 'warn');
+
+    const results = listMeetingReadModels(ctx);
+    expect(results).toHaveLength(1);
+    expect(results[0]!.id).toBe(meeting.id);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('stale entries'));
+  });
 });
 
 describe('read-model-service: agents (hybrid default)', () => {
@@ -268,6 +299,21 @@ describe('read-model-service: agents (hybrid default)', () => {
     rebuildAllProjections(ctx);
 
     expect(listAgentReadModels(ctx)).toHaveLength(2);
+  });
+
+  it('warns and falls back to legacy when listing and any projection is stale (hybrid mode, agents)', () => {
+    const dir = makeCleanDir();
+    const ctx = makeContext(dir);
+    registerAgent(ctx, { id: 'agent-stale-list', name: 'StaleList', client: 'test', status: 'available', roles: ['builder'] });
+    rebuildAllProjections(ctx);
+    registerAgent(ctx, { id: 'agent-stale-list', name: 'StaleList', client: 'test', status: 'busy', roles: ['builder'] });
+
+    const warnSpy = vi.spyOn(ctx.logger, 'warn');
+
+    const results = listAgentReadModels(ctx);
+    expect(results).toHaveLength(1);
+    expect(results[0]!.id).toBe('agent-stale-list');
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('stale entries'));
   });
 });
 
@@ -326,6 +372,48 @@ describe('read-model-service: projection-only mode', () => {
     const projCtx = switchMode(ctx, 'projection');
     expect(() => getTaskReadModel(projCtx, task.id)).toThrow(MesaError);
   });
+
+  it('throws MesaError when listing and any projection is stale (projection mode, tasks)', () => {
+    const dir = makeCleanDir();
+    const ctx = makeContext(dir);
+    const task = createTask(ctx, { title: 'Stale list task' });
+    rebuildAllProjections(ctx);
+    updateTaskStatus(ctx, task.id, 'in_progress');
+
+    const projCtx = switchMode(ctx, 'projection');
+    expect(() => listTaskReadModels(projCtx)).toThrow(MesaError);
+    try { listTaskReadModels(projCtx); } catch (e) {
+      expect((e as MesaError).message).toContain('Run "mesa rebuild"');
+    }
+  });
+
+  it('throws MesaError when listing and any projection is stale (projection mode, meetings)', () => {
+    const dir = makeCleanDir();
+    const ctx = makeContext(dir);
+    const meeting = createMeeting(ctx, { title: 'Stale list meeting' });
+    rebuildAllProjections(ctx);
+    updateMeetingStatus(ctx, meeting.id, 'active');
+
+    const projCtx = switchMode(ctx, 'projection');
+    expect(() => listMeetingReadModels(projCtx)).toThrow(MesaError);
+    try { listMeetingReadModels(projCtx); } catch (e) {
+      expect((e as MesaError).message).toContain('Run "mesa rebuild"');
+    }
+  });
+
+  it('throws MesaError when listing and any projection is stale (projection mode, agents)', () => {
+    const dir = makeCleanDir();
+    const ctx = makeContext(dir);
+    registerAgent(ctx, { id: 'stale-agent', name: 'Stale', client: 'test', status: 'available', roles: ['builder'] });
+    rebuildAllProjections(ctx);
+    registerAgent(ctx, { id: 'stale-agent', name: 'Stale', client: 'test', status: 'busy', roles: ['builder'] });
+
+    const projCtx = switchMode(ctx, 'projection');
+    expect(() => listAgentReadModels(projCtx)).toThrow(MesaError);
+    try { listAgentReadModels(projCtx); } catch (e) {
+      expect((e as MesaError).message).toContain('Run "mesa rebuild"');
+    }
+  });
 });
 
 describe('read-model-service: legacy-only mode', () => {
@@ -365,5 +453,22 @@ describe('read-model-service: legacy-only mode', () => {
     expect(result).not.toBeNull();
     expect(result!.id).toBe(task.id);
     expect(result!.title).toBe('Legacy untouched');
+  });
+
+  it('list ignores projection staleness (legacy mode)', () => {
+    const dir = makeCleanDir();
+    const ctx = makeContext(dir);
+    const task = createTask(ctx, { title: 'Legacy list' });
+    rebuildAllProjections(ctx);
+    updateTaskStatus(ctx, task.id, 'in_progress');
+
+    const legacyCtx = switchMode(ctx, 'legacy');
+    const warnSpy = vi.spyOn(legacyCtx.logger, 'warn');
+
+    const results = listTaskReadModels(legacyCtx);
+    expect(results).toHaveLength(1);
+    expect(results[0]!.id).toBe(task.id);
+    expect(results[0]!.title).toBe('Legacy list');
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 });
