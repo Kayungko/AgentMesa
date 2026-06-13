@@ -135,7 +135,7 @@ Bridges CI pipeline results into AgentMesa tasks.
 | `FileTransport` (core) | **Done.** Always-available transport with full read/write capabilities. |
 | `createDefaultTransports` (core) | **Done.** Bootstraps `[FileTransport]`. Custom transports injectable via `CreateRuntimeContextOptions.transports`. |
 | `findTransportsByType` / `getAvailableTransports` (core) | **Done.** Registry query helpers. |
-| MCP transport | **Done** (mcp-server). `StdioServerTransport` maps MCP tools to Core services. Treated as one transport implementation, not the center. |
+| MCP transport | **Partial.** MCP server exists and maps tools to Core services, but uses `process.cwd()` directly rather than the `MesaTransport` interface. Treated as one transport implementation, not the center — full transport-registry integration is design intent. |
 | HTTP transport | **Design intent.** |
 | WebSocket transport | **Design intent.** |
 | GitHub transport | **Design intent.** |

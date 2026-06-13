@@ -40,6 +40,11 @@ rebuiltAt, lastEventId, lastSequence). Existing services still read from `.agent
 etc. — projections are not yet the authoritative read path. Events are a durable audit log,
 but not yet the sole source of truth.
 
+**Known limits:** Incremental rebuild (replaying only new events since last build) and
+staleness auto-detection on read are not yet implemented. Projections must be rebuilt
+explicitly via `rebuildAllProjections` or `mesa rebuild`. The `mesa doctor` command
+detects missing and stale projections but does not auto-rebuild.
+
 Event type names are frozen as underscore literals (`task_created`, `task_status_changed`, ...) in the `eventTypeSchema` enum in `packages/protocol/src/schemas.ts`. That enum is the single source of truth for the vocabulary: the `EventType` TypeScript union is inferred from it, and a test in `schemas.test.ts` locks the exact set so any addition or rename is a deliberate, reviewed change. Because the event log is append-only, this naming is permanent once written to disk. The tables below use that frozen vocabulary.
 
 ## 1. Event Model

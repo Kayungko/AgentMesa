@@ -100,7 +100,7 @@ Acceptance:
 
 ## Priority 4: Event-Backed State
 
-Status: `minimal_projection_rebuild_done` (+ engineering closure)
+Status: `minimal_projection_rebuild_implemented` (+ engineering closure)
 
 - FileEventStore: append-only JSONL at `.agentmesa/events/events.jsonl`, validates against MesaEventSchema.
 - Default `MesaRuntimeContext` eventStore is `FileEventStore`; events survive process exit.
@@ -155,7 +155,7 @@ Acceptance:
 
 ## Priority 6: Transport Layer
 
-Status: `transport_abstraction_done`
+Status: `transport_abstraction_implemented_file_only_mcp_partial`
 
 - `TransportCapabilitiesSchema` in protocol: structured capabilities (canCreateTasks, canReadTasks, etc.) replacing loose `string[]`.
 - `MesaTransportSchema` updated to use structured capabilities.
@@ -181,7 +181,7 @@ Acceptance:
 
 ## Priority 7: Policy Layer
 
-Status: `role_based_engine_done`
+Status: `role_based_engine_implemented_not_default`
 
 - `RoleBasedPolicyEngine` in core: maps action keys (e.g. `task.create`) → capabilities (e.g. `write_task`) with per-role capability sets. Owner bypass built in. Constructor accepts overrides.
 - `AllowAllMesaPolicyEngine` kept as development default; `RoleBasedPolicyEngine` available via `createRuntimeContext({ policy: ... })`.

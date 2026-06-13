@@ -6,7 +6,7 @@ AgentMesa operates in a multi-agent environment where different agents with diff
 
 | Capability | Status |
 |---|---|
-| **Role-based policy engine** | **Done.** `RoleBasedPolicyEngine` in core implements `MesaPolicyEngine` with action→capability mapping. Default roles: chair, planner, builder, reviewer, tester, documenter, maintainer, researcher, custom. `['owner']` PermissionLevel bypasses all checks. Constructor accepts per-role capability overrides. |
+| **Role-based policy engine** | **Done (not default).** `RoleBasedPolicyEngine` in core implements `MesaPolicyEngine` with action→capability mapping. Default roles: chair, planner, builder, reviewer, tester, documenter, maintainer, researcher, custom. `['owner']` PermissionLevel bypasses all checks. Constructor accepts per-role capability overrides. The **default** engine remains `AllowAllMesaPolicyEngine` — `RoleBasedPolicyEngine` must be explicitly selected via config `policy.mode: "role-based"` or injected via `createRuntimeContext({ policy: ... })`. |
 | **Permission checker** | **Done** (policy package). `PermissionChecker` validates `(role, action)` pairs against the role-capability matrix. |
 | **File access rules** | **Done** (policy package). `FileAccessChecker` matches glob patterns against allowed/denied roles. Secret path detection built in. |
 | **Command safety** | **Done** (policy package). `CommandPolicyChecker` classifies commands as safe/blocked/approval-required. |
