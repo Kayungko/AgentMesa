@@ -45,7 +45,12 @@ export type AgentRole =
   | 'documenter'
   | 'maintainer'
   | 'researcher'
-  | 'custom';
+  | 'custom'
+  // v0.7 production roles
+  | 'admin'
+  | 'connector'
+  | 'ci'
+  | 'system';
 
 export type AgentStatus = 'available' | 'busy' | 'offline';
 

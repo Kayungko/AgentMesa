@@ -67,5 +67,28 @@ export function defineRoleCapabilities(): RoleCapability {
     custom: [
       'read_task',
     ],
+    admin: [
+      'read_task',
+      'write_task',
+      'change_status',
+      'post_message',
+      'create_artifact',
+      'delete_task',
+      'manage_agents',
+      'manage_meetings',
+    ],
+    connector: [
+      'read_task',
+      'post_message',
+      'create_artifact',
+    ],
+    ci: [
+      'read_task',
+      'post_message',
+      'create_artifact',
+    ],
+    system: [
+      'read_task',
+    ],
   };
 }

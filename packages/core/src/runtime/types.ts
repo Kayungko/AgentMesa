@@ -61,6 +61,12 @@ export interface MesaPolicyDecision {
 
 export interface MesaPolicyEngine {
   can(actor: MesaActor, action: string, resource: string): MesaPolicyDecision;
+  canWithContext(
+    actor: MesaActor,
+    action: string,
+    resource: string,
+    context?: Record<string, unknown>,
+  ): MesaPolicyDecision;
 }
 
 export interface MesaLogger {

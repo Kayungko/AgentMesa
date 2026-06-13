@@ -19,6 +19,10 @@ const agentRoleSchema = z.enum([
   'maintainer',
   'researcher',
   'custom',
+  'admin',
+  'connector',
+  'ci',
+  'system',
 ]);
 
 const agentStatusSchema = z.enum(['available', 'busy', 'offline']);

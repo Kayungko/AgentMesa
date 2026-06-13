@@ -10,6 +10,15 @@ export class AllowAllMesaPolicyEngine implements MesaPolicyEngine {
   can(_actor: MesaActor, _action: string, _resource: string): MesaPolicyDecision {
     return { allowed: true };
   }
+
+  canWithContext(
+    _actor: MesaActor,
+    _action: string,
+    _resource: string,
+    _context?: Record<string, unknown>,
+  ): MesaPolicyDecision {
+    return { allowed: true };
+  }
 }
 
 // --- Role-based policy engine ---
@@ -23,11 +32,15 @@ type Capability =
   | 'archive_task'
   | 'delete_task'
   | 'manage_agents'
-  | 'manage_meetings';
+  | 'manage_meetings'
+  | 'read_events'
+  | 'read_projections'
+  | 'rebuild_projections'
+  | 'inspect_transports';
 
 /**
- * Maps core service action keys (e.g. "task.create") to the least-privilege
- * capability required. Unmapped actions are denied by default.
+ * Maps core service action keys to the least-privilege capability required.
+ * Unmapped actions are denied by default.
  */
 const ACTION_CAPABILITY: Record<string, Capability> = {
   'task.create': 'write_task',
@@ -39,41 +52,144 @@ const ACTION_CAPABILITY: Record<string, Capability> = {
   'meeting.updateStatus': 'manage_meetings',
   'meeting.addTask': 'manage_meetings',
   'meeting.addAgent': 'manage_meetings',
-  'message.send': 'post_message',
+  'message.append': 'post_message',
   'artifact.create': 'create_artifact',
   'agent.register': 'manage_agents',
+  'event.read': 'read_events',
+  'projection.read': 'read_projections',
+  'projection.rebuild': 'rebuild_projections',
+  'transport.inspect': 'inspect_transports',
 };
 
 const ROLE_CAPABILITIES: Record<string, Capability[]> = {
-  chair: [
-    'read_task', 'write_task', 'change_status', 'post_message',
-    'create_artifact', 'archive_task', 'delete_task', 'manage_agents', 'manage_meetings',
+  owner: [
+    'read_task',
+    'write_task',
+    'change_status',
+    'post_message',
+    'create_artifact',
+    'archive_task',
+    'delete_task',
+    'manage_agents',
+    'manage_meetings',
+    'read_events',
+    'read_projections',
+    'rebuild_projections',
+    'inspect_transports',
   ],
-  planner: [
-    'read_task', 'write_task', 'post_message', 'manage_meetings',
+  admin: [
+    'read_task',
+    'write_task',
+    'change_status',
+    'post_message',
+    'create_artifact',
+    'archive_task',
+    'delete_task',
+    'manage_agents',
+    'manage_meetings',
+    'read_events',
+    'read_projections',
+    'rebuild_projections',
+    'inspect_transports',
   ],
   builder: [
-    'read_task', 'write_task', 'change_status', 'post_message', 'create_artifact',
+    'read_task',
+    'write_task',
+    'change_status',
+    'post_message',
+    'create_artifact',
+    'read_events',
+    'read_projections',
   ],
   reviewer: [
-    'read_task', 'change_status', 'post_message', 'create_artifact',
+    'read_task',
+    'change_status',
+    'post_message',
+    'create_artifact',
+    'read_events',
+    'read_projections',
+  ],
+  connector: [
+    'read_task',
+    'post_message',
+    'create_artifact',
+    'read_events',
+    'read_projections',
+  ],
+  ci: [
+    'read_task',
+    'post_message',
+    'create_artifact',
+    'read_events',
+    'read_projections',
+  ],
+  system: [
+    'read_task',
+    'read_events',
+    'read_projections',
+    'rebuild_projections',
+  ],
+  // --- legacy roles (kept for backward compat) ---
+  chair: [
+    'read_task',
+    'write_task',
+    'change_status',
+    'post_message',
+    'create_artifact',
+    'archive_task',
+    'delete_task',
+    'manage_agents',
+    'manage_meetings',
+    'read_events',
+    'read_projections',
+    'rebuild_projections',
+    'inspect_transports',
+  ],
+  planner: [
+    'read_task',
+    'write_task',
+    'post_message',
+    'manage_meetings',
+    'read_events',
+    'read_projections',
   ],
   tester: [
-    'read_task', 'post_message', 'create_artifact',
+    'read_task',
+    'post_message',
+    'create_artifact',
+    'read_events',
+    'read_projections',
   ],
   documenter: [
-    'read_task', 'post_message', 'create_artifact',
+    'read_task',
+    'post_message',
+    'create_artifact',
+    'read_events',
+    'read_projections',
   ],
   maintainer: [
-    'read_task', 'write_task', 'change_status', 'post_message',
-    'create_artifact', 'archive_task', 'delete_task', 'manage_agents', 'manage_meetings',
+    'read_task',
+    'write_task',
+    'change_status',
+    'post_message',
+    'create_artifact',
+    'archive_task',
+    'delete_task',
+    'manage_agents',
+    'manage_meetings',
+    'read_events',
+    'read_projections',
+    'rebuild_projections',
+    'inspect_transports',
   ],
   researcher: [
-    'read_task', 'post_message', 'create_artifact',
-  ],
-  custom: [
     'read_task',
+    'post_message',
+    'create_artifact',
+    'read_events',
+    'read_projections',
   ],
+  custom: ['read_task'],
 };
 
 export class RoleBasedPolicyEngine implements MesaPolicyEngine {
@@ -88,7 +204,16 @@ export class RoleBasedPolicyEngine implements MesaPolicyEngine {
   }
 
   can(actor: MesaActor, action: string, _resource: string): MesaPolicyDecision {
-    // Owner / admin bypass — full access for workspace owners
+    return this.canWithContext(actor, action, _resource);
+  }
+
+  canWithContext(
+    actor: MesaActor,
+    action: string,
+    _resource: string,
+    _context?: Record<string, unknown>,
+  ): MesaPolicyDecision {
+    // Owner bypass — full access for workspace owners
     if (actor.roles.includes('owner')) {
       return { allowed: true };
     }
