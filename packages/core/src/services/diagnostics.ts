@@ -102,58 +102,144 @@ export function checkProjectionConsistency(ctx: MesaRuntimeContext): DiagnosticF
 
   const taskStreams = new Set(taskEvents.map((e) => e.streamId));
   let missing = 0;
+  let corrupted = 0;
+  let stale = 0;
   let tombstones = 0;
+
   for (const streamId of taskStreams) {
-    const proj = getTaskProjection(ctx, streamId);
-    if (!proj) {
-      missing++;
+    try {
+      const proj = getTaskProjection(ctx, streamId);
+      if (!proj) {
+        missing++;
+        findings.push({
+          level: 'warn',
+          category: 'projections',
+          message: `Task "${streamId}" has events but no projection — run "mesa rebuild".`,
+        });
+        continue;
+      }
+
+      if (proj.deleted === true) tombstones++;
+
+      // Staleness: compare _meta.lastSequence vs max event sequence for this stream
+      const streamEvents = taskEvents.filter((e) => e.streamId === streamId);
+      if (streamEvents.length > 0) {
+        const maxSeq = Math.max(...streamEvents.map((e) => e.sequence));
+        const metaSeq = (proj._meta as { lastSequence?: number } | undefined)?.lastSequence;
+        if (metaSeq !== undefined && metaSeq < maxSeq) {
+          stale++;
+          findings.push({
+            level: 'warn',
+            category: 'projections',
+            message: `Task "${streamId}" projection is stale (last event seq ${maxSeq}, projection seq ${metaSeq}) — run "mesa rebuild".`,
+          });
+        }
+      }
+    } catch {
+      corrupted++;
       findings.push({
-        level: 'warn',
+        level: 'error',
         category: 'projections',
-        message: `Task "${streamId}" has events but no projection — run "mesa rebuild".`,
+        message: `Task "${streamId}" projection is corrupted (invalid JSON or schema) — run "mesa rebuild".`,
       });
-    } else if (proj.deleted === true) {
-      tombstones++;
     }
   }
 
   // Check meetings
-  const meetingStreams = new Set(
-    listEvents(ctx, { type: 'meeting_created' }).map((e) => e.streamId),
-  );
+  const meetingEvents = listEvents(ctx, { type: 'meeting_created' });
+  const meetingStreams = new Set(meetingEvents.map((e) => e.streamId));
   for (const streamId of meetingStreams) {
-    const proj = getMeetingProjection(ctx, streamId);
-    if (!proj) {
-      missing++;
+    try {
+      const proj = getMeetingProjection(ctx, streamId);
+      if (!proj) {
+        missing++;
+        findings.push({
+          level: 'warn',
+          category: 'projections',
+          message: `Meeting "${streamId}" has events but no projection — run "mesa rebuild".`,
+        });
+        continue;
+      }
+
+      // Staleness
+      const streamEvents = listEvents(ctx, { streamId });
+      if (streamEvents.length > 0) {
+        const maxSeq = Math.max(...streamEvents.map((e) => e.sequence));
+        const metaSeq = (proj._meta as { lastSequence?: number } | undefined)?.lastSequence;
+        if (metaSeq !== undefined && metaSeq < maxSeq) {
+          stale++;
+          findings.push({
+            level: 'warn',
+            category: 'projections',
+            message: `Meeting "${streamId}" projection is stale (last event seq ${maxSeq}, projection seq ${metaSeq}) — run "mesa rebuild".`,
+          });
+        }
+      }
+    } catch {
+      corrupted++;
       findings.push({
-        level: 'warn',
+        level: 'error',
         category: 'projections',
-        message: `Meeting "${streamId}" has events but no projection — run "mesa rebuild".`,
+        message: `Meeting "${streamId}" projection is corrupted (invalid JSON or schema) — run "mesa rebuild".`,
       });
     }
   }
 
   // Check agents
-  const agentStreams = new Set(
-    listEvents(ctx, { type: 'agent_registered' }).map((e) => e.streamId),
-  );
+  const agentEvents = listEvents(ctx, { type: 'agent_registered' });
+  const agentStreams = new Set(agentEvents.map((e) => e.streamId));
   for (const streamId of agentStreams) {
-    const proj = getAgentProjection(ctx, streamId);
-    if (!proj) {
-      missing++;
+    try {
+      const proj = getAgentProjection(ctx, streamId);
+      if (!proj) {
+        missing++;
+        findings.push({
+          level: 'warn',
+          category: 'projections',
+          message: `Agent "${streamId}" has events but no projection — run "mesa rebuild".`,
+        });
+        continue;
+      }
+
+      // Staleness
+      const streamEvents = listEvents(ctx, { streamId });
+      if (streamEvents.length > 0) {
+        const maxSeq = Math.max(...streamEvents.map((e) => e.sequence));
+        const metaSeq = (proj._meta as { lastSequence?: number } | undefined)?.lastSequence;
+        if (metaSeq !== undefined && metaSeq < maxSeq) {
+          stale++;
+          findings.push({
+            level: 'warn',
+            category: 'projections',
+            message: `Agent "${streamId}" projection is stale (last event seq ${maxSeq}, projection seq ${metaSeq}) — run "mesa rebuild".`,
+          });
+        }
+      }
+    } catch {
+      corrupted++;
       findings.push({
-        level: 'warn',
+        level: 'error',
         category: 'projections',
-        message: `Agent "${streamId}" has events but no projection — run "mesa rebuild".`,
+        message: `Agent "${streamId}" projection is corrupted (invalid JSON or schema) — run "mesa rebuild".`,
       });
     }
   }
 
-  if (missing === 0) {
+  if (missing === 0 && corrupted === 0 && stale === 0) {
     findings.push({
       level: 'ok',
       category: 'projections',
       message: `Projections consistent: ${taskStreams.size} task(s), ${meetingStreams.size} meeting(s), ${agentStreams.size} agent(s). Tombstones: ${tombstones}.`,
+    });
+  } else {
+    const parts: string[] = [];
+    if (missing > 0) parts.push(`${missing} missing`);
+    if (corrupted > 0) parts.push(`${corrupted} corrupted`);
+    if (stale > 0) parts.push(`${stale} stale`);
+    findings.push({
+      level: corrupted > 0 ? 'error' : 'warn',
+      category: 'projections',
+      message: `Projection issues: ${parts.join(', ')}.`,
     });
   }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { initWorkspace } from '../workspace.js';
@@ -103,6 +103,56 @@ describe('checkProjectionConsistency', () => {
 
     const findings = checkProjectionConsistency(ctx);
     expect(findings.some((f) => f.message.includes('Tombstones: 1'))).toBe(true);
+  });
+
+  it('reports corrupted projection as error (invalid JSON)', () => {
+    const task = createTask(ctx, { title: 'Corrupt task' });
+    rebuildAllProjections(ctx);
+
+    // Corrupt the projection file
+    const projPath = join(ctx.paths.taskProjectionsDir, `${task.id}.json`);
+    writeFileSync(projPath, 'not valid json {{{', 'utf-8');
+
+    const findings = checkProjectionConsistency(ctx);
+    const errors = findings.filter((f) => f.level === 'error' && f.category === 'projections');
+    expect(errors.length).toBeGreaterThanOrEqual(1);
+    expect(errors.some((f) => f.message.includes('corrupted'))).toBe(true);
+  });
+
+  it('reports corrupted projection as error (invalid schema)', () => {
+    const task = createTask(ctx, { title: 'Bad schema task' });
+    rebuildAllProjections(ctx);
+
+    // Replace with valid JSON that fails schema (missing required _meta)
+    const projPath = join(ctx.paths.taskProjectionsDir, `${task.id}.json`);
+    writeFileSync(projPath, JSON.stringify({ id: task.id, type: 'wrong_type' }), 'utf-8');
+
+    const findings = checkProjectionConsistency(ctx);
+    const errors = findings.filter((f) => f.level === 'error' && f.category === 'projections');
+    expect(errors.length).toBeGreaterThanOrEqual(1);
+    expect(errors.some((f) => f.message.includes('corrupted'))).toBe(true);
+  });
+
+  it('reports stale projection as warn (event seq > _meta.lastSequence)', () => {
+    const task = createTask(ctx, { title: 'Stale task' });
+    rebuildAllProjections(ctx);
+
+    // Manually rewrite projection with lagging lastSequence
+    const projPath = join(ctx.paths.taskProjectionsDir, `${task.id}.json`);
+    const eventsPath = join(ctx.paths.eventsDir, 'events.jsonl');
+    const eventsRaw = readFileSync(eventsPath, 'utf-8');
+    const lines = eventsRaw.split('\n').filter((l: string) => l !== '');
+    const maxSeq = Math.max(
+      ...lines.map((l: string) => JSON.parse(l).sequence as number),
+    );
+
+    const projRaw = JSON.parse(readFileSync(projPath, 'utf-8')) as Record<string, unknown>;
+    (projRaw._meta as Record<string, unknown>).lastSequence = maxSeq - 5;
+    writeFileSync(projPath, JSON.stringify(projRaw), 'utf-8');
+
+    const findings = checkProjectionConsistency(ctx);
+    const warns = findings.filter((f) => f.level === 'warn' && f.category === 'projections');
+    expect(warns.some((f) => f.message.includes('stale'))).toBe(true);
   });
 });
 

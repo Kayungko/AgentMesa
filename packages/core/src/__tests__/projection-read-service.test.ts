@@ -196,7 +196,7 @@ describe('strict validation', () => {
 
     const list = listTaskProjections(ctx, { strict: false });
     expect(list).toHaveLength(1);
-    expect(list[0].id).toBe(task.id);
+    expect(list[0]!.id).toBe(task.id);
   });
 
   it('listMeetingProjections strict=false skips schema-invalid file', () => {
@@ -208,7 +208,7 @@ describe('strict validation', () => {
 
     const list = listMeetingProjections(ctx, { strict: false });
     expect(list).toHaveLength(1);
-    expect(list[0].id).toBe(meeting.id);
+    expect(list[0]!.id).toBe(meeting.id);
   });
 
   it('listAgentProjections strict=false skips corrupted file', () => {
@@ -220,6 +220,6 @@ describe('strict validation', () => {
 
     const list = listAgentProjections(ctx, { strict: false });
     expect(list).toHaveLength(1);
-    expect(list[0].id).toBe('ag-survivor');
+    expect(list[0]!.id).toBe('ag-survivor');
   });
 });
