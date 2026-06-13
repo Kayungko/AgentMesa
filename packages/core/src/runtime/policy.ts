@@ -20,6 +20,7 @@ type Capability =
   | 'change_status'
   | 'post_message'
   | 'create_artifact'
+  | 'archive_task'
   | 'delete_task'
   | 'manage_agents'
   | 'manage_meetings';
@@ -32,6 +33,7 @@ const ACTION_CAPABILITY: Record<string, Capability> = {
   'task.create': 'write_task',
   'task.updateStatus': 'change_status',
   'task.assign': 'write_task',
+  'task.archive': 'archive_task',
   'task.delete': 'delete_task',
   'meeting.create': 'manage_meetings',
   'meeting.updateStatus': 'manage_meetings',
@@ -45,7 +47,7 @@ const ACTION_CAPABILITY: Record<string, Capability> = {
 const ROLE_CAPABILITIES: Record<string, Capability[]> = {
   chair: [
     'read_task', 'write_task', 'change_status', 'post_message',
-    'create_artifact', 'delete_task', 'manage_agents', 'manage_meetings',
+    'create_artifact', 'archive_task', 'delete_task', 'manage_agents', 'manage_meetings',
   ],
   planner: [
     'read_task', 'write_task', 'post_message', 'manage_meetings',
@@ -64,7 +66,7 @@ const ROLE_CAPABILITIES: Record<string, Capability[]> = {
   ],
   maintainer: [
     'read_task', 'write_task', 'change_status', 'post_message',
-    'create_artifact', 'delete_task', 'manage_agents', 'manage_meetings',
+    'create_artifact', 'archive_task', 'delete_task', 'manage_agents', 'manage_meetings',
   ],
   researcher: [
     'read_task', 'post_message', 'create_artifact',

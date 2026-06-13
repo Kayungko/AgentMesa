@@ -211,7 +211,7 @@ export function deleteTask(ctx: MesaRuntimeContext, taskId: string): boolean {
  * projection is marked deleted=true with deletedAt set to the event timestamp.
  */
 export function archiveTask(ctx: MesaRuntimeContext, taskId: string): MesaTask {
-  assertPolicy(ctx, 'task.delete', `task:${taskId}`);
+  assertPolicy(ctx, 'task.archive', `task:${taskId}`);
   const task = getTask(ctx, taskId);
 
   const archived: MesaTask = {

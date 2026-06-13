@@ -105,4 +105,34 @@ describe('RoleBasedPolicyEngine', () => {
     expect(result.reason).toContain('tester');
     expect(result.reason).toContain('meeting.create');
   });
+
+  it('treats archive and delete as independent capabilities', () => {
+    // builder can NOT archive (no archive_task)
+    const b = actor({ roles: ['builder'] });
+    expect(policy.can(b, 'task.archive', 't1').allowed).toBe(false);
+    expect(policy.can(b, 'task.delete', 't1').allowed).toBe(false);
+
+    // chair can both archive and delete
+    const c = actor({ roles: ['chair'] });
+    expect(policy.can(c, 'task.archive', 't1').allowed).toBe(true);
+    expect(policy.can(c, 'task.delete', 't1').allowed).toBe(true);
+
+    // maintainer can both archive and delete
+    const m = actor({ roles: ['maintainer'] });
+    expect(policy.can(m, 'task.archive', 't1').allowed).toBe(true);
+    expect(policy.can(m, 'task.delete', 't1').allowed).toBe(true);
+  });
+
+  it('grants archive_task only to chair and maintainer', () => {
+    const chair = actor({ roles: ['chair'] });
+    expect(policy.can(chair, 'task.archive', 't1').allowed).toBe(true);
+
+    const maintainer = actor({ roles: ['maintainer'] });
+    expect(policy.can(maintainer, 'task.archive', 't1').allowed).toBe(true);
+
+    // planner, reviewer, tester, documenter, researcher, builder lack archive_task
+    for (const role of ['planner', 'reviewer', 'tester', 'documenter', 'researcher', 'builder'] as const) {
+      expect(policy.can(actor({ roles: [role] }), 'task.archive', 't1').allowed).toBe(false);
+    }
+  });
 });
