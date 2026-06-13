@@ -9,7 +9,7 @@ Core services append protocol events for task creation/status/assignment/deletio
 
 These runtime events are useful for policy/audit attribution tests, but they are not yet durable and they are not the source of truth. The durable state is still the readable JSON files under `.agentmesa/`. Event-backed State begins when these events move to an append-only persistent log and projections can be rebuilt from them.
 
-The current protocol event names use underscore literals such as `task_created`, `task_deleted`, `meeting_status_changed`, `meeting_task_added`, `meeting_agent_added`, `message_sent`, `artifact_created`, and `agent_registered`. The dot-delimited names below describe the long-term product model and may be reconciled in a future protocol version.
+Event type names are frozen as underscore literals (`task_created`, `task_status_changed`, ...) in the `eventTypeSchema` enum in `packages/protocol/src/schemas.ts`. That enum is the single source of truth for the vocabulary: the `EventType` TypeScript union is inferred from it, and a test in `schemas.test.ts` locks the exact set so any addition or rename is a deliberate, reviewed change. Because the event log is append-only, this naming is permanent once written to disk. The tables below use that frozen vocabulary.
 
 ## 1. Event Model
 
@@ -18,7 +18,7 @@ Every state change in AgentMesa is recorded as a **MesaEvent**. Events are the s
 ```ts
 interface MesaEvent {
   id: string;          // event_<ulid>
-  type: string;        // dot-delimited event type, e.g. "task.created"
+  type: string;        // underscore event type, e.g. "task_created" (see eventTypeSchema)
   streamId: string;    // task or meeting id that owns this stream
   data: Record<string, unknown>;  // event payload
   actor: string;       // agent or user id that caused the event
@@ -29,7 +29,7 @@ interface MesaEvent {
 
 Key invariants:
 - Events are immutable once written. The `.jsonl` file is append-only.
-- The `version` field enables schema evolution without rewriting history.
+- The schema version enables schema evolution without rewriting history.
 - `streamId` partitions events per logical aggregate (one stream per task, one per meeting).
 - Every event carries `actor` so the audit trail identifies who performed each action.
 
@@ -41,53 +41,60 @@ The current state of any entity is a **projection** rebuilt by replaying its str
 
 | Type | Payload | Meaning |
 |---|---|---|
-| `task.created` | `{ title, createdBy, meetingId?, branch?, context? }` | A new task is created |
-| `task.status_changed` | `{ previousStatus, newStatus, reason? }` | Task transitions between status states |
-| `task.assigned` | `{ previousAssignee?, newAssignee, reviewer? }` | Agent assignment (or re-assignment) |
+| `task_created` | `{ title, createdBy, meetingId?, branch?, context? }` | A new task is created |
+| `task_status_changed` | `{ previousStatus, newStatus, reason? }` | Task transitions between status states |
+| `task_assigned` | `{ previousAssignee?, newAssignee, reviewer? }` | Agent assignment (or re-assignment) |
+| `task_deleted` | `{ reason? }` | A task is removed from the workspace |
 
 ### Meeting Events
 
 | Type | Payload | Meaning |
 |---|---|---|
-| `meeting.created` | `{ title, agents[] }` | A new collaboration meeting is opened |
-| `meeting.closed` | `{ reason? }` | A meeting is closed (further messages blocked) |
+| `meeting_created` | `{ title, agents[] }` | A new collaboration meeting is opened |
+| `meeting_status_changed` | `{ previousStatus, newStatus, reason? }` | Meeting changes status (e.g. closed — further messages blocked) |
+| `meeting_task_added` | `{ taskId }` | A task is added to the meeting |
+| `meeting_agent_added` | `{ agentId }` | An agent joins the meeting |
 
 ### Message Events
 
 | Type | Payload | Meaning |
 |---|---|---|
-| `message.posted` | `{ taskId?, threadId?, replyTo?, from, to?, type, summary, artifactIds? }` | An agent posts a structured message |
+| `message_sent` | `{ taskId?, threadId?, replyTo?, from, to?, type, summary, artifactIds? }` | An agent posts a structured message |
 
 ### Artifact Events
 
 | Type | Payload | Meaning |
 |---|---|---|
-| `artifact.attached` | `{ kind, taskId?, meetingId?, createdBy, format?, metadata? }` | A durable artifact is attached to a task or meeting |
+| `artifact_created` | `{ kind, taskId?, meetingId?, createdBy, format?, metadata? }` | A durable artifact is attached to a task or meeting |
 
 ### Decision Events
 
 | Type | Payload | Meaning |
 |---|---|---|
-| `decision.recorded` | `{ meetingId, taskId?, decidedBy, options[], selectedOption, rationale }` | A formal decision is recorded |
+| `decision_made` | `{ meetingId, taskId?, decidedBy, options[], selectedOption, rationale }` | A formal decision is recorded |
 
 ### Agent Events
 
 | Type | Payload | Meaning |
 |---|---|---|
-| `agent.registered` | `{ name, client, roles[], capabilities }` | An agent registers itself with Mesa |
+| `agent_registered` | `{ name, client, roles[], capabilities }` | An agent registers itself with Mesa |
+| `agent_joined` | `{ meetingId }` | An agent joins a meeting |
+| `agent_left` | `{ meetingId, reason? }` | An agent leaves a meeting |
 
 ### Check Events
 
 | Type | Payload | Meaning |
 |---|---|---|
-| `check.completed` | `{ checkId, result, output?, artifactId? }` | A CI check, test run, or policy check completes |
+| `check_completed` | `{ checkId, result, output?, artifactId? }` | A CI check, test run, or policy check completes |
 
 ### Run Events
 
 | Type | Payload | Meaning |
 |---|---|---|
-| `run.started` | `{ runId, agentId, taskId?, prompt }` | An agent run is started |
-| `run.completed` | `{ runId, exitCode, output?, error? }` | An agent run finishes (success or failure) |
+| `run_started` | `{ runId, agentId, taskId?, prompt }` | An agent run is started |
+| `run_completed` | `{ runId, exitCode, output?, error? }` | An agent run finishes (success or failure) |
+
+The remaining frozen types `thread_created` and `thread_resolved` track discussion-thread lifecycle within a meeting.
 
 ## 3. EventStore Interface
 
@@ -127,11 +134,11 @@ A **projection** is a denormalized JSON snapshot of an entity's current state, b
 
 ```
 events for stream "task_abc123" in order:
-  task.created       → create skeleton Task { id, title, status: "todo", ... }
-  task.assigned      → set assignedTo = "codex"
-  task.status_changed → set status = "in_progress"
-  artifact.attached  → add artifact id to task.artifactIds
-  task.status_changed → set status = "ready_for_review"
+  task_created        → create skeleton Task { id, title, status: "todo", ... }
+  task_assigned       → set assignedTo = "codex"
+  task_status_changed → set status = "in_progress"
+  artifact_created    → add artifact id to task.artifactIds
+  task_status_changed → set status = "ready_for_review"
 
 → final Task JSON written to .agentmesa/projections/tasks/task_abc123.json
 ```
@@ -213,16 +220,16 @@ A meeting timeline is built by collecting events from all streams that participa
 The result is a complete chronological timeline:
 
 ```
-[09:00] meeting.created         -- Planning session opened
-[09:05] task.created            -- "Implement QR login"
-[09:05] task.assigned           -- assigned to claude
-[09:06] agent.registered        -- codex joins
-[09:30] task.status_changed     -- in_progress → ready_for_review
-[09:31] message.posted          -- claude → codex: review_request
-[09:32] artifact.attached       -- implementation summary
-[10:00] check.completed         -- CI: tests pass
-[10:15] message.posted          -- codex → claude: review_result
-[10:20] decision.recorded       -- approve with minor changes
+[09:00] meeting_created         -- Planning session opened
+[09:05] task_created            -- "Implement QR login"
+[09:05] task_assigned           -- assigned to claude
+[09:06] agent_registered        -- codex joins
+[09:30] task_status_changed     -- in_progress → ready_for_review
+[09:31] message_sent            -- claude → codex: review_request
+[09:32] artifact_created        -- implementation summary
+[10:00] check_completed         -- CI: tests pass
+[10:15] message_sent            -- codex → claude: review_result
+[10:20] decision_made           -- approve with minor changes
 ```
 
 The Mesa Desk visual dashboard renders this timeline as a chronological feed. The CLI can output it with `mesa timeline --meeting <id>`.

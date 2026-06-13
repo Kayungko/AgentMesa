@@ -20,6 +20,7 @@ import {
   CreateThreadInputSchema,
   CreateDecisionInputSchema,
   CreateAgentRunInputSchema,
+  eventTypeSchema,
 } from '../schemas.js';
 
 // ---------------------------------------------------------------------------
@@ -455,6 +456,33 @@ describe('MesaEventSchema', () => {
   it('rejects invalid event type', () => {
     const result = MesaEventSchema.safeParse({ ...validEvent, type: 'invalid_type' });
     expect(result.success).toBe(false);
+  });
+
+  // The event vocabulary is the append-only audit contract: once these names are
+  // written to disk they can never be rewritten. This locks the frozen set so any
+  // addition or rename is a deliberate, reviewed change rather than silent drift.
+  it('freezes the event type vocabulary (underscore form)', () => {
+    expect(eventTypeSchema.options).toEqual([
+      'task_created',
+      'task_status_changed',
+      'task_assigned',
+      'task_deleted',
+      'meeting_created',
+      'meeting_status_changed',
+      'meeting_task_added',
+      'meeting_agent_added',
+      'agent_joined',
+      'agent_left',
+      'agent_registered',
+      'message_sent',
+      'artifact_created',
+      'decision_made',
+      'run_started',
+      'run_completed',
+      'check_completed',
+      'thread_created',
+      'thread_resolved',
+    ]);
   });
 });
 

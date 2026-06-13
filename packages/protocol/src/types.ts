@@ -21,6 +21,7 @@ import type {
   MesaAgentRunSchema,
   MesaCheckResultSchema,
   MesaRepositorySchema,
+  eventTypeSchema,
 } from './schemas.js';
 
 import type { z } from 'zod';
@@ -122,26 +123,9 @@ export type TaskKind =
 
 export type ThreadResolution = 'unresolved' | 'resolved' | 'stale';
 
-export type EventType =
-  | 'task_created'
-  | 'task_status_changed'
-  | 'task_assigned'
-  | 'task_deleted'
-  | 'meeting_created'
-  | 'meeting_status_changed'
-  | 'meeting_task_added'
-  | 'meeting_agent_added'
-  | 'agent_joined'
-  | 'agent_left'
-  | 'agent_registered'
-  | 'message_sent'
-  | 'artifact_created'
-  | 'decision_made'
-  | 'run_started'
-  | 'run_completed'
-  | 'check_completed'
-  | 'thread_created'
-  | 'thread_resolved';
+// EventType is inferred from the schema enum — the schema is the single source
+// of truth for the append-only event vocabulary, so the type cannot drift from it.
+export type EventType = z.infer<typeof eventTypeSchema>;
 
 export type TransportKind = 'file' | 'mcp' | 'http' | 'websocket' | 'github' | 'ci';
 

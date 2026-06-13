@@ -107,7 +107,7 @@ const taskKindSchema = z.enum([
 
 const threadResolutionSchema = z.enum(['unresolved', 'resolved', 'stale']);
 
-const eventTypeSchema = z.enum([
+export const eventTypeSchema = z.enum([
   'task_created',
   'task_status_changed',
   'task_assigned',
