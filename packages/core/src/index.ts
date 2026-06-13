@@ -16,6 +16,7 @@ export * from './services/artifact-service.js';
 export * from './services/agent-registry.js';
 export * from './services/lock-manager.js';
 export * from './services/event-service.js';
+export * from './services/projection-schemas.js';
 export * from './services/projection-service.js';
 export * from './services/projection-read-service.js';
 export * from './services/diagnostics.js';

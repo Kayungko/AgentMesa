@@ -1,6 +1,11 @@
 import type { MesaEvent } from '@agentmesa/protocol';
 import { join } from 'node:path';
-import { MesaError } from '../errors.js';
+import {
+  TaskProjectionSchema,
+  MeetingProjectionSchema,
+  AgentProjectionSchema,
+  type ProjectionMeta,
+} from './projection-schemas.js';
 import type { MesaRuntimeContext } from '../runtime/types.js';
 
 export interface RebuildOptions {
@@ -8,46 +13,10 @@ export interface RebuildOptions {
   clean?: boolean;
 }
 
-// --- Lightweight projection validation ---
-
-interface ProjectionMeta {
-  source: 'event_rebuild';
-  rebuiltAt: string;
-  lastEventId: string;
-  lastSequence: number;
-  projectionVersion: 1;
-}
-
-function validateMeta(raw: unknown): ProjectionMeta {
-  const m = raw as Record<string, unknown>;
-  if (
-    typeof m !== 'object' || m === null ||
-    m.source !== 'event_rebuild' ||
-    typeof m.rebuiltAt !== 'string' ||
-    typeof m.lastEventId !== 'string' ||
-    typeof m.lastSequence !== 'number' ||
-    m.projectionVersion !== 1
-  ) {
-    throw new MesaError('STORAGE_ERROR', 'Invalid projection metadata');
-  }
-  return m as unknown as ProjectionMeta;
-}
-
-function assertStringOrUndefined(val: unknown): string | undefined {
-  if (val === undefined) return undefined;
-  if (typeof val !== 'string') throw new MesaError('STORAGE_ERROR', `Expected string, got ${typeof val}`);
-  return val;
-}
-
 function validateProjection(raw: Record<string, unknown>, type: string): void {
-  if (typeof raw.id !== 'string' || raw.type !== type) {
-    throw new MesaError('STORAGE_ERROR', `Invalid ${type} projection: missing id or wrong type`);
-  }
-  validateMeta(raw._meta);
-  if (type === 'meeting') {
-    if (!Array.isArray(raw.taskIds)) throw new MesaError('STORAGE_ERROR', 'Meeting projection missing taskIds');
-    if (!Array.isArray(raw.agentIds)) throw new MesaError('STORAGE_ERROR', 'Meeting projection missing agentIds');
-  }
+  if (type === 'task') TaskProjectionSchema.parse(raw);
+  else if (type === 'meeting') MeetingProjectionSchema.parse(raw);
+  else AgentProjectionSchema.parse(raw);
 }
 
 // --- Replay helpers ---
