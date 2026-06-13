@@ -3,6 +3,7 @@ import { currentProtocolVersion } from '@agentmesa/protocol';
 import { MesaError } from '../errors.js';
 import { createWorkspacePaths } from '../workspace.js';
 import { InMemoryMesaEventStore } from './event-store.js';
+import { FileEventStore } from './file-event-store.js';
 import { FileStorageAdapter } from './file-storage-adapter.js';
 import { createConsoleLogger } from './logger.js';
 import { AllowAllMesaPolicyEngine } from './policy.js';
@@ -29,6 +30,11 @@ export function createRuntimeContext(
     paths.agentsDir,
     paths.logsDir,
     paths.locksDir,
+    paths.eventsDir,
+    paths.projectionsDir,
+    paths.taskProjectionsDir,
+    paths.meetingProjectionsDir,
+    paths.agentProjectionsDir,
   ]) {
     storage.ensureDirectory(directory);
   }
@@ -42,7 +48,7 @@ export function createRuntimeContext(
     config,
     actor: options.actor,
     storage,
-    eventStore: options.eventStore ?? new InMemoryMesaEventStore(),
+    eventStore: options.eventStore ?? new FileEventStore(paths.eventsDir),
     policy: options.policy ?? new AllowAllMesaPolicyEngine(),
     logger: options.logger ?? createConsoleLogger(options.actor),
   };
