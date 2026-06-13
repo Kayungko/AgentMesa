@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { initWorkspace } from '../workspace.js';
 import type { MesaWorkspacePaths } from '../workspace.js';
 import { createRuntimeContext } from '../runtime/create-runtime-context.js';
 import type { MesaRuntimeContext } from '../runtime/types.js';
+import { MesaError } from '../errors.js';
 import { createTask } from '../services/task-service.js';
 import { createMeeting } from '../services/meeting-service.js';
 import { registerAgent } from '../services/agent-registry.js';
@@ -141,5 +142,84 @@ describe('listAgentProjections', () => {
   it('returns empty array when no rebuild has run', () => {
     registerAgent(ctx, { id: 'agent-99', name: 'A99', client: 'claude', roles: ['reviewer'], status: 'available' });
     expect(listAgentProjections(ctx)).toEqual([]);
+  });
+});
+
+// --- Strict vs lenient validation ---
+
+describe('strict validation', () => {
+  it('getTaskProjection throws MesaError on corrupted JSON', () => {
+    const taskDir = ctx.paths.taskProjectionsDir;
+    mkdirSync(taskDir, { recursive: true });
+    writeFileSync(join(taskDir, 'task-bad-json.json'), 'not json {{{');
+
+    expect(() => getTaskProjection(ctx, 'task-bad-json')).toThrow(MesaError);
+    expect(() => getTaskProjection(ctx, 'task-bad-json')).toThrow(/Corrupted projection/);
+  });
+
+  it('getTaskProjection with strict=false returns null on corrupted JSON', () => {
+    const taskDir = ctx.paths.taskProjectionsDir;
+    mkdirSync(taskDir, { recursive: true });
+    writeFileSync(join(taskDir, 'task-lenient.json'), 'not json {{{');
+
+    expect(getTaskProjection(ctx, 'task-lenient', { strict: false })).toBeNull();
+  });
+
+  it('getMeetingProjection throws on schema-invalid JSON', () => {
+    const meetingDir = ctx.paths.meetingProjectionsDir;
+    mkdirSync(meetingDir, { recursive: true });
+    writeFileSync(join(meetingDir, 'mtg-bad.json'), JSON.stringify({ id: 'mtg-bad', type: 'wrong_type' }));
+
+    expect(() => getMeetingProjection(ctx, 'mtg-bad')).toThrow(MesaError);
+    expect(() => getMeetingProjection(ctx, 'mtg-bad')).toThrow(/Invalid meeting projection/);
+  });
+
+  it('listTaskProjections strict mode throws on bad file', () => {
+    // First create a valid projection
+    const task = createTask(ctx, { title: 'Good task' });
+    rebuildAllProjections(ctx);
+
+    // Then corrupt one of the projection files
+    const taskDir = ctx.paths.taskProjectionsDir;
+    writeFileSync(join(taskDir, 'task-broken.json'), 'not json {{{');
+
+    expect(() => listTaskProjections(ctx)).toThrow(MesaError);
+    expect(() => listTaskProjections(ctx, { strict: true })).toThrow(MesaError);
+  });
+
+  it('listTaskProjections strict=false skips bad files', () => {
+    const task = createTask(ctx, { title: 'Survivor' });
+    rebuildAllProjections(ctx);
+
+    const taskDir = ctx.paths.taskProjectionsDir;
+    writeFileSync(join(taskDir, 'task-corrupt.json'), 'not json {{{');
+
+    const list = listTaskProjections(ctx, { strict: false });
+    expect(list).toHaveLength(1);
+    expect(list[0].id).toBe(task.id);
+  });
+
+  it('listMeetingProjections strict=false skips schema-invalid file', () => {
+    const meeting = createMeeting(ctx, { title: 'Real meeting' });
+    rebuildAllProjections(ctx);
+
+    const meetingDir = ctx.paths.meetingProjectionsDir;
+    writeFileSync(join(meetingDir, 'fake.json'), JSON.stringify({ id: 'fake', type: 'wrong' }));
+
+    const list = listMeetingProjections(ctx, { strict: false });
+    expect(list).toHaveLength(1);
+    expect(list[0].id).toBe(meeting.id);
+  });
+
+  it('listAgentProjections strict=false skips corrupted file', () => {
+    registerAgent(ctx, { id: 'ag-survivor', name: 'Survivor', client: 'claude', roles: ['builder'], status: 'available' });
+    rebuildAllProjections(ctx);
+
+    const agentDir = ctx.paths.agentProjectionsDir;
+    writeFileSync(join(agentDir, 'corrupt.json'), '{{{broken');
+
+    const list = listAgentProjections(ctx, { strict: false });
+    expect(list).toHaveLength(1);
+    expect(list[0].id).toBe('ag-survivor');
   });
 });
