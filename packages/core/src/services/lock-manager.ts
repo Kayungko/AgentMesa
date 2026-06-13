@@ -20,7 +20,7 @@ function lockPathFor(ctx: MesaRuntimeContext, resource: string): string {
   return join(ctx.paths.locksDir, `${safeName}.lock`);
 }
 
-export function acquireLock(ctx: MesaRuntimeContext, resource: string): void {
+export function acquireLock(ctx: MesaRuntimeContext, resource: string): string {
   ctx.storage.ensureDirectory(ctx.paths.locksDir);
   const lockPath = lockPathFor(ctx, resource);
 
@@ -48,9 +48,30 @@ export function acquireLock(ctx: MesaRuntimeContext, resource: string): void {
     }
     throw new LockError(resource, `already locked by ${heldBy}`);
   }
+
+  return lockData.token;
 }
 
-export function releaseLock(ctx: MesaRuntimeContext, resource: string): void {
+export function releaseLock(ctx: MesaRuntimeContext, resource: string, token: string): void {
+  const lockPath = lockPathFor(ctx, resource);
+
+  if (!existsSync(lockPath)) {
+    return;
+  }
+
+  const data = JSON.parse(readFileSync(lockPath, 'utf-8')) as LockData;
+  if (data.token !== token) {
+    throw new LockError(resource, 'token mismatch: lock held by different caller');
+  }
+
+  try {
+    unlinkSync(lockPath);
+  } catch {
+    throw new LockError(resource, 'failed to release lock');
+  }
+}
+
+export function releaseLockUnsafe(ctx: MesaRuntimeContext, resource: string): void {
   const lockPath = lockPathFor(ctx, resource);
 
   if (!existsSync(lockPath)) {
@@ -74,10 +95,10 @@ export function isLocked(ctx: MesaRuntimeContext, resource: string): boolean {
  * so a lock is never leaked on failure.
  */
 export function withLock<T>(ctx: MesaRuntimeContext, resource: string, fn: () => T): T {
-  acquireLock(ctx, resource);
+  const token = acquireLock(ctx, resource);
   try {
     return fn();
   } finally {
-    releaseLock(ctx, resource);
+    releaseLock(ctx, resource, token);
   }
 }
