@@ -103,8 +103,25 @@ export class FileStorageAdapter implements MesaStorageAdapter {
 }
 
 /**
+ * List orphaned atomic-write temp files left behind by a crash mid-write,
+ * without removing them. Used by `mesa doctor` to report before `--fix` cleans.
+ */
+export function findOrphanedTempFiles(dirs: string[]): string[] {
+  const found: string[] = [];
+  for (const dir of dirs) {
+    if (!existsSync(dir)) continue;
+    for (const name of readdirSync(dir)) {
+      if (name.startsWith(TEMP_FILE_MARKER)) {
+        found.push(join(dir, name));
+      }
+    }
+  }
+  return found;
+}
+
+/**
  * Remove orphaned atomic-write temp files left behind by a crash mid-write.
- * Returns the number of files removed. Used by `mesa doctor` as a diagnostic.
+ * Returns the number of files removed. Used by `mesa doctor --fix`.
  */
 export function cleanOrphanedTempFiles(dirs: string[]): number {
   let removed = 0;

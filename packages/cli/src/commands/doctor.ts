@@ -3,6 +3,7 @@ import {
   loadConfig,
   createWorkspacePaths,
   cleanOrphanedTempFiles,
+  findOrphanedTempFiles,
 } from '@agentmesa/core';
 import { existsSync } from 'node:fs';
 import type { ParsedArgs } from '../parse-args.js';
@@ -54,17 +55,31 @@ export function runDoctor(args: ParsedArgs): void {
       issues++;
     }
 
-    const removed = cleanOrphanedTempFiles([
+    const tempDirs = [
       paths.tasksDir,
       paths.messagesDir,
       paths.artifactsDir,
       paths.meetingsDir,
       paths.agentsDir,
-    ]);
-    if (removed > 0) {
-      printWarning(`Removed ${removed} orphaned temp file(s) from interrupted writes.`);
+    ];
+    const fix = args.flags.fix === true;
+    if (fix) {
+      const removed = cleanOrphanedTempFiles(tempDirs);
+      if (removed > 0) {
+        printWarning(`Removed ${removed} orphaned temp file(s) from interrupted writes.`);
+      } else {
+        printSuccess('No orphaned temp files.');
+      }
     } else {
-      printSuccess('No orphaned temp files.');
+      const orphaned = findOrphanedTempFiles(tempDirs);
+      if (orphaned.length > 0) {
+        printWarning(
+          `Found ${orphaned.length} orphaned temp file(s) from interrupted writes. Run "mesa doctor --fix" to remove them.`,
+        );
+        issues++;
+      } else {
+        printSuccess('No orphaned temp files.');
+      }
     }
   }
 

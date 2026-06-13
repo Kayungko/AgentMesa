@@ -6,6 +6,7 @@ import {
   FileStorageAdapter,
   TEMP_FILE_MARKER,
   cleanOrphanedTempFiles,
+  findOrphanedTempFiles,
 } from '../runtime/file-storage-adapter.js';
 
 let testDir: string;
@@ -47,6 +48,23 @@ describe('FileStorageAdapter.list', () => {
     storage.writeText(join(testDir, 'real.json'), '{}');
     writeFileSync(join(testDir, `${TEMP_FILE_MARKER}999-0`), 'partial');
     expect(storage.list(testDir)).toEqual(['real.json']);
+  });
+});
+
+describe('findOrphanedTempFiles', () => {
+  it('lists temp files without removing them', () => {
+    writeFileSync(join(testDir, `${TEMP_FILE_MARKER}1-0`), 'x');
+    storage.writeText(join(testDir, 'keep.json'), '{}');
+
+    const found = findOrphanedTempFiles([testDir]);
+    expect(found).toHaveLength(1);
+    expect(found[0]).toContain(TEMP_FILE_MARKER);
+    // report-only: the file is still on disk
+    expect(readdirSync(testDir).some((n) => n.startsWith(TEMP_FILE_MARKER))).toBe(true);
+  });
+
+  it('returns an empty array for directories that do not exist', () => {
+    expect(findOrphanedTempFiles([join(testDir, 'missing')])).toEqual([]);
   });
 });
 

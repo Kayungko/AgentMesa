@@ -59,7 +59,7 @@ Usage: mesa <command> [subcommand] [options]
 
 Commands:
   init                        Initialize AgentMesa workspace
-  doctor                      Check workspace health
+  doctor [--fix]              Check workspace health (--fix removes orphaned temp files)
   task create <title>         Create a new task
   task list                   List all tasks
   task show <id>              Show task details
