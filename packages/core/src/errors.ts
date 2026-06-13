@@ -9,7 +9,9 @@ export type MesaErrorCode =
   | 'LOCK_ERROR'
   | 'POLICY_DENIED'
   | 'VALIDATION_ERROR'
-  | 'STORAGE_ERROR';
+  | 'STORAGE_ERROR'
+  | 'PROJECTION_MISSING'
+  | 'PROJECTION_STALE';
 
 export class MesaError extends Error {
   readonly code: MesaErrorCode;

@@ -41,9 +41,9 @@ Projection freshness checks:
 - `listTaskReadModels(ctx)` / `listMeetingReadModels(ctx)` / `listAgentReadModels(ctx)`
   return all entities of that type.
 - The read mode is controlled by `config.readModel.mode`:
-  - `hybrid` (default): try projections first, fall back to legacy files
-  - `projection`: only read from event-rebuilt projections
-  - `legacy`: only read from `.agentmesa/tasks/` etc. (backward compatible)
+  - `projection`: strict mode — missing/stale/corrupt projections throw `MesaError` (no legacy fallback). Error messages prompt "Run mesa rebuild".
+  - `hybrid` (default): compatibility migration mode — returns fresh projection when available; warns and falls back to legacy on missing, stale, or corrupted projections.
+  - `legacy`: never reads projections — always returns legacy JSON from `.agentmesa/tasks/` etc.
 - The CLI `show` and `list` commands for task, meeting, and agent all use the read-model-service.
 
 Task lifecycle semantics:

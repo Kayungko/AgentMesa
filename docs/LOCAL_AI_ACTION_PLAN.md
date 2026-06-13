@@ -100,7 +100,7 @@ Acceptance:
 
 ## Priority 4: Event-Backed State
 
-Status: `authoritative_read_path_implemented` (+ read model, freshness, CLI migration)
+Status: `read_path_hardened` (+ strict projection mode, freshness enforcement, warn+fallback hybrid)
 
 - FileEventStore: append-only JSONL at `.agentmesa/events/events.jsonl`, validates against MesaEventSchema.
 - Default `MesaRuntimeContext` eventStore is `FileEventStore`; events survive process exit.
@@ -117,7 +117,8 @@ Status: `authoritative_read_path_implemented` (+ read model, freshness, CLI migr
 - **Authoritative read model:** `read-model-service.ts` provides `get*ReadModel` / `list*ReadModels`. Config `readModel.mode` controls `hybrid` (default, projection + legacy fallback), `projection`-only, or `legacy`-only reads.
 - **CLI migration complete:** `mesa task/meeting/agent list/show` use read-model-service. `mesa agent show <id>` added. `mesa rebuild` command available.
 - **Doctor alignment:** `mesa doctor` detects stale projections (freshness check) and reports fixable warnings.
-- Incremental rebuild and staleness auto-detection on read are not yet implemented.
+- **Read-model mode hardening complete:** `projection` mode throws `MesaError` on missing/stale/corrupt projections (no fallback). `hybrid` mode warns and falls back to legacy on missing/stale/corrupt projections. `legacy` mode never reads projections. Error messages prompt "Run mesa rebuild".
+- Incremental rebuild is not yet implemented.
 
 Direction:
 

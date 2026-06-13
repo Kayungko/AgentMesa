@@ -9,6 +9,7 @@ import {
   createMeeting,
   registerAgent,
   rebuildAllProjections,
+  updateTaskStatus,
 } from '../index.js';
 import type { MesaRuntimeContext, ReadModelMode } from '../index.js';
 import { FileStorageAdapter } from '../runtime/file-storage-adapter.js';
@@ -163,6 +164,35 @@ describe('read-model-service: tasks (hybrid default)', () => {
     expect(results[0]!.id).toBe(task.id);
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('projections corrupted'));
   });
+
+  it('warns and falls back when projection missing (hybrid mode)', () => {
+    const dir = makeCleanDir();
+    const ctx = makeContext(dir);
+    const task = createTask(ctx, { title: 'Hybrid missing' });
+
+    const warnSpy = vi.spyOn(ctx.logger, 'warn');
+
+    const result = getTaskReadModel(ctx, task.id);
+    expect(result).not.toBeNull();
+    expect(result!.id).toBe(task.id);
+    expect(result!.title).toBe('Hybrid missing');
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('projection missing'));
+  });
+
+  it('warns and falls back when projection stale (hybrid mode)', () => {
+    const dir = makeCleanDir();
+    const ctx = makeContext(dir);
+    const task = createTask(ctx, { title: 'Hybrid stale' });
+    rebuildAllProjections(ctx);
+    updateTaskStatus(ctx, task.id, 'in_progress');
+
+    const warnSpy = vi.spyOn(ctx.logger, 'warn');
+
+    const result = getTaskReadModel(ctx, task.id);
+    expect(result).not.toBeNull();
+    expect(result!.id).toBe(task.id);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('projection stale'));
+  });
 });
 
 describe('read-model-service: meetings (hybrid default)', () => {
@@ -253,13 +283,24 @@ describe('read-model-service: projection-only mode', () => {
     expect(result).not.toBeNull();
   });
 
-  it('returns null when projection is missing (no legacy fallback)', () => {
+  it('throws MesaError when projection is missing (projection mode)', () => {
     const dir = makeCleanDir();
     const ctx = makeContext(dir);
-    createTask(ctx, { title: 'Only in legacy' });
+    const task = createTask(ctx, { title: 'No projection' });
 
     const projCtx = switchMode(ctx, 'projection');
-    expect(getTaskReadModel(projCtx, 'nonexistent')).toBeNull();
+    expect(() => getTaskReadModel(projCtx, task.id)).toThrow(MesaError);
+  });
+
+  it('throws MesaError when projection is stale (projection mode)', () => {
+    const dir = makeCleanDir();
+    const ctx = makeContext(dir);
+    const task = createTask(ctx, { title: 'Go stale' });
+    rebuildAllProjections(ctx);
+    updateTaskStatus(ctx, task.id, 'in_progress');
+
+    const projCtx = switchMode(ctx, 'projection');
+    expect(() => getTaskReadModel(projCtx, task.id)).toThrow(MesaError);
   });
 
   it('lists only projections', () => {

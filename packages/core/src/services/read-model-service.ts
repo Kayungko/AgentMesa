@@ -10,26 +10,62 @@ import {
   listTaskProjections,
   listMeetingProjections,
   listAgentProjections,
+  isTaskProjectionFresh,
+  isMeetingProjectionFresh,
+  isAgentProjectionFresh,
 } from './projection-read-service.js';
 
 function readMode(ctx: MesaRuntimeContext): ReadModelMode {
   return ctx.config.readModel!.mode!;
 }
 
-function tryGetProjection<T>(
+function getReadModelViaProjection<T extends Record<string, unknown>>(
   ctx: MesaRuntimeContext,
-  getFn: () => T,
-  fallbackLabel: string,
+  id: string,
+  label: string,
+  getProjFn: () => T | null,
+  isFreshFn: () => boolean,
+  legacyGetFn: () => T | null,
 ): T | null {
-  try {
-    return getFn();
-  } catch (err) {
-    if (err instanceof MesaError) {
-      ctx.logger.warn(`${fallbackLabel} projection corrupted, falling back to legacy: ${err.message}`);
-      return null;
+  const mode = readMode(ctx);
+
+  // projection mode: strict — missing/stale/corrupt all throw
+  if (mode === 'projection') {
+    const proj = getProjFn();
+    if (!proj) {
+      throw new MesaError('PROJECTION_MISSING', `No projection found for ${label} "${id}". Run "mesa rebuild".`);
     }
-    throw err;
+    if (!isFreshFn()) {
+      throw new MesaError('PROJECTION_STALE', `Stale projection for ${label} "${id}". Run "mesa rebuild".`);
+    }
+    return proj;
   }
+
+  // hybrid mode: fallback to legacy with warn on any projection issue
+  if (mode === 'hybrid') {
+    let proj: T | null;
+    try {
+      proj = getProjFn();
+    } catch (err) {
+      if (err instanceof MesaError) {
+        ctx.logger.warn(`${label} projection corrupted, falling back to legacy: ${err.message}`);
+        return legacyGetFn();
+      }
+      throw err;
+    }
+    if (!proj) {
+      ctx.logger.warn(`${label} projection missing, falling back to legacy. Run "mesa rebuild".`);
+      return legacyGetFn();
+    }
+    if (!isFreshFn()) {
+      ctx.logger.warn(`${label} projection stale, falling back to legacy. Run "mesa rebuild".`);
+      return legacyGetFn();
+    }
+    return proj;
+  }
+
+  // legacy mode
+  return legacyGetFn();
 }
 
 function tryListProjections<T>(
@@ -49,30 +85,25 @@ function tryListProjections<T>(
 }
 
 export function getTaskReadModel(ctx: MesaRuntimeContext, taskId: string): Record<string, unknown> | null {
-  const mode = readMode(ctx);
-
-  if (mode === 'projection') {
-    return getTaskProjection(ctx, taskId); // strict:true by default
-  }
-
-  if (mode === 'hybrid') {
-    const proj = tryGetProjection(ctx, () => getTaskProjection(ctx, taskId), 'task');
-    if (proj !== null) return proj;
-  }
-
-  // legacy (or hybrid fallback)
-  try {
-    return getTask(ctx, taskId) as unknown as Record<string, unknown>;
-  } catch {
-    return null;
-  }
+  return getReadModelViaProjection(
+    ctx, taskId, 'task',
+    () => getTaskProjection(ctx, taskId),
+    () => isTaskProjectionFresh(ctx, taskId),
+    () => {
+      try {
+        return getTask(ctx, taskId) as unknown as Record<string, unknown>;
+      } catch {
+        return null;
+      }
+    },
+  );
 }
 
 export function listTaskReadModels(ctx: MesaRuntimeContext): Record<string, unknown>[] {
   const mode = readMode(ctx);
 
   if (mode === 'projection') {
-    return listTaskProjections(ctx); // strict:true by default
+    return listTaskProjections(ctx);
   }
 
   if (mode === 'hybrid') {
@@ -80,34 +111,29 @@ export function listTaskReadModels(ctx: MesaRuntimeContext): Record<string, unkn
     if (projs !== null && projs.length > 0) return projs;
   }
 
-  // legacy (or hybrid fallback when no projections exist)
   return listTasks(ctx) as unknown as Record<string, unknown>[];
 }
 
 export function getMeetingReadModel(ctx: MesaRuntimeContext, meetingId: string): Record<string, unknown> | null {
-  const mode = readMode(ctx);
-
-  if (mode === 'projection') {
-    return getMeetingProjection(ctx, meetingId); // strict:true by default
-  }
-
-  if (mode === 'hybrid') {
-    const proj = tryGetProjection(ctx, () => getMeetingProjection(ctx, meetingId), 'meeting');
-    if (proj !== null) return proj;
-  }
-
-  try {
-    return getMeeting(ctx, meetingId) as unknown as Record<string, unknown>;
-  } catch {
-    return null;
-  }
+  return getReadModelViaProjection(
+    ctx, meetingId, 'meeting',
+    () => getMeetingProjection(ctx, meetingId),
+    () => isMeetingProjectionFresh(ctx, meetingId),
+    () => {
+      try {
+        return getMeeting(ctx, meetingId) as unknown as Record<string, unknown>;
+      } catch {
+        return null;
+      }
+    },
+  );
 }
 
 export function listMeetingReadModels(ctx: MesaRuntimeContext): Record<string, unknown>[] {
   const mode = readMode(ctx);
 
   if (mode === 'projection') {
-    return listMeetingProjections(ctx); // strict:true by default
+    return listMeetingProjections(ctx);
   }
 
   if (mode === 'hybrid') {
@@ -119,29 +145,25 @@ export function listMeetingReadModels(ctx: MesaRuntimeContext): Record<string, u
 }
 
 export function getAgentReadModel(ctx: MesaRuntimeContext, agentId: string): Record<string, unknown> | null {
-  const mode = readMode(ctx);
-
-  if (mode === 'projection') {
-    return getAgentProjection(ctx, agentId); // strict:true by default
-  }
-
-  if (mode === 'hybrid') {
-    const proj = tryGetProjection(ctx, () => getAgentProjection(ctx, agentId), 'agent');
-    if (proj !== null) return proj;
-  }
-
-  try {
-    return getAgent(ctx, agentId) as unknown as Record<string, unknown>;
-  } catch {
-    return null;
-  }
+  return getReadModelViaProjection(
+    ctx, agentId, 'agent',
+    () => getAgentProjection(ctx, agentId),
+    () => isAgentProjectionFresh(ctx, agentId),
+    () => {
+      try {
+        return getAgent(ctx, agentId) as unknown as Record<string, unknown>;
+      } catch {
+        return null;
+      }
+    },
+  );
 }
 
 export function listAgentReadModels(ctx: MesaRuntimeContext): Record<string, unknown>[] {
   const mode = readMode(ctx);
 
   if (mode === 'projection') {
-    return listAgentProjections(ctx); // strict:true by default
+    return listAgentProjections(ctx);
   }
 
   if (mode === 'hybrid') {
