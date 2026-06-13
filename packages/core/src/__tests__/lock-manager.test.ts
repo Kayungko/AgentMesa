@@ -6,6 +6,7 @@ import { initWorkspace } from '../workspace.js';
 import { createRuntimeContext } from '../runtime/create-runtime-context.js';
 import type { MesaRuntimeContext } from '../runtime/types.js';
 import { acquireLock, releaseLock, releaseLockUnsafe, isLocked, withLock } from '../services/lock-manager.js';
+import type { AcquireLockOptions } from '../services/lock-manager.js';
 import { LockError } from '../errors.js';
 
 let testDir: string;
@@ -189,5 +190,39 @@ describe('lock token', () => {
     const token = acquireLock(ctx, 'wl-token-test');
     expect(isLocked(ctx, 'wl-token-test')).toBe(true);
     releaseLock(ctx, 'wl-token-test', token);
+  });
+});
+
+describe('acquireLock timeout / retry', () => {
+  it('throws immediately when timeoutMs is 0 (default)', () => {
+    acquireLock(ctx, 'timeout-immediate');
+    expect(() => acquireLock(ctx, 'timeout-immediate')).toThrow(LockError);
+  });
+
+  it('throws LockError on timeout', () => {
+    acquireLock(ctx, 'timeout-hold');
+    // timeoutMs=50 with a held lock should time out quickly
+    expect(() =>
+      acquireLock(ctx, 'timeout-hold', { timeoutMs: 50, retryIntervalMs: 10 }),
+    ).toThrow(LockError);
+    // Verify the error message mentions timeout
+    expect(() =>
+      acquireLock(ctx, 'timeout-hold', { timeoutMs: 50, retryIntervalMs: 10 }),
+    ).toThrow(/timed out/);
+  });
+
+  it('withLock forwards options to acquireLock', () => {
+    acquireLock(ctx, 'wl-options');
+    // withLock with timeout should fail since the lock is held
+    expect(() =>
+      withLock(ctx, 'wl-options', () => 'ok', { timeoutMs: 30, retryIntervalMs: 10 }),
+    ).toThrow(LockError);
+  });
+
+  it('default timeoutMs=0 preserves backward-compatible immediate throw', () => {
+    acquireLock(ctx, 'backward-compat');
+    expect(() => acquireLock(ctx, 'backward-compat')).toThrow(LockError);
+    // Verify the error does NOT mention timeout (immediate failure)
+    expect(() => acquireLock(ctx, 'backward-compat')).toThrow('already locked');
   });
 });

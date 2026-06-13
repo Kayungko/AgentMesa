@@ -11,6 +11,19 @@ interface LockData {
   acquiredAt: string;
 }
 
+export interface AcquireLockOptions {
+  timeoutMs?: number;
+  retryIntervalMs?: number;
+}
+
+function sleepSync(ms: number): void {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    // Busy-wait is acceptable here because lock contention is a short-lived,
+    // low-frequency operation and Node.js has no cross-platform synchronous sleep.
+  }
+}
+
 function lockPathFor(ctx: MesaRuntimeContext, resource: string): string {
   // Hash the resource into the filename: a resource id may contain ':', '/', or
   // Windows-illegal chars like '*', and a raw id could also escape locksDir via
@@ -20,9 +33,16 @@ function lockPathFor(ctx: MesaRuntimeContext, resource: string): string {
   return join(ctx.paths.locksDir, `${safeName}.lock`);
 }
 
-export function acquireLock(ctx: MesaRuntimeContext, resource: string): string {
+export function acquireLock(
+  ctx: MesaRuntimeContext,
+  resource: string,
+  options?: AcquireLockOptions,
+): string {
   ctx.storage.ensureDirectory(ctx.paths.locksDir);
   const lockPath = lockPathFor(ctx, resource);
+
+  const timeoutMs = options?.timeoutMs ?? 0;
+  const retryIntervalMs = options?.retryIntervalMs ?? 100;
 
   const lockData: LockData = {
     resource,
@@ -31,25 +51,32 @@ export function acquireLock(ctx: MesaRuntimeContext, resource: string): string {
     acquiredAt: new Date().toISOString(),
   };
 
-  try {
-    // `wx` fails if the file already exists, making lock creation atomic and
-    // free of the check-then-write race a plain existsSync + write would have.
-    writeFileSync(lockPath, JSON.stringify(lockData, null, 2), { encoding: 'utf-8', flag: 'wx' });
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
-      throw new LockError(resource, 'failed to acquire lock');
-    }
-    let heldBy = 'an unknown holder';
-    try {
-      const data = JSON.parse(readFileSync(lockPath, 'utf-8')) as LockData;
-      heldBy = `pid ${data.pid} since ${data.acquiredAt}`;
-    } catch {
-      throw new LockError(resource, 'lock file is corrupted');
-    }
-    throw new LockError(resource, `already locked by ${heldBy}`);
-  }
+  const startedAt = Date.now();
 
-  return lockData.token;
+  while (true) {
+    try {
+      writeFileSync(lockPath, JSON.stringify(lockData, null, 2), { encoding: 'utf-8', flag: 'wx' });
+      return lockData.token;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
+        throw new LockError(resource, 'failed to acquire lock');
+      }
+
+      const elapsed = Date.now() - startedAt;
+      if (elapsed >= timeoutMs) {
+        let heldBy = 'an unknown holder';
+        try {
+          const data = JSON.parse(readFileSync(lockPath, 'utf-8')) as LockData;
+          heldBy = `pid ${data.pid} since ${data.acquiredAt}`;
+        } catch {
+          throw new LockError(resource, 'lock file is corrupted');
+        }
+        throw new LockError(resource, `timed out after ${timeoutMs}ms — already locked by ${heldBy}`);
+      }
+
+      sleepSync(retryIntervalMs);
+    }
+  }
 }
 
 export function releaseLock(ctx: MesaRuntimeContext, resource: string, token: string): void {
@@ -94,8 +121,13 @@ export function isLocked(ctx: MesaRuntimeContext, resource: string): boolean {
  * throws. This is the entry point mutation paths (e.g. event append) should use
  * so a lock is never leaked on failure.
  */
-export function withLock<T>(ctx: MesaRuntimeContext, resource: string, fn: () => T): T {
-  const token = acquireLock(ctx, resource);
+export function withLock<T>(
+  ctx: MesaRuntimeContext,
+  resource: string,
+  fn: () => T,
+  options?: AcquireLockOptions,
+): T {
+  const token = acquireLock(ctx, resource, options);
   try {
     return fn();
   } finally {
