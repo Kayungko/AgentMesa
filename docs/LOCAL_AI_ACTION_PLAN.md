@@ -100,13 +100,15 @@ Acceptance:
 
 ## Priority 4: Event-Backed State
 
-Status: `file_event_store_done`
+Status: `projection_rebuild_done`
 
-- FileEventStore implemented: append-only JSONL at `.agentmesa/events/events.jsonl`.
-- Default `MesaRuntimeContext` eventStore is now `FileEventStore`; events survive process exit.
-- All core services (task, meeting, message, artifact, agent) append runtime events through the file store.
-- Projection rebuild and event replay are not yet implemented — durable readable state is still the JSON files under `.agentmesa/tasks/` etc.
-- Sequence allocation in `appendRuntimeEvent` is not concurrency-safe (TODO documented); needs atomic locked increment before multi-client use.
+- FileEventStore: append-only JSONL at `.agentmesa/events/events.jsonl`, validates against MesaEventSchema.
+- Default `MesaRuntimeContext` eventStore is `FileEventStore`; events survive process exit.
+- All core services append runtime events through the file store.
+- Projection rebuild: `rebuildTaskProjections` / `rebuildMeetingProjections` / `rebuildAllProjections` in `projection-service.ts` replay events and write to `.agentmesa/projections/`.
+- Deleted tasks produce tombstone projections (not removed).
+- Existing services still read from `.agentmesa/tasks/` etc. — projections not yet the authoritative read path.
+- Sequence allocation is not concurrency-safe (TODO documented).
 
 Direction:
 

@@ -12,9 +12,18 @@ Core services — task create/status/assignment/deletion, meeting create/status/
 changes, message append, artifact creation, agent registration — all append protocol events
 through the file store.
 
-Projection rebuild is not yet implemented. The durable readable state is still the JSON files
-under `.agentmesa/tasks/`, `.agentmesa/meetings/`, etc. — those are not yet rebuilt from the
-event log. Events are now a durable audit trail, but not yet the sole source of truth.
+Minimal projection rebuild is implemented via `projection-service.ts`:
+- `rebuildTaskProjections(ctx)` replays task events (task_created, task_status_changed,
+  task_assigned, task_deleted → tombstone) and writes to `.agentmesa/projections/tasks/<id>.json`.
+- `rebuildMeetingProjections(ctx)` replays meeting events (meeting_created,
+  meeting_status_changed, meeting_task_added, meeting_agent_added) and writes to
+  `.agentmesa/projections/meetings/<id>.json`.
+- `rebuildAllProjections(ctx)` runs both.
+
+Projections are written to the `projections/` directory and carry `_meta` fields (source,
+rebuiltAt, lastEventId, lastSequence). Existing services still read from `.agentmesa/tasks/`
+etc. — projections are not yet the authoritative read path. Events are a durable audit log,
+but not yet the sole source of truth.
 
 Event type names are frozen as underscore literals (`task_created`, `task_status_changed`, ...) in the `eventTypeSchema` enum in `packages/protocol/src/schemas.ts`. That enum is the single source of truth for the vocabulary: the `EventType` TypeScript union is inferred from it, and a test in `schemas.test.ts` locks the exact set so any addition or rename is a deliberate, reviewed change. Because the event log is append-only, this naming is permanent once written to disk. The tables below use that frozen vocabulary.
 
