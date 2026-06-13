@@ -5,7 +5,7 @@ import {
 } from '@agentmesa/core';
 import type { ArtifactKind } from '@agentmesa/protocol';
 import type { ParsedArgs } from '../parse-args.js';
-import { printError, formatOutput } from '../output.js';
+import { printError, outputResult } from '../output.js';
 
 export function runArtifact(args: ParsedArgs): void {
   const rootDir = process.cwd();
@@ -25,9 +25,7 @@ export function runArtifact(args: ParsedArgs): void {
         const taskId = args.positional[0] ?? (typeof args.flags['task'] === 'string' ? args.flags['task'] : undefined);
         const kind = typeof args.flags['kind'] === 'string' ? (args.flags['kind'] as ArtifactKind) : undefined;
         const artifacts = listArtifacts(ctx, taskId, kind);
-        if (json) {
-          formatOutput(artifacts, true);
-        } else {
+        outputResult(artifacts, json, () => {
           if (artifacts.length === 0) {
             console.log('No artifacts found.');
           } else {
@@ -38,7 +36,7 @@ export function runArtifact(args: ParsedArgs): void {
             }
             console.log(`\n  ${artifacts.length} artifact(s)\n`);
           }
-        }
+        });
         return;
       }
 
@@ -48,8 +46,7 @@ export function runArtifact(args: ParsedArgs): void {
           console.log('Usage: mesa artifact show <artifactId>');
           return;
         }
-        const artifact = getArtifact(ctx, artifactId);
-        formatOutput(artifact, json);
+        outputResult(getArtifact(ctx, artifactId), json);
         return;
       }
 

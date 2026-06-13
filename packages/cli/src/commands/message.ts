@@ -4,7 +4,7 @@ import {
   getMessagesByTask,
 } from '@agentmesa/core';
 import type { ParsedArgs } from '../parse-args.js';
-import { printError, formatOutput } from '../output.js';
+import { printError, outputResult } from '../output.js';
 
 export function runMessage(args: ParsedArgs): void {
   const rootDir = process.cwd();
@@ -23,9 +23,7 @@ export function runMessage(args: ParsedArgs): void {
       case 'list': {
         const taskId = args.positional[0] ?? (typeof args.flags['task'] === 'string' ? args.flags['task'] : undefined);
         const messages = taskId ? getMessagesByTask(ctx, taskId) : listMessages(ctx);
-        if (json) {
-          formatOutput(messages, true);
-        } else {
+        outputResult(messages, json, () => {
           if (messages.length === 0) {
             console.log('No messages found.');
           } else {
@@ -36,7 +34,7 @@ export function runMessage(args: ParsedArgs): void {
             }
             console.log(`\n  ${messages.length} message(s)\n`);
           }
-        }
+        });
         return;
       }
 

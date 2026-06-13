@@ -9,52 +9,53 @@ import {
   checkProjectionConsistency,
   findOrphanedLocks,
 } from '@agentmesa/core';
-import type { DiagnosticFinding } from '@agentmesa/core';
 import { existsSync } from 'node:fs';
 import type { ParsedArgs } from '../parse-args.js';
-import { printSuccess, printWarning, printError, printInfo } from '../output.js';
-
-function printFinding(f: DiagnosticFinding): void {
-  const icon = f.level === 'error' ? '✗' : f.level === 'warn' ? '!' : '✓';
-  const fn =
-    f.level === 'error' ? printError : f.level === 'warn' ? printWarning : printSuccess;
-  fn(`${icon} ${f.message}`);
-}
+import { printSuccess, printWarning, printError, printInfo, outputResult } from '../output.js';
 
 export function runDoctor(args: ParsedArgs): void {
   const rootDir = process.cwd();
+  const json = !!args.flags['json'];
   let issues = 0;
+  const findings: Array<{ level: string; message: string }> = [];
 
-  console.log('AgentMesa Doctor');
-  console.log('================');
-  console.log('');
+  function record(level: string, message: string): void {
+    findings.push({ level, message });
+    if (level === 'error' || level === 'warn') issues++;
+  }
+
+  if (json) {
+    // silent collection — no console output during check
+  } else {
+    console.log('AgentMesa Doctor');
+    console.log('================');
+    console.log('');
+  }
 
   // Check workspace
   if (isWorkspaceInitialized(rootDir)) {
-    printSuccess('Workspace initialized');
+    record('ok', 'Workspace initialized');
     const config = loadConfig(rootDir);
-    printInfo(`Protocol version: ${config.protocolVersion}`);
-    if (config.projectName) printInfo(`Project: ${config.projectName}`);
+    record('ok', `Protocol version: ${config.protocolVersion}`);
+    if (config.projectName) record('ok', `Project: ${config.projectName}`);
   } else {
-    printWarning('No AgentMesa workspace found. Run "mesa init" first.');
-    issues++;
+    record('warn', 'No AgentMesa workspace found. Run "mesa init" first.');
   }
 
   // Check git
   const gitDir = `${rootDir}/.git`;
   if (existsSync(gitDir)) {
-    printSuccess('Git repository found');
+    record('ok', 'Git repository found');
   } else {
-    printWarning('No git repository found. Git connector features will be limited.');
-    issues++;
+    record('warn', 'No git repository found. Git connector features will be limited.');
   }
 
   // Check node_modules
   const nodeModules = `${rootDir}/node_modules`;
   if (existsSync(nodeModules)) {
-    printSuccess('node_modules exists');
+    record('ok', 'node_modules exists');
   } else {
-    printInfo('No node_modules found. Run your package manager install first.');
+    record('ok', 'No node_modules found. Run your package manager install first.');
   }
 
   // Workspace diagnostics
@@ -63,10 +64,9 @@ export function runDoctor(args: ParsedArgs): void {
 
     // Agent dir
     if (existsSync(paths.agentsDir)) {
-      printSuccess('Agents directory exists');
+      record('ok', 'Agents directory exists');
     } else {
-      printWarning('Agents directory missing.');
-      issues++;
+      record('warn', 'Agents directory missing.');
     }
 
     // Orphaned temp files
@@ -81,27 +81,23 @@ export function runDoctor(args: ParsedArgs): void {
     if (fix) {
       const removed = cleanOrphanedTempFiles(tempDirs);
       if (removed > 0) {
-        printWarning(`Removed ${removed} orphaned temp file(s) from interrupted writes.`);
+        record('warn', `Removed ${removed} orphaned temp file(s) from interrupted writes.`);
       } else {
-        printSuccess('No orphaned temp files.');
+        record('ok', 'No orphaned temp files.');
       }
     } else {
       const orphaned = findOrphanedTempFiles(tempDirs);
       if (orphaned.length > 0) {
-        printWarning(
-          `Found ${orphaned.length} orphaned temp file(s) from interrupted writes. Run "mesa doctor --fix" to remove them.`,
-        );
-        issues++;
+        record('warn', `Found ${orphaned.length} orphaned temp file(s) from interrupted writes. Run "mesa doctor --fix" to remove them.`);
       } else {
-        printSuccess('No orphaned temp files.');
+        record('ok', 'No orphaned temp files.');
       }
     }
 
     // Event log validation
     const eventFindings = validateEventLog(paths.eventsDir);
     for (const f of eventFindings) {
-      printFinding(f);
-      if (f.level !== 'ok') issues++;
+      record(f.level, f.message);
     }
 
     // Runtime diagnostics (needs ctx for projection + lock checks)
@@ -113,19 +109,29 @@ export function runDoctor(args: ParsedArgs): void {
 
       const projFindings = checkProjectionConsistency(ctx);
       for (const f of projFindings) {
-        printFinding(f);
-        if (f.level !== 'ok') issues++;
+        record(f.level, f.message);
       }
 
       const lockFindings = findOrphanedLocks(ctx.paths);
       for (const f of lockFindings) {
-        printFinding(f);
-        if (f.level !== 'ok') issues++;
+        record(f.level, f.message);
       }
     } catch (err) {
-      printWarning(`Skipping runtime diagnostics — ${String(err)}`);
-      issues++;
+      record('warn', `Skipping runtime diagnostics — ${String(err)}`);
     }
+  }
+
+  if (json) {
+    outputResult({ issues, findings }, true);
+    return;
+  }
+
+  // Human-readable output
+  for (const f of findings) {
+    const icon = f.level === 'error' ? '✗' : f.level === 'warn' ? '!' : '✓';
+    const fn =
+      f.level === 'error' ? printError : f.level === 'warn' ? printWarning : printSuccess;
+    fn(`${icon} ${f.message}`);
   }
 
   console.log('');

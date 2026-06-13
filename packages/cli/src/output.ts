@@ -22,6 +22,22 @@ export function printInfo(message: string): void {
   console.log(`\x1b[36mℹ\x1b[0m ${message}`);
 }
 
+/**
+ * Output data in either JSON or human-readable format.
+ * When json=true, only JSON goes to stdout — safe for local AI consumption.
+ */
+export function outputResult(data: unknown, json: boolean, humanRenderer?: () => void): void {
+  if (json) {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+  if (humanRenderer) {
+    humanRenderer();
+    return;
+  }
+  formatOutput(data, false);
+}
+
 export function formatOutput(data: unknown, json: boolean): void {
   if (json) {
     console.log(JSON.stringify(data, null, 2));

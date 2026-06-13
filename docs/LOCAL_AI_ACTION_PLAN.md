@@ -207,6 +207,18 @@ Acceptance:
 
 ## Priority 8: CLI Alignment
 
+Status: `cli_aligned`
+
+- `--json` flag supported across all commands (task, message, artifact, meeting, agent, init, doctor). When set, only JSON goes to stdout — safe for local AI consumption.
+- `outputResult(data, json, humanRenderer)` helper ensures no mixed output when `--json` is active.
+- New inspection commands:
+  - `mesa events list [--meeting <id>] [--task <id>] [--type <type>] [--actor <id>]` — query event log
+  - `mesa timeline <taskId|meetingId>` — show event timeline + reconstructed projection
+  - `mesa transports` — list available transports and capabilities
+- `mesa doctor` supports `--json` with structured findings output.
+- `mesa init` supports `--json` with structured result.
+- CLI uses the same `MesaRuntimeContext` as all other consumers — not a special case.
+
 Direction:
 
 - Make CLI use the same runtime context as future transports.

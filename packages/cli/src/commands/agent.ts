@@ -5,7 +5,7 @@ import {
 } from '@agentmesa/core';
 import type { AgentRole } from '@agentmesa/protocol';
 import type { ParsedArgs } from '../parse-args.js';
-import { printSuccess, printError, formatOutput } from '../output.js';
+import { printSuccess, printError, outputResult } from '../output.js';
 
 export function runAgent(args: ParsedArgs): void {
   const rootDir = process.cwd();
@@ -37,16 +37,13 @@ export function runAgent(args: ParsedArgs): void {
 
         const client = typeof args.flags['client'] === 'string' ? args.flags['client'] : id;
         const agent = registerAgent(ctx, { id, name, client, status: 'available', roles });
-        printSuccess(`Registered agent: ${agent.id} (${agent.name})`);
-        if (json) formatOutput(agent, true);
+        outputResult(agent, json, () => printSuccess(`Registered agent: ${agent.id} (${agent.name})`));
         return;
       }
 
       case 'list': {
         const agents = listAgents(ctx);
-        if (json) {
-          formatOutput(agents, true);
-        } else {
+        outputResult(agents, json, () => {
           if (agents.length === 0) {
             console.log('No agents registered. Add one with: mesa agent add <id> <name> [roles]');
           } else {
@@ -57,7 +54,7 @@ export function runAgent(args: ParsedArgs): void {
             }
             console.log(`\n  ${agents.length} agent(s)\n`);
           }
-        }
+        });
         return;
       }
 

@@ -5,7 +5,7 @@ import {
   getMeeting,
 } from '@agentmesa/core';
 import type { ParsedArgs } from '../parse-args.js';
-import { printSuccess, printError, formatOutput } from '../output.js';
+import { printSuccess, printError, outputResult } from '../output.js';
 
 export function runMeeting(args: ParsedArgs): void {
   const rootDir = process.cwd();
@@ -28,16 +28,13 @@ export function runMeeting(args: ParsedArgs): void {
           return;
         }
         const meeting = createMeeting(ctx, { title });
-        printSuccess(`Created meeting ${meeting.id}: ${meeting.title}`);
-        if (json) formatOutput(meeting, true);
+        outputResult(meeting, json, () => printSuccess(`Created meeting ${meeting.id}: ${meeting.title}`));
         return;
       }
 
       case 'list': {
         const meetings = listMeetings(ctx);
-        if (json) {
-          formatOutput(meetings, true);
-        } else {
+        outputResult(meetings, json, () => {
           if (meetings.length === 0) {
             console.log('No meetings found. Create one with: mesa meeting create <title>');
           } else {
@@ -48,7 +45,7 @@ export function runMeeting(args: ParsedArgs): void {
             }
             console.log(`\n  ${meetings.length} meeting(s)\n`);
           }
-        }
+        });
         return;
       }
 
@@ -58,8 +55,7 @@ export function runMeeting(args: ParsedArgs): void {
           console.log('Usage: mesa meeting show <meetingId>');
           return;
         }
-        const meeting = getMeeting(ctx, meetingId);
-        formatOutput(meeting, json);
+        outputResult(getMeeting(ctx, meetingId), json);
         return;
       }
 

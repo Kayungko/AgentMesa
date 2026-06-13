@@ -8,7 +8,7 @@ import {
 } from '@agentmesa/core';
 import type { TaskStatus } from '@agentmesa/protocol';
 import type { ParsedArgs } from '../parse-args.js';
-import { printSuccess, printError, formatOutput } from '../output.js';
+import { printSuccess, printError, outputResult } from '../output.js';
 
 export function runTask(args: ParsedArgs): void {
   const rootDir = process.cwd();
@@ -36,16 +36,13 @@ export function runTask(args: ParsedArgs): void {
           reviewer: typeof args.flags['reviewer'] === 'string' ? args.flags['reviewer'] : undefined,
           branch: typeof args.flags['branch'] === 'string' ? args.flags['branch'] : undefined,
         });
-        printSuccess(`Created task ${task.id}: ${task.title}`);
-        if (json) formatOutput(task, true);
+        outputResult(task, json, () => printSuccess(`Created task ${task.id}: ${task.title}`));
         return;
       }
 
       case 'list': {
         const tasks = listTasks(ctx);
-        if (json) {
-          formatOutput(tasks, true);
-        } else {
+        outputResult(tasks, json, () => {
           if (tasks.length === 0) {
             console.log('No tasks found. Create one with: mesa task create <title>');
           } else {
@@ -56,7 +53,7 @@ export function runTask(args: ParsedArgs): void {
             }
             console.log(`\n  ${tasks.length} task(s)\n`);
           }
-        }
+        });
         return;
       }
 
@@ -66,8 +63,7 @@ export function runTask(args: ParsedArgs): void {
           console.log('Usage: mesa task show <taskId>');
           return;
         }
-        const task = getTask(ctx, taskId);
-        formatOutput(task, json);
+        outputResult(getTask(ctx, taskId), json);
         return;
       }
 
@@ -80,8 +76,7 @@ export function runTask(args: ParsedArgs): void {
           return;
         }
         const task = updateTaskStatus(ctx, taskId, newStatus as TaskStatus);
-        printSuccess(`Task ${task.id} status: ${task.status}`);
-        if (json) formatOutput(task, true);
+        outputResult(task, json, () => printSuccess(`Task ${task.id} status: ${task.status}`));
         return;
       }
 
@@ -94,8 +89,7 @@ export function runTask(args: ParsedArgs): void {
         }
         const reviewer = args.positional[2];
         const task = assignTask(ctx, taskId, assignee, reviewer);
-        printSuccess(`Task ${task.id} assigned to ${task.assignedTo}`);
-        if (json) formatOutput(task, true);
+        outputResult(task, json, () => printSuccess(`Task ${task.id} assigned to ${task.assignedTo}`));
         return;
       }
 
