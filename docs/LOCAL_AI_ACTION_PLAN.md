@@ -100,6 +100,14 @@ Acceptance:
 
 ## Priority 4: Event-Backed State
 
+Status: `file_event_store_done`
+
+- FileEventStore implemented: append-only JSONL at `.agentmesa/events/events.jsonl`.
+- Default `MesaRuntimeContext` eventStore is now `FileEventStore`; events survive process exit.
+- All core services (task, meeting, message, artifact, agent) append runtime events through the file store.
+- Projection rebuild and event replay are not yet implemented — durable readable state is still the JSON files under `.agentmesa/tasks/` etc.
+- Sequence allocation in `appendRuntimeEvent` is not concurrency-safe (TODO documented); needs atomic locked increment before multi-client use.
+
 Direction:
 
 - Add an event model.

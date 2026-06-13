@@ -4,10 +4,17 @@ AgentMesa uses an event-sourced architecture to preserve a complete, append-only
 
 ## Current Implementation Status
 
-Current code has only the Runtime Context event interface and an in-memory `MesaEventStore` stub.
-Core services append protocol events for task creation/status/assignment/deletion, meeting creation/status/membership changes, message append, artifact creation, and agent registration.
+`FileEventStore` is the default event store backing `MesaRuntimeContext`. It persists every
+runtime event as a single-line JSON object appended to `.agentmesa/events/events.jsonl`.
+Events survive process exit and are readable across `createRuntimeContext` calls.
 
-These runtime events are useful for policy/audit attribution tests, but they are not yet durable and they are not the source of truth. The durable state is still the readable JSON files under `.agentmesa/`. Event-backed State begins when these events move to an append-only persistent log and projections can be rebuilt from them.
+Core services — task create/status/assignment/deletion, meeting create/status/membership
+changes, message append, artifact creation, agent registration — all append protocol events
+through the file store.
+
+Projection rebuild is not yet implemented. The durable readable state is still the JSON files
+under `.agentmesa/tasks/`, `.agentmesa/meetings/`, etc. — those are not yet rebuilt from the
+event log. Events are now a durable audit trail, but not yet the sole source of truth.
 
 Event type names are frozen as underscore literals (`task_created`, `task_status_changed`, ...) in the `eventTypeSchema` enum in `packages/protocol/src/schemas.ts`. That enum is the single source of truth for the vocabulary: the `EventType` TypeScript union is inferred from it, and a test in `schemas.test.ts` locks the exact set so any addition or rename is a deliberate, reviewed change. Because the event log is append-only, this naming is permanent once written to disk. The tables below use that frozen vocabulary.
 
