@@ -59,8 +59,8 @@ export function runEvents(args: ParsedArgs): void {
         console.log('    List events with optional filters');
         console.log('');
         console.log('Also available:');
-        console.log('  mesa timeline <taskId>     Show task event timeline + projection');
-        console.log('  mesa timeline <meetingId>  Show meeting event timeline + projection');
+        console.log('  mesa timeline task <id>     Show task event timeline + projection');
+        console.log('  mesa timeline meeting <id>  Show meeting event timeline + projection');
     }
   } catch (err) {
     printError(err);
@@ -74,55 +74,68 @@ export function runTimeline(args: ParsedArgs): void {
   const targetId = args.positional[0];
 
   if (!targetId) {
-    console.log('Usage: mesa timeline <taskId|meetingId>');
+    console.log('Usage:');
+    console.log('  mesa timeline task <taskId>');
+    console.log('  mesa timeline meeting <meetingId>');
     return;
   }
 
   try {
-    // Determine if targetId is a task or meeting
-    const taskEvents = getTaskEvents(ctx, targetId);
-    const meetingEvents = getMeetingEvents(ctx, targetId);
-
-    if (taskEvents.length > 0) {
-      const projection = getTaskProjection(ctx, targetId);
-      outputResult(
-        { streamType: 'task', streamId: targetId, projection, events: taskEvents },
-        json,
-        () => {
-          console.log(`\nTask Timeline: ${targetId}`);
-          console.log(`${'─'.repeat(60)}`);
-          if (projection) {
-            console.log(`  Status: ${(projection as Record<string, unknown>).status ?? 'unknown'}`);
-            console.log(`  Title:  ${(projection as Record<string, unknown>).title ?? 'unknown'}`);
+    switch (args.subcommand) {
+      case 'task': {
+        const events = getTaskEvents(ctx, targetId);
+        const projection = getTaskProjection(ctx, targetId);
+        outputResult(
+          { streamType: 'task', streamId: targetId, projection, events },
+          json,
+          () => {
+            console.log(`\nTask Timeline: ${targetId}`);
+            console.log(`${'─'.repeat(60)}`);
+            if (projection) {
+              console.log(`  Status: ${(projection as Record<string, unknown>).status ?? 'unknown'}`);
+              console.log(`  Title:  ${(projection as Record<string, unknown>).title ?? 'unknown'}`);
+            }
+            if (events.length === 0 && !projection) {
+              console.log(`  No events or projection found for "${targetId}".`);
+            } else {
+              console.log('');
+              printEventTimeline(events);
+            }
           }
-          console.log('');
-          printEventTimeline(taskEvents);
-        }
-      );
-    } else if (meetingEvents.length > 0) {
-      const projection = getMeetingProjection(ctx, targetId);
-      outputResult(
-        { streamType: 'meeting', streamId: targetId, projection, events: meetingEvents },
-        json,
-        () => {
-          console.log(`\nMeeting Timeline: ${targetId}`);
-          console.log(`${'─'.repeat(60)}`);
-          if (projection) {
-            const p = projection as Record<string, unknown>;
-            console.log(`  Status: ${p.status ?? 'unknown'}`);
-            console.log(`  Title:  ${p.title ?? 'unknown'}`);
-            console.log(`  Tasks:  ${JSON.stringify(p.taskIds ?? p.tasks ?? [])}`);
-          }
-          console.log('');
-          printEventTimeline(meetingEvents);
-        }
-      );
-    } else {
-      if (json) {
-        outputResult({ error: `No events found for "${targetId}"` }, true);
-      } else {
-        console.log(`No events found for "${targetId}".`);
+        );
+        return;
       }
+
+      case 'meeting': {
+        const events = getMeetingEvents(ctx, targetId);
+        const projection = getMeetingProjection(ctx, targetId);
+        outputResult(
+          { streamType: 'meeting', streamId: targetId, projection, events },
+          json,
+          () => {
+            console.log(`\nMeeting Timeline: ${targetId}`);
+            console.log(`${'─'.repeat(60)}`);
+            if (projection) {
+              const p = projection as Record<string, unknown>;
+              console.log(`  Status: ${p.status ?? 'unknown'}`);
+              console.log(`  Title:  ${p.title ?? 'unknown'}`);
+              console.log(`  Tasks:  ${JSON.stringify(p.taskIds ?? p.tasks ?? [])}`);
+            }
+            if (events.length === 0 && !projection) {
+              console.log(`  No events or projection found for "${targetId}".`);
+            } else {
+              console.log('');
+              printEventTimeline(events);
+            }
+          }
+        );
+        return;
+      }
+
+      default:
+        console.log('Usage:');
+        console.log('  mesa timeline task <taskId>');
+        console.log('  mesa timeline meeting <meetingId>');
     }
   } catch (err) {
     printError(err);
