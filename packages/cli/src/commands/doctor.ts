@@ -1,4 +1,9 @@
-import { isWorkspaceInitialized, loadConfig, createWorkspacePaths } from '@agentmesa/core';
+import {
+  isWorkspaceInitialized,
+  loadConfig,
+  createWorkspacePaths,
+  cleanOrphanedTempFiles,
+} from '@agentmesa/core';
 import { existsSync } from 'node:fs';
 import type { ParsedArgs } from '../parse-args.js';
 import { printSuccess, printWarning, printError, printInfo } from '../output.js';
@@ -39,7 +44,7 @@ export function runDoctor(args: ParsedArgs): void {
     printInfo('No node_modules found. Run your package manager install first.');
   }
 
-  // Check agents
+  // Check agents and clean orphaned temp files
   if (isWorkspaceInitialized(rootDir)) {
     const paths = createWorkspacePaths(rootDir);
     if (existsSync(paths.agentsDir)) {
@@ -47,6 +52,19 @@ export function runDoctor(args: ParsedArgs): void {
     } else {
       printWarning('Agents directory missing.');
       issues++;
+    }
+
+    const removed = cleanOrphanedTempFiles([
+      paths.tasksDir,
+      paths.messagesDir,
+      paths.artifactsDir,
+      paths.meetingsDir,
+      paths.agentsDir,
+    ]);
+    if (removed > 0) {
+      printWarning(`Removed ${removed} orphaned temp file(s) from interrupted writes.`);
+    } else {
+      printSuccess('No orphaned temp files.');
     }
   }
 
