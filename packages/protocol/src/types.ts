@@ -1,9 +1,13 @@
 /**
  * AgentMesa Protocol Types
  *
- * ALL types are inferred from Zod schemas — schemas are the sole source of truth.
- * Enum-style literal unions are kept for convenience so consumers can use them
- * without pulling in Zod.
+ * Entity types (agents, tasks, messages, events, etc.) and EventType are
+ * inferred from their Zod schemas — those schemas are the sole source of truth,
+ * so the inferred types cannot drift from runtime validation.
+ *
+ * The enum-style literal unions below (AgentRole, AgentStatus, MessageType,
+ * TaskStatus, …) are hand-written. They are small, stable vocabularies that
+ * consumers can reference without pulling in Zod, and are not yet schema-backed.
  */
 
 import type {

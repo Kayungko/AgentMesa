@@ -2,6 +2,20 @@
 
 AgentMesa's storage layer is the local-first persistence backbone for cross-client AI agent collaboration. It guarantees atomic writes, file-based locking, and event-sourced state so that multiple agent clients can safely share one workspace.
 
+## Implementation Status
+
+This document describes the target design. The sections below track what is actually shipped today versus what is still planned.
+
+| Capability | Status |
+|---|---|
+| **Atomic writes** (temp + fsync + rename) | **Done.** `FileStorageAdapter.writeText` writes to a `.mesa-tmp-<pid>-<n>` file, fsyncs, then renames into place. A crash mid-write leaves an orphaned temp file rather than a corrupt target; `list()` hides temp files so a partial write is never read as a record. |
+| **Atomic lock creation** | **Done.** `acquireLock` uses the `wx` open flag so lock-file creation is atomic — no check-then-write race. Lock filenames are sha256 hashes of the resource id, keeping them filesystem-safe and traversal-proof; the original resource is stored in the lock body. |
+| **Orphaned temp-file cleanup** | **Done.** `mesa doctor` reports orphaned `.mesa-tmp-` files; `mesa doctor --fix` removes them. The default run never mutates files. |
+| **Persistent event store** | **Not yet.** The current `EventStore` is in-memory only — events do not survive process exit. A file-backed `FileEventStore` (append-only `.jsonl` per stream) is the next phase. Until then, the `events/` and `projections/` layout below is design intent, not on-disk reality. |
+| **SQLite index, soft-delete, migration** | **Not yet.** Design intent only. |
+
+The `MesaStorageAdapter` interface, directory layout, and lock-naming description further down reflect the target design and may not match the current code exactly (e.g. the shipped adapter exposes `readText`/`writeText`/`list`, and lock filenames are hashed, not separator-substituted).
+
 ## Directory Layout
 
 All workspace data lives under `.agentmesa/` at the project root:
