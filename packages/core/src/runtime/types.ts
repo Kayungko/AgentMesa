@@ -21,6 +21,9 @@ export interface MesaConfig {
   projectName?: string;
   defaultBuilder?: string;
   defaultReviewer?: string;
+  policy?: {
+    mode?: 'allow-all' | 'role-based';
+  };
 }
 
 export interface MesaStorageAdapter {

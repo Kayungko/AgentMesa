@@ -7,6 +7,7 @@ import { createRuntimeContext } from '../runtime/create-runtime-context.js';
 import { FileStorageAdapter } from '../runtime/file-storage-adapter.js';
 import { FileEventStore } from '../runtime/file-event-store.js';
 import { InMemoryMesaEventStore } from '../runtime/event-store.js';
+import { AllowAllMesaPolicyEngine, RoleBasedPolicyEngine } from '../runtime/policy.js';
 
 let testDir: string;
 
@@ -154,5 +155,80 @@ describe('default runtime dependencies', () => {
     expect(info).toHaveBeenCalledOnce();
     expect(warn).toHaveBeenCalledOnce();
     expect(error).toHaveBeenCalledOnce();
+  });
+
+  it('defaults to AllowAllMesaPolicyEngine when no policy mode is configured', () => {
+    const ctx = createRuntimeContext({
+      rootDir: testDir,
+      actor: { id: 'user:test', type: 'user', roles: ['owner'] },
+    });
+
+    expect(ctx.policy).toBeInstanceOf(AllowAllMesaPolicyEngine);
+    expect(ctx.policy.can(ctx.actor, 'task.create', 't1')).toEqual({ allowed: true });
+  });
+
+  it('selects RoleBasedPolicyEngine when policy.mode is role-based', () => {
+    const storage = new FileStorageAdapter();
+    const configPath = join(testDir, '.agentmesa', 'config.json');
+    storage.writeText(
+      configPath,
+      JSON.stringify({
+        protocolVersion: currentProtocolVersion,
+        policy: { mode: 'role-based' },
+      }),
+    );
+
+    const ctx = createRuntimeContext({
+      rootDir: testDir,
+      actor: { id: 'user:test', type: 'user', roles: ['owner'] },
+      storage,
+    });
+
+    expect(ctx.policy).toBeInstanceOf(RoleBasedPolicyEngine);
+  });
+
+  it('role-based policy denies an unmapped action for non-owner', () => {
+    const storage = new FileStorageAdapter();
+    const configPath = join(testDir, '.agentmesa', 'config.json');
+    storage.writeText(
+      configPath,
+      JSON.stringify({
+        protocolVersion: currentProtocolVersion,
+        policy: { mode: 'role-based' },
+      }),
+    );
+
+    const ctx = createRuntimeContext({
+      rootDir: testDir,
+      actor: { id: 'agent:builder', type: 'agent', roles: ['builder'] },
+      storage,
+    });
+
+    // builder can write_task → task.create is allowed
+    expect(ctx.policy.can(ctx.actor, 'task.create', 't1').allowed).toBe(true);
+  });
+
+  it('options.policy takes precedence over config mode', () => {
+    const storage = new FileStorageAdapter();
+    const configPath = join(testDir, '.agentmesa', 'config.json');
+    // Write role-based in config
+    storage.writeText(
+      configPath,
+      JSON.stringify({
+        protocolVersion: currentProtocolVersion,
+        policy: { mode: 'role-based' },
+      }),
+    );
+
+    const allowAll = new AllowAllMesaPolicyEngine();
+    const ctx = createRuntimeContext({
+      rootDir: testDir,
+      actor: { id: 'user:test', type: 'user', roles: ['owner'] },
+      storage,
+      policy: allowAll,
+    });
+
+    expect(ctx.policy).toBe(allowAll);
+    expect(ctx.policy).toBeInstanceOf(AllowAllMesaPolicyEngine);
   });
 });

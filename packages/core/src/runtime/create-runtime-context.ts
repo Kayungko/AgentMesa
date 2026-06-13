@@ -6,7 +6,7 @@ import { InMemoryMesaEventStore } from './event-store.js';
 import { FileEventStore } from './file-event-store.js';
 import { FileStorageAdapter } from './file-storage-adapter.js';
 import { createConsoleLogger } from './logger.js';
-import { AllowAllMesaPolicyEngine } from './policy.js';
+import { AllowAllMesaPolicyEngine, RoleBasedPolicyEngine } from './policy.js';
 import { createDefaultTransports } from './transports.js';
 import type {
   CreateRuntimeContextOptions,
@@ -50,10 +50,17 @@ export function createRuntimeContext(
     actor: options.actor,
     storage,
     eventStore: options.eventStore ?? new FileEventStore(paths.eventsDir),
-    policy: options.policy ?? new AllowAllMesaPolicyEngine(),
+    policy: options.policy ?? resolvePolicyEngine(config),
     logger: options.logger ?? createConsoleLogger(options.actor),
     transports: options.transports ?? createDefaultTransports(),
   };
+}
+
+function resolvePolicyEngine(config: MesaConfig): AllowAllMesaPolicyEngine | RoleBasedPolicyEngine {
+  if (config.policy?.mode === 'role-based') {
+    return new RoleBasedPolicyEngine();
+  }
+  return new AllowAllMesaPolicyEngine();
 }
 
 function loadOrCreateConfig(
