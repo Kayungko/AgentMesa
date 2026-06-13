@@ -15,3 +15,4 @@ export * from './services/artifact-service.js';
 export * from './services/agent-registry.js';
 export * from './services/lock-manager.js';
 export * from './services/event-service.js';
+export * from './services/projection-service.js';
