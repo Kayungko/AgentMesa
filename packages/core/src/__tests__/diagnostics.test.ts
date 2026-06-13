@@ -6,7 +6,7 @@ import { initWorkspace } from '../workspace.js';
 import type { MesaWorkspacePaths } from '../workspace.js';
 import { createRuntimeContext } from '../runtime/create-runtime-context.js';
 import type { MesaRuntimeContext } from '../runtime/types.js';
-import { createTask, deleteTask } from '../services/task-service.js';
+import { createTask, deleteTask, updateTaskStatus } from '../services/task-service.js';
 import { createMeeting } from '../services/meeting-service.js';
 import { registerAgent } from '../services/agent-registry.js';
 import { rebuildAllProjections } from '../services/projection-service.js';
@@ -67,6 +67,26 @@ describe('validateEventLog', () => {
     const errors = findings.filter((f) => f.level === 'error');
     expect(errors.length).toBeGreaterThanOrEqual(1);
     expect(errors[0]?.message).toContain('invalid event');
+  });
+
+  it('includes path and recommendation on corrupt JSON finding', () => {
+    const eventsPath = join(paths.eventsDir, 'events.jsonl');
+    writeFileSync(eventsPath, '{not valid json\n', 'utf-8');
+    const findings = validateEventLog(paths.eventsDir);
+    const corrupt = findings.find((f) => f.message.includes('corrupted'));
+    expect(corrupt).toBeDefined();
+    expect(corrupt!.path).toBe(eventsPath);
+    expect(corrupt!.recommendation).toContain('Remove or fix');
+  });
+
+  it('includes path and recommendation on invalid event finding', () => {
+    const eventsPath = join(paths.eventsDir, 'events.jsonl');
+    writeFileSync(eventsPath, '{"id":"e_1","type":"bogus_type","streamId":"s1","data":{},"actor":"a","timestamp":"2024-01-01T00:00:00.000Z","sequence":0}\n', 'utf-8');
+    const findings = validateEventLog(paths.eventsDir);
+    const invalid = findings.find((f) => f.message.includes('invalid event'));
+    expect(invalid).toBeDefined();
+    expect(invalid!.path).toBe(eventsPath);
+    expect(invalid!.recommendation).toContain('Remove or fix');
   });
 });
 
@@ -154,6 +174,52 @@ describe('checkProjectionConsistency', () => {
     const warns = findings.filter((f) => f.level === 'warn' && f.category === 'projections');
     expect(warns.some((f) => f.message.includes('stale'))).toBe(true);
   });
+
+  it('missing projection finding has resourceId, path, fixable, recommendation', () => {
+    createTask(ctx, { title: 'Missing proj' });
+    const findings = checkProjectionConsistency(ctx);
+    const missing = findings.find((f) => f.message.includes('no projection'));
+    expect(missing).toBeDefined();
+    expect(missing!.resourceId).toBeDefined();
+    expect(missing!.resourceId).toMatch(/^task_/);
+    expect(missing!.path).toContain('projections');
+    expect(missing!.path).toContain('.json');
+    expect(missing!.fixable).toBe(true);
+    expect(missing!.recommendation).toContain('mesa rebuild');
+  });
+
+  it('corrupted projection finding has resourceId, path, fixable, recommendation', () => {
+    const task = createTask(ctx, { title: 'Corrupt extra' });
+    rebuildAllProjections(ctx);
+    const projPath = join(ctx.paths.taskProjectionsDir, `${task.id}.json`);
+    writeFileSync(projPath, 'not valid json {{{', 'utf-8');
+
+    const findings = checkProjectionConsistency(ctx);
+    const corrupt = findings.find((f) => f.message.includes('corrupted'));
+    expect(corrupt).toBeDefined();
+    expect(corrupt!.resourceId).toBe(task.id);
+    expect(corrupt!.path).toBe(projPath);
+    expect(corrupt!.fixable).toBe(true);
+    expect(corrupt!.recommendation).toContain('mesa rebuild');
+  });
+
+  it('stale projection finding has resourceId, path, fixable, recommendation', () => {
+    const task = createTask(ctx, { title: 'Stale extra' });
+    updateTaskStatus(ctx, task.id, 'in_progress'); // creates second event so maxSeq >= 1
+    rebuildAllProjections(ctx);
+    const projPath = join(ctx.paths.taskProjectionsDir, `${task.id}.json`);
+    const projRaw = JSON.parse(readFileSync(projPath, 'utf-8')) as Record<string, unknown>;
+    (projRaw._meta as Record<string, unknown>).lastSequence = 0; // set below maxSeq
+    writeFileSync(projPath, JSON.stringify(projRaw), 'utf-8');
+
+    const findings = checkProjectionConsistency(ctx);
+    const stale = findings.find((f) => f.message.includes('stale'));
+    expect(stale).toBeDefined();
+    expect(stale!.resourceId).toBe(task.id);
+    expect(stale!.path).toBe(projPath);
+    expect(stale!.fixable).toBe(true);
+    expect(stale!.recommendation).toContain('mesa rebuild');
+  });
 });
 
 describe('findOrphanedLocks', () => {
@@ -183,6 +249,21 @@ describe('findOrphanedLocks', () => {
     const findings = findOrphanedLocks(ctx.paths);
     const warns = findings.filter((f) => f.level === 'warn');
     expect(warns.some((f) => f.message.includes('Corrupt'))).toBe(true);
+  });
+
+  it('orphaned lock finding has path, fixable, recommendation', () => {
+    const lockPath = join(paths.locksDir, 'ffffffffffff.lock');
+    writeFileSync(
+      lockPath,
+      JSON.stringify({ resource: 'test_res', pid: 99999, token: 'abc', acquiredAt: new Date().toISOString() }),
+      'utf-8',
+    );
+    const findings = findOrphanedLocks(ctx.paths);
+    const orphaned = findings.find((f) => f.message.includes('Orphaned'));
+    expect(orphaned).toBeDefined();
+    expect(orphaned!.path).toBe(lockPath);
+    expect(orphaned!.fixable).toBe(true);
+    expect(orphaned!.recommendation).toContain('mesa doctor --fix');
   });
 });
 

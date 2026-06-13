@@ -14,6 +14,10 @@ export interface DiagnosticFinding {
   level: 'ok' | 'warn' | 'error';
   category: string;
   message: string;
+  path?: string;
+  resourceId?: string;
+  fixable?: boolean;
+  recommendation?: string;
 }
 
 function pidIsAlive(pid: number): boolean {
@@ -57,6 +61,8 @@ export function validateEventLog(eventsDir: string): DiagnosticFinding[] {
             level: 'error',
             category: 'events',
             message: `Line ${lineNum}: invalid event — ${issues}`,
+            path: filePath,
+            recommendation: 'Remove or fix the corrupted line, or delete the events log to start fresh.',
           });
         }
       } catch {
@@ -65,6 +71,8 @@ export function validateEventLog(eventsDir: string): DiagnosticFinding[] {
           level: 'error',
           category: 'events',
           message: `Line ${lineNum}: corrupted — not valid JSON (${line.slice(0, 80)}...)`,
+          path: filePath,
+          recommendation: 'Remove or fix the corrupted line, or delete the events log to start fresh.',
         });
       }
     }
@@ -115,6 +123,10 @@ export function checkProjectionConsistency(ctx: MesaRuntimeContext): DiagnosticF
           level: 'warn',
           category: 'projections',
           message: `Task "${streamId}" has events but no projection — run "mesa rebuild".`,
+          resourceId: streamId,
+          path: join(ctx.paths.taskProjectionsDir, `${streamId}.json`),
+          fixable: true,
+          recommendation: 'Run "mesa rebuild" to regenerate this projection.',
         });
         continue;
       }
@@ -132,6 +144,10 @@ export function checkProjectionConsistency(ctx: MesaRuntimeContext): DiagnosticF
             level: 'warn',
             category: 'projections',
             message: `Task "${streamId}" projection is stale (last event seq ${maxSeq}, projection seq ${metaSeq}) — run "mesa rebuild".`,
+            resourceId: streamId,
+            path: join(ctx.paths.taskProjectionsDir, `${streamId}.json`),
+            fixable: true,
+            recommendation: 'Run "mesa rebuild" to regenerate this projection.',
           });
         }
       }
@@ -141,6 +157,10 @@ export function checkProjectionConsistency(ctx: MesaRuntimeContext): DiagnosticF
         level: 'error',
         category: 'projections',
         message: `Task "${streamId}" projection is corrupted (invalid JSON or schema) — run "mesa rebuild".`,
+        resourceId: streamId,
+        path: join(ctx.paths.taskProjectionsDir, `${streamId}.json`),
+        fixable: true,
+        recommendation: 'Run "mesa rebuild" to regenerate this projection.',
       });
     }
   }
@@ -157,6 +177,10 @@ export function checkProjectionConsistency(ctx: MesaRuntimeContext): DiagnosticF
           level: 'warn',
           category: 'projections',
           message: `Meeting "${streamId}" has events but no projection — run "mesa rebuild".`,
+          resourceId: streamId,
+          path: join(ctx.paths.meetingProjectionsDir, `${streamId}.json`),
+          fixable: true,
+          recommendation: 'Run "mesa rebuild" to regenerate this projection.',
         });
         continue;
       }
@@ -172,6 +196,10 @@ export function checkProjectionConsistency(ctx: MesaRuntimeContext): DiagnosticF
             level: 'warn',
             category: 'projections',
             message: `Meeting "${streamId}" projection is stale (last event seq ${maxSeq}, projection seq ${metaSeq}) — run "mesa rebuild".`,
+            resourceId: streamId,
+            path: join(ctx.paths.meetingProjectionsDir, `${streamId}.json`),
+            fixable: true,
+            recommendation: 'Run "mesa rebuild" to regenerate this projection.',
           });
         }
       }
@@ -181,6 +209,10 @@ export function checkProjectionConsistency(ctx: MesaRuntimeContext): DiagnosticF
         level: 'error',
         category: 'projections',
         message: `Meeting "${streamId}" projection is corrupted (invalid JSON or schema) — run "mesa rebuild".`,
+        resourceId: streamId,
+        path: join(ctx.paths.meetingProjectionsDir, `${streamId}.json`),
+        fixable: true,
+        recommendation: 'Run "mesa rebuild" to regenerate this projection.',
       });
     }
   }
@@ -197,6 +229,10 @@ export function checkProjectionConsistency(ctx: MesaRuntimeContext): DiagnosticF
           level: 'warn',
           category: 'projections',
           message: `Agent "${streamId}" has events but no projection — run "mesa rebuild".`,
+          resourceId: streamId,
+          path: join(ctx.paths.agentProjectionsDir, `${streamId}.json`),
+          fixable: true,
+          recommendation: 'Run "mesa rebuild" to regenerate this projection.',
         });
         continue;
       }
@@ -212,6 +248,10 @@ export function checkProjectionConsistency(ctx: MesaRuntimeContext): DiagnosticF
             level: 'warn',
             category: 'projections',
             message: `Agent "${streamId}" projection is stale (last event seq ${maxSeq}, projection seq ${metaSeq}) — run "mesa rebuild".`,
+            resourceId: streamId,
+            path: join(ctx.paths.agentProjectionsDir, `${streamId}.json`),
+            fixable: true,
+            recommendation: 'Run "mesa rebuild" to regenerate this projection.',
           });
         }
       }
@@ -221,6 +261,10 @@ export function checkProjectionConsistency(ctx: MesaRuntimeContext): DiagnosticF
         level: 'error',
         category: 'projections',
         message: `Agent "${streamId}" projection is corrupted (invalid JSON or schema) — run "mesa rebuild".`,
+        resourceId: streamId,
+        path: join(ctx.paths.agentProjectionsDir, `${streamId}.json`),
+        fixable: true,
+        recommendation: 'Run "mesa rebuild" to regenerate this projection.',
       });
     }
   }
@@ -266,6 +310,9 @@ export function findOrphanedLocks(paths: MesaWorkspacePaths): DiagnosticFinding[
           level: 'warn',
           category: 'locks',
           message: `Orphaned lock for "${data.resource}" (pid ${data.pid} is dead, acquired ${data.acquiredAt}).`,
+          path: lockPath,
+          fixable: true,
+          recommendation: 'Run "mesa doctor --fix" to remove orphaned lock files.',
         });
       }
     } catch {
@@ -273,6 +320,9 @@ export function findOrphanedLocks(paths: MesaWorkspacePaths): DiagnosticFinding[
         level: 'warn',
         category: 'locks',
         message: `Corrupt lock file: ${file}.`,
+        path: lockPath,
+        fixable: true,
+        recommendation: 'Run "mesa doctor --fix" to remove corrupt lock files.',
       });
       orphaned++;
     }
