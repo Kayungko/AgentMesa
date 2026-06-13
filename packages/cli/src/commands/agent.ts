@@ -1,7 +1,8 @@
 import {
   createRuntimeContext,
   registerAgent,
-  listAgents,
+  listAgentReadModels,
+  getAgentReadModel,
 } from '@agentmesa/core';
 import type { AgentRole } from '@agentmesa/protocol';
 import type { ParsedArgs } from '../parse-args.js';
@@ -42,7 +43,7 @@ export function runAgent(args: ParsedArgs): void {
       }
 
       case 'list': {
-        const agents = listAgents(ctx);
+        const agents = listAgentReadModels(ctx);
         outputResult(agents, json, () => {
           if (agents.length === 0) {
             console.log('No agents registered. Add one with: mesa agent add <id> <name> [roles]');
@@ -50,11 +51,27 @@ export function runAgent(args: ParsedArgs): void {
             console.log(`\n  ${'ID'.padEnd(20)} ${'Name'.padEnd(20)} ${'Client'.padEnd(16)} Roles`);
             console.log(`  ${'─'.repeat(20)} ${'─'.repeat(20)} ${'─'.repeat(16)} ${'─'.repeat(30)}`);
             for (const a of agents) {
-              console.log(`  ${a.id.padEnd(20)} ${a.name.padEnd(20)} ${a.client.padEnd(16)} ${a.roles.join(', ')}`);
+              const roles = Array.isArray(a.roles) ? (a.roles as string[]).join(', ') : String(a.roles ?? '');
+              console.log(`  ${(a.id as string).padEnd(20)} ${(a.name as string).padEnd(20)} ${(a.client as string).padEnd(16)} ${roles}`);
             }
             console.log(`\n  ${agents.length} agent(s)\n`);
           }
         });
+        return;
+      }
+
+      case 'show': {
+        const agentId = args.positional[0];
+        if (!agentId) {
+          console.log('Usage: mesa agent show <agentId>');
+          return;
+        }
+        const agent = getAgentReadModel(ctx, agentId);
+        if (!agent) {
+          outputResult(null, json, () => console.log(`Agent "${agentId}" not found.`));
+          return;
+        }
+        outputResult(agent, json);
         return;
       }
 
@@ -64,6 +81,7 @@ export function runAgent(args: ParsedArgs): void {
         console.log('Subcommands:');
         console.log('  add <id> <name> [roles]   Register an agent');
         console.log('  list                      List all agents');
+        console.log('  show <id>                 Show agent details');
     }
   } catch (err) {
     printError(err);

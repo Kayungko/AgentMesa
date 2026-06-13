@@ -71,6 +71,7 @@ export function initWorkspace(rootDir: string): MesaWorkspacePaths {
 
   const config: MesaConfig = {
     protocolVersion: currentProtocolVersion,
+    readModel: { mode: 'hybrid' },
   };
 
   writeJson(join(paths.mesaDir, 'config.json'), config);

@@ -30,6 +30,22 @@ Projection read services are available via `projection-read-service.ts`:
 - `listTaskProjections(ctx)` / `listMeetingProjections(ctx)` / `listAgentProjections(ctx)`
   return all rebuilt projections in the category.
 
+Projection freshness checks:
+- `isTaskProjectionFresh(ctx, id)` / `isMeetingProjectionFresh(ctx, id)` / `isAgentProjectionFresh(ctx, id)`
+  compare `_meta.lastSequence` against the max sequence in the event log. Returns `false` when
+  the projection is missing or has fallen behind new events.
+
+**Authoritative read model** is provided by `read-model-service.ts`:
+- `getTaskReadModel(ctx, id)` / `getMeetingReadModel(ctx, id)` / `getAgentReadModel(ctx, id)`
+  return the current entity state as `Record<string, unknown>` (or `null` if not found).
+- `listTaskReadModels(ctx)` / `listMeetingReadModels(ctx)` / `listAgentReadModels(ctx)`
+  return all entities of that type.
+- The read mode is controlled by `config.readModel.mode`:
+  - `hybrid` (default): try projections first, fall back to legacy files
+  - `projection`: only read from event-rebuilt projections
+  - `legacy`: only read from `.agentmesa/tasks/` etc. (backward compatible)
+- The CLI `show` and `list` commands for task, meeting, and agent all use the read-model-service.
+
 Task lifecycle semantics:
 - `deleteTask` hard-deletes the task file and emits `task_deleted`.
 - `archiveTask` preserves the task file (marks it `archived=true`) and emits `task_archived`.
@@ -42,8 +58,15 @@ but not yet the sole source of truth.
 
 **Known limits:** Incremental rebuild (replaying only new events since last build) and
 staleness auto-detection on read are not yet implemented. Projections must be rebuilt
-explicitly via `rebuildAllProjections` or `mesa rebuild`. The `mesa doctor` command
-detects missing and stale projections but does not auto-rebuild.
+explicitly via `rebuildAllProjections` or the `mesa rebuild` CLI command (supports `--json`
+for programmatic consumption and `--no-clean` to skip stale projection removal).
+
+The `mesa doctor` command detects stale projections (via `isTaskProjectionFresh` etc.) and
+reports them as fixable warnings with a recommendation to run `mesa rebuild`. It does not
+auto-rebuild.
+
+The `mesa agent show <id>` subcommand is available alongside the existing `add` and `list`
+subcommands.
 
 Event type names are frozen as underscore literals (`task_created`, `task_status_changed`, ...) in the `eventTypeSchema` enum in `packages/protocol/src/schemas.ts`. That enum is the single source of truth for the vocabulary: the `EventType` TypeScript union is inferred from it, and a test in `schemas.test.ts` locks the exact set so any addition or rename is a deliberate, reviewed change. Because the event log is append-only, this naming is permanent once written to disk. The tables below use that frozen vocabulary.
 
@@ -187,16 +210,22 @@ Projections are rebuilt whenever:
 
 ### Staleness Detection
 
-Each projection stores a `lastEventSequence` number matching the count of events in its stream at build time. Before reading a projection, the runtime compares this number to the actual line count of the stream file. A mismatch means the projection is stale and must be rebuilt.
+Each projection stores `_meta` metadata recording the state of the event log at build time:
 
 ```ts
 interface ProjectionMeta {
-  entityId: string;
-  entityType: string;
-  lastEventSequence: number;
-  builtAt: string;
+  source: 'event_rebuild';
+  rebuiltAt: string;         // ISO 8601 timestamp
+  lastEventId: string;       // ID of the last event replayed
+  lastSequence: number;      // sequence number of the last event replayed
+  projectionVersion: 1;
 }
 ```
+
+Freshness is checked by comparing `_meta.lastSequence` against the maximum `sequence` in
+the entity's event stream. `isTaskProjectionFresh(ctx, id)` (and equivalents for meetings
+and agents) returns `false` when the projection is missing or has fallen behind. The
+`mesa doctor` command surfaces stale projections as `warn`-level fixable findings.
 
 ## 5. File Layout
 

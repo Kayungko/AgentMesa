@@ -69,7 +69,10 @@ function loadOrCreateConfig(
   storage: MesaStorageAdapter
 ): MesaConfig {
   if (content === null) {
-    const config: MesaConfig = { protocolVersion: currentProtocolVersion };
+    const config: MesaConfig = {
+      protocolVersion: currentProtocolVersion,
+      readModel: { mode: 'hybrid' },
+    };
     storage.writeText(configPath, `${JSON.stringify(config, null, 2)}\n`);
     return config;
   }
@@ -79,7 +82,10 @@ function loadOrCreateConfig(
     if (typeof parsed.protocolVersion !== 'string') {
       throw new Error('protocolVersion is required');
     }
-    return parsed as MesaConfig;
+    return {
+      ...parsed,
+      readModel: { mode: parsed.readModel?.mode ?? 'hybrid' },
+    } as MesaConfig;
   } catch (error) {
     throw new MesaError(
       'VALIDATION_ERROR',

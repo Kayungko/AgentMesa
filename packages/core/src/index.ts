@@ -19,4 +19,5 @@ export * from './services/event-service.js';
 export * from './services/projection-schemas.js';
 export * from './services/projection-service.js';
 export * from './services/projection-read-service.js';
+export * from './services/read-model-service.js';
 export * from './services/diagnostics.js';

@@ -101,3 +101,35 @@ export function listAgentProjections(ctx: MesaRuntimeContext, options?: ReadProj
 
 // Re-export types
 export type { TaskProjection, MeetingProjection, AgentProjection };
+
+// --- Freshness ---
+
+function maxEventSequence(ctx: MesaRuntimeContext, streamId: string): number {
+  const events = ctx.eventStore.list({ streamId });
+  if (events.length === 0) return -1;
+  return events.reduce((max, e) => Math.max(max, e.sequence), -1);
+}
+
+export function isTaskProjectionFresh(ctx: MesaRuntimeContext, taskId: string): boolean {
+  const proj = getTaskProjection(ctx, taskId, { strict: false });
+  if (!proj) return false;
+  const lastSeq = (proj._meta as { lastSequence?: number } | undefined)?.lastSequence;
+  if (lastSeq === undefined) return false;
+  return lastSeq >= maxEventSequence(ctx, taskId);
+}
+
+export function isMeetingProjectionFresh(ctx: MesaRuntimeContext, meetingId: string): boolean {
+  const proj = getMeetingProjection(ctx, meetingId, { strict: false });
+  if (!proj) return false;
+  const lastSeq = (proj._meta as { lastSequence?: number } | undefined)?.lastSequence;
+  if (lastSeq === undefined) return false;
+  return lastSeq >= maxEventSequence(ctx, meetingId);
+}
+
+export function isAgentProjectionFresh(ctx: MesaRuntimeContext, agentId: string): boolean {
+  const proj = getAgentProjection(ctx, agentId, { strict: false });
+  if (!proj) return false;
+  const lastSeq = (proj._meta as { lastSequence?: number } | undefined)?.lastSequence;
+  if (lastSeq === undefined) return false;
+  return lastSeq >= maxEventSequence(ctx, agentId);
+}

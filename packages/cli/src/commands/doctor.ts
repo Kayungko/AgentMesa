@@ -8,6 +8,12 @@ import {
   validateEventLog,
   checkProjectionConsistency,
   findOrphanedLocks,
+  isTaskProjectionFresh,
+  isMeetingProjectionFresh,
+  isAgentProjectionFresh,
+  listTaskProjections,
+  listMeetingProjections,
+  listAgentProjections,
 } from '@agentmesa/core';
 import type { DiagnosticFinding } from '@agentmesa/core';
 import { existsSync } from 'node:fs';
@@ -124,6 +130,47 @@ export function runDoctor(args: ParsedArgs): void {
       const projFindings = checkProjectionConsistency(ctx);
       for (const f of projFindings) {
         record(f);
+      }
+
+      // Stale projection freshness check
+      for (const t of listTaskProjections(ctx, { strict: false })) {
+        const taskId = t.id as string;
+        if (!isTaskProjectionFresh(ctx, taskId)) {
+          record({
+            level: 'warn',
+            category: 'projection',
+            message: `Stale projection for task "${taskId}" — events have been added since the last rebuild.`,
+            resourceId: taskId,
+            fixable: true,
+            recommendation: 'Run "mesa rebuild" to regenerate projections.',
+          });
+        }
+      }
+      for (const m of listMeetingProjections(ctx, { strict: false })) {
+        const meetingId = m.id as string;
+        if (!isMeetingProjectionFresh(ctx, meetingId)) {
+          record({
+            level: 'warn',
+            category: 'projection',
+            message: `Stale projection for meeting "${meetingId}" — events have been added since the last rebuild.`,
+            resourceId: meetingId,
+            fixable: true,
+            recommendation: 'Run "mesa rebuild" to regenerate projections.',
+          });
+        }
+      }
+      for (const a of listAgentProjections(ctx, { strict: false })) {
+        const agentId = a.id as string;
+        if (!isAgentProjectionFresh(ctx, agentId)) {
+          record({
+            level: 'warn',
+            category: 'projection',
+            message: `Stale projection for agent "${agentId}" — events have been added since the last rebuild.`,
+            resourceId: agentId,
+            fixable: true,
+            recommendation: 'Run "mesa rebuild" to regenerate projections.',
+          });
+        }
       }
 
       const lockFindings = findOrphanedLocks(ctx.paths);

@@ -7,8 +7,8 @@ import type { MesaWorkspacePaths } from '../workspace.js';
 import { createRuntimeContext } from '../runtime/create-runtime-context.js';
 import type { MesaRuntimeContext } from '../runtime/types.js';
 import { MesaError } from '../errors.js';
-import { createTask } from '../services/task-service.js';
-import { createMeeting } from '../services/meeting-service.js';
+import { createTask, updateTaskStatus } from '../services/task-service.js';
+import { createMeeting, updateMeetingStatus } from '../services/meeting-service.js';
 import { registerAgent } from '../services/agent-registry.js';
 import { rebuildAllProjections } from '../services/projection-service.js';
 import {
@@ -18,6 +18,9 @@ import {
   listTaskProjections,
   listMeetingProjections,
   listAgentProjections,
+  isTaskProjectionFresh,
+  isMeetingProjectionFresh,
+  isAgentProjectionFresh,
 } from '../services/projection-read-service.js';
 
 let testDir: string;
@@ -221,5 +224,52 @@ describe('strict validation', () => {
     const list = listAgentProjections(ctx, { strict: false });
     expect(list).toHaveLength(1);
     expect(list[0]!.id).toBe('ag-survivor');
+  });
+});
+
+describe('projection freshness', () => {
+  it('fresh after rebuild', () => {
+    const task = createTask(ctx, { title: 'Fresh' });
+    rebuildAllProjections(ctx);
+
+    expect(isTaskProjectionFresh(ctx, task.id)).toBe(true);
+  });
+
+  it('stale after mutation adds event', () => {
+    const task = createTask(ctx, { title: 'Stale soon' });
+    rebuildAllProjections(ctx);
+    updateTaskStatus(ctx, task.id, 'in_progress');
+
+    expect(isTaskProjectionFresh(ctx, task.id)).toBe(false);
+  });
+
+  it('not fresh when projection missing', () => {
+    expect(isTaskProjectionFresh(ctx, 'nonexistent')).toBe(false);
+  });
+
+  it('meeting fresh after rebuild', () => {
+    const meeting = createMeeting(ctx, { title: 'M' });
+    rebuildAllProjections(ctx);
+
+    expect(isMeetingProjectionFresh(ctx, meeting.id)).toBe(true);
+  });
+
+  it('meeting stale after status change', () => {
+    const meeting = createMeeting(ctx, { title: 'M2' });
+    rebuildAllProjections(ctx);
+    updateMeetingStatus(ctx, meeting.id, 'closed');
+
+    expect(isMeetingProjectionFresh(ctx, meeting.id)).toBe(false);
+  });
+
+  it('agent fresh after rebuild', () => {
+    registerAgent(ctx, { id: 'a', name: 'A', client: 'c', roles: ['builder'], status: 'available' });
+    rebuildAllProjections(ctx);
+
+    expect(isAgentProjectionFresh(ctx, 'a')).toBe(true);
+  });
+
+  it('agent not fresh when projection missing', () => {
+    expect(isAgentProjectionFresh(ctx, 'nobody')).toBe(false);
   });
 });

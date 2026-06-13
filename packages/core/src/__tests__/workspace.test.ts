@@ -63,6 +63,12 @@ describe('loadConfig', () => {
     expect(config.protocolVersion).toBe('0.2.0');
   });
 
+  it('returns readModel with hybrid default after init', () => {
+    initWorkspace(testDir);
+    const config = loadConfig(testDir);
+    expect(config.readModel).toEqual({ mode: 'hybrid' });
+  });
+
   it('throws if not initialized', () => {
     expect(() => loadConfig(testDir)).toThrow(WorkspaceNotFoundError);
   });

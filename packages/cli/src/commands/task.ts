@@ -1,8 +1,8 @@
 import {
   createRuntimeContext,
   createTask,
-  getTask,
-  listTasks,
+  listTaskReadModels,
+  getTaskReadModel,
   updateTaskStatus,
   assignTask,
 } from '@agentmesa/core';
@@ -41,7 +41,7 @@ export function runTask(args: ParsedArgs): void {
       }
 
       case 'list': {
-        const tasks = listTasks(ctx);
+        const tasks = listTaskReadModels(ctx);
         outputResult(tasks, json, () => {
           if (tasks.length === 0) {
             console.log('No tasks found. Create one with: mesa task create <title>');
@@ -49,7 +49,7 @@ export function runTask(args: ParsedArgs): void {
             console.log(`\n  ${'ID'.padEnd(10)} ${'Status'.padEnd(22)} ${'Title'}`);
             console.log(`  ${'─'.repeat(10)} ${'─'.repeat(22)} ${'─'.repeat(40)}`);
             for (const t of tasks) {
-              console.log(`  ${t.id.padEnd(10)} ${t.status.padEnd(22)} ${t.title}`);
+              console.log(`  ${(t.id as string).padEnd(10)} ${(t.status as string).padEnd(22)} ${t.title}`);
             }
             console.log(`\n  ${tasks.length} task(s)\n`);
           }
@@ -63,7 +63,12 @@ export function runTask(args: ParsedArgs): void {
           console.log('Usage: mesa task show <taskId>');
           return;
         }
-        outputResult(getTask(ctx, taskId), json);
+        const task = getTaskReadModel(ctx, taskId);
+        if (!task) {
+          outputResult(null, json, () => console.log(`Task "${taskId}" not found.`));
+          return;
+        }
+        outputResult(task, json);
         return;
       }
 

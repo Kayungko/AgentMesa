@@ -90,6 +90,54 @@ describe('createRuntimeContext', () => {
 
     expect(ctx.config.projectName).toBe('AgentMesa');
   });
+
+  it('defaults readModel to hybrid when not in config', () => {
+    const storage = new FileStorageAdapter();
+    const configPath = join(testDir, '.agentmesa', 'config.json');
+    storage.writeText(
+      configPath,
+      JSON.stringify({
+        protocolVersion: currentProtocolVersion,
+      })
+    );
+
+    const ctx = createRuntimeContext({
+      rootDir: testDir,
+      actor: { id: 'user:test', type: 'user', roles: ['owner'] },
+      storage,
+    });
+
+    expect(ctx.config.readModel).toEqual({ mode: 'hybrid' });
+  });
+
+  it('preserves existing readModel.mode from config', () => {
+    const storage = new FileStorageAdapter();
+    const configPath = join(testDir, '.agentmesa', 'config.json');
+    storage.writeText(
+      configPath,
+      JSON.stringify({
+        protocolVersion: currentProtocolVersion,
+        readModel: { mode: 'projection' },
+      })
+    );
+
+    const ctx = createRuntimeContext({
+      rootDir: testDir,
+      actor: { id: 'user:test', type: 'user', roles: ['owner'] },
+      storage,
+    });
+
+    expect(ctx.config.readModel).toEqual({ mode: 'projection' });
+  });
+
+  it('new config has readModel hybrid by default', () => {
+    const ctx = createRuntimeContext({
+      rootDir: testDir,
+      actor: { id: 'user:test', type: 'user', roles: ['owner'] },
+    });
+
+    expect(ctx.config.readModel).toEqual({ mode: 'hybrid' });
+  });
 });
 
 describe('FileStorageAdapter', () => {

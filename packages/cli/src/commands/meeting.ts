@@ -1,8 +1,8 @@
 import {
   createRuntimeContext,
   createMeeting,
-  listMeetings,
-  getMeeting,
+  listMeetingReadModels,
+  getMeetingReadModel,
 } from '@agentmesa/core';
 import type { ParsedArgs } from '../parse-args.js';
 import { printSuccess, printError, outputResult } from '../output.js';
@@ -33,7 +33,7 @@ export function runMeeting(args: ParsedArgs): void {
       }
 
       case 'list': {
-        const meetings = listMeetings(ctx);
+        const meetings = listMeetingReadModels(ctx);
         outputResult(meetings, json, () => {
           if (meetings.length === 0) {
             console.log('No meetings found. Create one with: mesa meeting create <title>');
@@ -41,7 +41,8 @@ export function runMeeting(args: ParsedArgs): void {
             console.log(`\n  ${'ID'.padEnd(14)} ${'Status'.padEnd(12)} ${'Tasks'.padEnd(8)} ${'Title'}`);
             console.log(`  ${'─'.repeat(14)} ${'─'.repeat(12)} ${'─'.repeat(8)} ${'─'.repeat(40)}`);
             for (const m of meetings) {
-              console.log(`  ${m.id.padEnd(14)} ${m.status.padEnd(12)} ${String(m.tasks.length).padEnd(8)} ${m.title}`);
+              const taskCount = ((m.taskIds ?? m.tasks ?? []) as string[]).length;
+              console.log(`  ${(m.id as string).padEnd(14)} ${(m.status as string).padEnd(12)} ${String(taskCount).padEnd(8)} ${m.title}`);
             }
             console.log(`\n  ${meetings.length} meeting(s)\n`);
           }
@@ -55,7 +56,12 @@ export function runMeeting(args: ParsedArgs): void {
           console.log('Usage: mesa meeting show <meetingId>');
           return;
         }
-        outputResult(getMeeting(ctx, meetingId), json);
+        const meeting = getMeetingReadModel(ctx, meetingId);
+        if (!meeting) {
+          outputResult(null, json, () => console.log(`Meeting "${meetingId}" not found.`));
+          return;
+        }
+        outputResult(meeting, json);
         return;
       }
 

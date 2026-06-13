@@ -10,6 +10,7 @@ import { runMeeting } from './commands/meeting.js';
 import { runAgent } from './commands/agent.js';
 import { runEvents, runTimeline } from './commands/events.js';
 import { runTransports } from './commands/transports.js';
+import { runRebuild } from './commands/rebuild.js';
 
 const args = parseArgs(process.argv);
 
@@ -59,6 +60,10 @@ switch (args.command) {
     runTransports(args);
     break;
 
+  case 'rebuild':
+    runRebuild(args);
+    break;
+
   case 'help':
   default:
     printHelp();
@@ -86,9 +91,11 @@ State Commands:
   artifact show <id>          Show artifact details
   agent add <id> <name>       Register an agent
   agent list                  List registered agents
+  agent show <id>             Show agent details
 
 Inspection Commands:
   doctor [--fix]              Check workspace health (--fix removes orphaned temp files)
+  rebuild                     Rebuild all projections from events
   events list [filters]       List events (--meeting, --task, --type, --actor)
   timeline <id>                Auto-detect task or meeting timeline
   timeline task <id>           Show task event timeline + projection

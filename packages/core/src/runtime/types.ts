@@ -16,6 +16,8 @@ export interface MesaActor {
   client?: string;
 }
 
+export type ReadModelMode = 'legacy' | 'projection' | 'hybrid';
+
 export interface MesaConfig {
   protocolVersion: string;
   projectName?: string;
@@ -23,6 +25,9 @@ export interface MesaConfig {
   defaultReviewer?: string;
   policy?: {
     mode?: 'allow-all' | 'role-based';
+  };
+  readModel?: {
+    mode?: ReadModelMode;
   };
 }
 
