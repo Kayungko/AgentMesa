@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { currentProtocolVersion, generateEventId } from '@agentmesa/protocol';
 import { createRuntimeContext } from '../runtime/create-runtime-context.js';
 import { FileStorageAdapter } from '../runtime/file-storage-adapter.js';
+import { FileEventStore } from '../runtime/file-event-store.js';
+import { InMemoryMesaEventStore } from '../runtime/event-store.js';
 
 let testDir: string;
 
@@ -33,6 +35,39 @@ describe('createRuntimeContext', () => {
       allowed: true,
     });
     expect(ctx.logger).toBeDefined();
+  });
+
+  it('creates events and projections directories', () => {
+    const ctx = createRuntimeContext({
+      rootDir: testDir,
+      actor: { id: 'user:test', type: 'user', roles: ['owner'] },
+    });
+
+    expect(ctx.storage.exists(ctx.paths.eventsDir)).toBe(true);
+    expect(ctx.storage.exists(ctx.paths.projectionsDir)).toBe(true);
+    expect(ctx.storage.exists(ctx.paths.taskProjectionsDir)).toBe(true);
+    expect(ctx.storage.exists(ctx.paths.meetingProjectionsDir)).toBe(true);
+    expect(ctx.storage.exists(ctx.paths.agentProjectionsDir)).toBe(true);
+  });
+
+  it('uses FileEventStore by default', () => {
+    const ctx = createRuntimeContext({
+      rootDir: testDir,
+      actor: { id: 'user:test', type: 'user', roles: ['owner'] },
+    });
+
+    expect(ctx.eventStore).toBeInstanceOf(FileEventStore);
+  });
+
+  it('allows injecting InMemoryMesaEventStore via options', () => {
+    const memoryStore = new InMemoryMesaEventStore();
+    const ctx = createRuntimeContext({
+      rootDir: testDir,
+      actor: { id: 'user:test', type: 'user', roles: ['owner'] },
+      eventStore: memoryStore,
+    });
+
+    expect(ctx.eventStore).toBe(memoryStore);
   });
 
   it('loads an existing config', () => {

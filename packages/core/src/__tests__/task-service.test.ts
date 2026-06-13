@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { initWorkspace } from '../workspace.js';
@@ -200,7 +200,36 @@ describe('runtime context integration', () => {
     });
 
     expect(() => createTask(deniedCtx, { title: 'Blocked task' })).toThrow(
-      'Policy denied'
+      'Policy denied',
     );
+  });
+});
+
+describe('event persistence', () => {
+  it('writes task_created to events.jsonl', () => {
+    createTask(ctx, { title: 'Persistent task' });
+    const raw = readFileSync(join(ctx.paths.eventsDir, 'events.jsonl'), 'utf-8');
+    expect(raw).toContain('"type":"task_created"');
+    expect(raw).toContain('"title":"Persistent task"');
+  });
+
+  it('writes task_status_changed after update', () => {
+    const task = createTask(ctx, { title: 'Status task' });
+    updateTaskStatus(ctx, task.id, 'in_progress');
+    const events = ctx.eventStore.list({ streamId: task.id });
+    expect(events.map((e) => e.type)).toEqual(['task_created', 'task_status_changed']);
+  });
+
+  it('survives a fresh createRuntimeContext', () => {
+    const task = createTask(ctx, { title: 'Surviving task' });
+
+    const ctx2 = createRuntimeContext({
+      rootDir: testDir,
+      actor: { id: 'user:test', type: 'user', roles: ['owner'] },
+    });
+    const events = ctx2.eventStore.list({ streamId: task.id });
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe('task_created');
+    expect(events[0]?.actor).toBe('user:test');
   });
 });
