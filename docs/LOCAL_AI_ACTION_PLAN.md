@@ -100,17 +100,21 @@ Acceptance:
 
 ## Priority 4: Event-Backed State
 
-Status: `minimal_projection_rebuild_done`
+Status: `minimal_projection_rebuild_done` (+ engineering closure)
 
 - FileEventStore: append-only JSONL at `.agentmesa/events/events.jsonl`, validates against MesaEventSchema.
 - Default `MesaRuntimeContext` eventStore is `FileEventStore`; events survive process exit.
 - All core services append runtime events through the file store.
 - Projection rebuild: `rebuildTaskProjections` / `rebuildMeetingProjections` / `rebuildAgentProjections` / `rebuildAllProjections` replay events and write to `.agentmesa/projections/`.
+- `rebuildAllProjections(ctx, { clean: true })` removes stale projections before rebuild.
+- Event replay is deterministic (sort: sequence → timestamp → id).
+- Projection read services: `getTaskProjection` / `getMeetingProjection` / `getAgentProjection` / `listTaskProjections` / `listMeetingProjections` / `listAgentProjections`.
+- `archiveTask` emits `task_archived` (soft-archive, file preserved); replay produces tombstone same as `task_deleted`.
 - Meeting seed tasks/agents are preserved during rebuild (reads both `meeting.tasks`/`meeting.agents` and future alias fields).
-- Deleted tasks produce tombstone projections (not removed).
+- Deleted/archived tasks produce tombstone projections (not removed).
 - Projections validate required fields before writing (id, type, _meta, taskIds/agentIds for meetings).
 - Existing services still read from `.agentmesa/tasks/` etc. — projections not yet the authoritative read path.
-- Stale projection cleanup and full event-as-source-of-truth are not yet implemented.
+- Incremental rebuild and staleness auto-detection are not yet implemented.
 
 Direction:
 

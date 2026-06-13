@@ -436,6 +436,7 @@ describe('MesaEventSchema', () => {
   it('accepts runtime context mutation event types', () => {
     const eventTypes = [
       'task_deleted',
+      'task_archived',
       'meeting_status_changed',
       'meeting_task_added',
       'meeting_agent_added',
@@ -467,6 +468,7 @@ describe('MesaEventSchema', () => {
       'task_status_changed',
       'task_assigned',
       'task_deleted',
+      'task_archived',
       'meeting_created',
       'meeting_status_changed',
       'meeting_task_added',

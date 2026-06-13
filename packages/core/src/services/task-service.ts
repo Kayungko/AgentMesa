@@ -177,6 +177,14 @@ export function assignTask(
   return result;
 }
 
+/**
+ * Hard-deletes the task file. The task is removed from the filesystem.
+ * A {@link task_deleted} event is emitted; projection rebuild produces a tombstone
+ * (deleted=true, deletedAt=timestamp).
+ *
+ * Prefer {@link archiveTask} when you need to preserve the task record and only
+ * mark it as inactive.
+ */
 export function deleteTask(ctx: MesaRuntimeContext, taskId: string): boolean {
   assertPolicy(ctx, 'task.delete', `task:${taskId}`);
   const task = getTask(ctx, taskId);
@@ -192,6 +200,38 @@ export function deleteTask(ctx: MesaRuntimeContext, taskId: string): boolean {
   });
 
   return deleted;
+}
+
+/**
+ * Soft-archives a task. The task file is preserved and marked with archived=true;
+ * an {@link task_archived} event is emitted. Unlike {@link deleteTask}, the task
+ * file remains readable on disk — it is simply excluded from active-task queries.
+ *
+ * Projection rebuild treats task_archived the same as task_deleted: the
+ * projection is marked deleted=true with deletedAt set to the event timestamp.
+ */
+export function archiveTask(ctx: MesaRuntimeContext, taskId: string): MesaTask {
+  assertPolicy(ctx, 'task.delete', `task:${taskId}`);
+  const task = getTask(ctx, taskId);
+
+  const archived: MesaTask = {
+    ...task,
+    archived: true,
+    updatedAt: new Date().toISOString(),
+  };
+
+  const result = MesaTaskSchema.parse(archived);
+  writeTask(ctx, result);
+
+  appendRuntimeEvent(ctx, {
+    meetingId: task.meetingId,
+    type: 'task_archived',
+    streamId: taskId,
+    streamType: 'task',
+    data: { taskId },
+  });
+
+  return result;
 }
 
 function writeTask(ctx: MesaRuntimeContext, task: MesaTask): void {

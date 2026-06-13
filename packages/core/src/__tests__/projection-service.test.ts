@@ -6,7 +6,7 @@ import { initWorkspace } from '../workspace.js';
 import type { MesaWorkspacePaths } from '../workspace.js';
 import { createRuntimeContext } from '../runtime/create-runtime-context.js';
 import type { MesaRuntimeContext } from '../runtime/types.js';
-import { createTask, updateTaskStatus, assignTask, deleteTask } from '../services/task-service.js';
+import { createTask, updateTaskStatus, assignTask, deleteTask, archiveTask } from '../services/task-service.js';
 import { createMeeting, updateMeetingStatus, addTaskToMeeting, addAgentToMeeting } from '../services/meeting-service.js';
 import { registerAgent } from '../services/agent-registry.js';
 import { rebuildTaskProjections, rebuildMeetingProjections, rebuildAgentProjections, rebuildAllProjections } from '../services/projection-service.js';
@@ -218,5 +218,51 @@ describe('rebuildAllProjections', () => {
   it('returns zero counts for an empty event log', () => {
     const result = rebuildAllProjections(ctx);
     expect(result).toEqual({ tasks: 0, meetings: 0, agents: 0 });
+  });
+
+  it('removes stale projections with clean:true', () => {
+    const task = createTask(ctx, { title: 'Clean test' });
+    rebuildAllProjections(ctx);
+
+    // Manually create a stale projection file not backed by any event
+    const stalePath = join(ctx.paths.taskProjectionsDir, 'stale_deadbeef.json');
+    ctx.storage.writeText(stalePath, JSON.stringify({ id: 'stale_deadbeef', type: 'task', _meta: { source: 'event_rebuild', rebuiltAt: new Date().toISOString(), lastEventId: 'e_unknown', lastSequence: 0, projectionVersion: 1 } }));
+
+    // Stale projection exists before clean
+    expect(ctx.storage.exists(stalePath)).toBe(true);
+
+    // Rebuild with clean — stale projection removed, real one rebuilt
+    const result = rebuildAllProjections(ctx, { clean: true });
+    expect(result.tasks).toBe(1);
+    expect(ctx.storage.exists(stalePath)).toBe(false);
+  });
+});
+
+describe('task_archived replay', () => {
+  it('produces a tombstone projection from task_archived event', () => {
+    const task = createTask(ctx, { title: 'Archive me' });
+    archiveTask(ctx, task.id);
+
+    const count = rebuildTaskProjections(ctx);
+    expect(count).toBe(1);
+
+    const proj = readProjection(ctx.paths.taskProjectionsDir, task.id);
+    expect(proj.id).toBe(task.id);
+    expect(proj.deleted).toBe(true);
+    expect(proj.deletedAt).toBeDefined();
+  });
+
+  it('treats task_archived same as task_deleted in rebuild', () => {
+    const t1 = createTask(ctx, { title: 'Deleted' });
+    const t2 = createTask(ctx, { title: 'Archived' });
+    deleteTask(ctx, t1.id);
+    archiveTask(ctx, t2.id);
+
+    rebuildTaskProjections(ctx);
+    const proj1 = readProjection(ctx.paths.taskProjectionsDir, t1.id);
+    const proj2 = readProjection(ctx.paths.taskProjectionsDir, t2.id);
+
+    expect(proj1.deleted).toBe(true);
+    expect(proj2.deleted).toBe(true);
   });
 });

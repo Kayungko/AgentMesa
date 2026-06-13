@@ -14,11 +14,26 @@ through the file store.
 
 Minimal projection rebuild is implemented via `projection-service.ts`:
 - `rebuildTaskProjections(ctx)` replays task events (task_created, task_status_changed,
-  task_assigned, task_deleted → tombstone) and writes to `.agentmesa/projections/tasks/<id>.json`.
+  task_assigned, task_deleted / task_archived → tombstone) and writes to `.agentmesa/projections/tasks/<id>.json`.
 - `rebuildMeetingProjections(ctx)` replays meeting events (meeting_created,
   meeting_status_changed, meeting_task_added, meeting_agent_added) and writes to
   `.agentmesa/projections/meetings/<id>.json`.
-- `rebuildAllProjections(ctx)` runs both.
+- `rebuildAgentProjections(ctx)` replays agent events (agent_registered) and writes to
+  `.agentmesa/projections/agents/<id>.json`.
+- `rebuildAllProjections(ctx, { clean })` runs all three. With `{ clean: true }`, stale
+  projections (files not backed by any event stream) are removed before rebuilding.
+- Replay is deterministic: events are sorted by `sequence`, then `timestamp`, then `id`.
+
+Projection read services are available via `projection-read-service.ts`:
+- `getTaskProjection(ctx, id)` / `getMeetingProjection(ctx, id)` / `getAgentProjection(ctx, id)`
+  return a single rebuilt projection or `null` if not found.
+- `listTaskProjections(ctx)` / `listMeetingProjections(ctx)` / `listAgentProjections(ctx)`
+  return all rebuilt projections in the category.
+
+Task lifecycle semantics:
+- `deleteTask` hard-deletes the task file and emits `task_deleted`.
+- `archiveTask` preserves the task file (marks it `archived=true`) and emits `task_archived`.
+  Both events produce tombstone projections on rebuild.
 
 Projections are written to the `projections/` directory and carry `_meta` fields (source,
 rebuiltAt, lastEventId, lastSequence). Existing services still read from `.agentmesa/tasks/`
@@ -61,6 +76,7 @@ The current state of any entity is a **projection** rebuilt by replaying its str
 | `task_status_changed` | `{ previousStatus, newStatus, reason? }` | Task transitions between status states |
 | `task_assigned` | `{ previousAssignee?, newAssignee, reviewer? }` | Agent assignment (or re-assignment) |
 | `task_deleted` | `{ reason? }` | A task is removed from the workspace |
+| `task_archived` | `{ taskId }` | A task is soft-archived (file preserved, marked archived) |
 
 ### Meeting Events
 

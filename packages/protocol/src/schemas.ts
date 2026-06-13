@@ -112,6 +112,7 @@ export const eventTypeSchema = z.enum([
   'task_status_changed',
   'task_assigned',
   'task_deleted',
+  'task_archived',
   'meeting_created',
   'meeting_status_changed',
   'meeting_task_added',
@@ -219,6 +220,7 @@ export const MesaTaskSchema = z.object({
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
   closedAt: z.string().optional(),
+  archived: z.boolean().optional(),
 });
 
 // --- Message ---

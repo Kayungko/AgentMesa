@@ -3,6 +3,11 @@ import { join } from 'node:path';
 import { MesaError } from '../errors.js';
 import type { MesaRuntimeContext } from '../runtime/types.js';
 
+export interface RebuildOptions {
+  /** Remove all existing projection files before rebuilding. */
+  clean?: boolean;
+}
+
 // --- Lightweight projection validation ---
 
 interface ProjectionMeta {
@@ -57,6 +62,15 @@ function buildMeta(lastEvent: MesaEvent) {
   };
 }
 
+/**
+ * Sort order for deterministic replay:
+ *   1. sequence (numeric)
+ *   2. timestamp (ISO 8601 lexical)
+ *   3. id (lexical, tiebreaker)
+ *
+ * This guarantees the same projection output for the same set of events,
+ * even when multiple events share a sequence number or timestamp.
+ */
 function eventsByStream(events: MesaEvent[]): Map<string, MesaEvent[]> {
   const map = new Map<string, MesaEvent[]>();
   for (const e of events) {
@@ -68,7 +82,7 @@ function eventsByStream(events: MesaEvent[]): Map<string, MesaEvent[]> {
     }
   }
   for (const list of map.values()) {
-    list.sort((a, b) => a.sequence - b.sequence || a.timestamp.localeCompare(b.timestamp));
+    list.sort((a, b) => a.sequence - b.sequence || a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id));
   }
   return map;
 }
@@ -106,7 +120,7 @@ function replayTask(events: MesaEvent[]) {
       if (data.reviewer !== undefined) projection.reviewer = data.reviewer;
     }
 
-    if (event.type === 'task_deleted') {
+    if (event.type === 'task_deleted' || event.type === 'task_archived') {
       projection.deleted = true;
       projection.deletedAt = event.timestamp;
     }
@@ -213,7 +227,21 @@ function writeProjection(
   ctx.storage.writeText(filePath, `${JSON.stringify(projection, null, 2)}\n`);
 }
 
-export function rebuildTaskProjections(ctx: MesaRuntimeContext): number {
+function cleanProjectionDir(ctx: MesaRuntimeContext, dir: string): number {
+  const files = ctx.storage.list(dir);
+  let removed = 0;
+  for (const file of files) {
+    ctx.storage.delete(join(dir, file));
+    removed++;
+  }
+  return removed;
+}
+
+export function rebuildTaskProjections(ctx: MesaRuntimeContext, options?: RebuildOptions): number {
+  if (options?.clean) {
+    cleanProjectionDir(ctx, ctx.paths.taskProjectionsDir);
+  }
+
   const allEvents = ctx.eventStore.list();
   const streams = eventsByStream(allEvents);
   let count = 0;
@@ -232,7 +260,11 @@ export function rebuildTaskProjections(ctx: MesaRuntimeContext): number {
   return count;
 }
 
-export function rebuildMeetingProjections(ctx: MesaRuntimeContext): number {
+export function rebuildMeetingProjections(ctx: MesaRuntimeContext, options?: RebuildOptions): number {
+  if (options?.clean) {
+    cleanProjectionDir(ctx, ctx.paths.meetingProjectionsDir);
+  }
+
   const allEvents = ctx.eventStore.list();
   const streams = eventsByStream(allEvents);
   let count = 0;
@@ -251,7 +283,11 @@ export function rebuildMeetingProjections(ctx: MesaRuntimeContext): number {
   return count;
 }
 
-export function rebuildAgentProjections(ctx: MesaRuntimeContext): number {
+export function rebuildAgentProjections(ctx: MesaRuntimeContext, options?: RebuildOptions): number {
+  if (options?.clean) {
+    cleanProjectionDir(ctx, ctx.paths.agentProjectionsDir);
+  }
+
   const allEvents = ctx.eventStore.list();
   const streams = eventsByStream(allEvents);
   let count = 0;
@@ -270,10 +306,10 @@ export function rebuildAgentProjections(ctx: MesaRuntimeContext): number {
   return count;
 }
 
-export function rebuildAllProjections(ctx: MesaRuntimeContext): { tasks: number; meetings: number; agents: number } {
+export function rebuildAllProjections(ctx: MesaRuntimeContext, options?: RebuildOptions): { tasks: number; meetings: number; agents: number } {
   return {
-    tasks: rebuildTaskProjections(ctx),
-    meetings: rebuildMeetingProjections(ctx),
-    agents: rebuildAgentProjections(ctx),
+    tasks: rebuildTaskProjections(ctx, options),
+    meetings: rebuildMeetingProjections(ctx, options),
+    agents: rebuildAgentProjections(ctx, options),
   };
 }
