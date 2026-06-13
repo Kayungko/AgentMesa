@@ -139,6 +139,10 @@ Status: `durable_and_diagnosed`
 - `archiveTask` preserves the task file (archived=true) instead of hard-deleting.
 - `validateEventLog` / `checkProjectionConsistency` / `findOrphanedLocks` wired into `mesa doctor` for local diagnostics.
 - Lock token, fsync behavior, event-durability, and diagnostic findings are all tested.
+- Lock release validates token (not just file existence) — `releaseLock` checks token before releasing; `releaseLockUnsafe` provides backward-compatible unsafe release.
+- Lock acquisition supports configurable timeout + retry via `AcquireLockOptions { timeoutMs?, retryIntervalMs? }`.
+- `DiagnosticFinding` enriched with optional `path`, `resourceId`, `fixable`, `recommendation` fields for programmatic consumption.
+- `mesa timeline <id>` (no subcommand) auto-detects task vs meeting with `inferredType` in JSON output.
 
 Direction:
 
