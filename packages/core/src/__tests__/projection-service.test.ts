@@ -8,7 +8,8 @@ import { createRuntimeContext } from '../runtime/create-runtime-context.js';
 import type { MesaRuntimeContext } from '../runtime/types.js';
 import { createTask, updateTaskStatus, assignTask, deleteTask } from '../services/task-service.js';
 import { createMeeting, updateMeetingStatus, addTaskToMeeting, addAgentToMeeting } from '../services/meeting-service.js';
-import { rebuildTaskProjections, rebuildMeetingProjections, rebuildAllProjections } from '../services/projection-service.js';
+import { registerAgent } from '../services/agent-registry.js';
+import { rebuildTaskProjections, rebuildMeetingProjections, rebuildAgentProjections, rebuildAllProjections } from '../services/projection-service.js';
 
 let testDir: string;
 let paths: MesaWorkspacePaths;
@@ -123,6 +124,19 @@ describe('rebuildMeetingProjections', () => {
     expect(getMeta(proj).source).toBe('event_rebuild');
   });
 
+  it('preserves seed tasks and agents from meeting creation', () => {
+    const meeting = createMeeting(ctx, {
+      title: 'Seeded meeting',
+      tasks: ['task_1', 'task_2'],
+      agents: ['agent_1'],
+    });
+
+    rebuildMeetingProjections(ctx);
+    const proj = readProjection(ctx.paths.meetingProjectionsDir, meeting.id);
+    expect(getStringList(proj, 'taskIds')).toEqual(['task_1', 'task_2']);
+    expect(getStringList(proj, 'agentIds')).toEqual(['agent_1']);
+  });
+
   it('replays meeting status changes', () => {
     const meeting = createMeeting(ctx, { title: 'Status meeting' });
     updateMeetingStatus(ctx, meeting.id, 'active');
@@ -159,20 +173,50 @@ describe('rebuildMeetingProjections', () => {
   });
 });
 
+describe('rebuildAgentProjections', () => {
+  it('rebuilds an agent from agent_registered event', () => {
+    const agent = registerAgent(ctx, {
+      id: 'agent-codex-reviewer',
+      name: 'Codex Reviewer',
+      client: 'codex',
+      clientId: 'agent-codex-1',
+      roles: ['reviewer'],
+      status: 'available',
+    });
+
+    const count = rebuildAgentProjections(ctx);
+    expect(count).toBe(1);
+
+    const proj = readProjection(ctx.paths.agentProjectionsDir, agent.id);
+    expect(proj.id).toBe(agent.id);
+    expect(proj.name).toBe('Codex Reviewer');
+    expect(proj.client).toBe('codex');
+    expect(proj.type).toBe('agent');
+    expect(getMeta(proj).source).toBe('event_rebuild');
+  });
+
+  it('returns 0 when there are no agent events', () => {
+    expect(rebuildAgentProjections(ctx)).toBe(0);
+  });
+});
+
 describe('rebuildAllProjections', () => {
-  it('rebuilds both task and meeting projections together', () => {
+  it('rebuilds task, meeting, and agent projections together', () => {
     // each createTask auto-creates a meeting, so 2 tasks + 1 meeting = 3 meetings
     createTask(ctx, { title: 'Task 1' });
     createTask(ctx, { title: 'Task 2' });
     createMeeting(ctx, { title: 'Meeting 1' });
+    registerAgent(ctx, { id: 'agent-a', name: 'Agent A', client: 'codex', roles: ['reviewer'], status: 'available' });
+    registerAgent(ctx, { id: 'agent-b', name: 'Agent B', client: 'claude', roles: ['builder'], status: 'available' });
 
     const result = rebuildAllProjections(ctx);
     expect(result.tasks).toBe(2);
     expect(result.meetings).toBe(3);
+    expect(result.agents).toBe(2);
   });
 
   it('returns zero counts for an empty event log', () => {
     const result = rebuildAllProjections(ctx);
-    expect(result).toEqual({ tasks: 0, meetings: 0 });
+    expect(result).toEqual({ tasks: 0, meetings: 0, agents: 0 });
   });
 });
