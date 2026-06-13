@@ -104,7 +104,7 @@ describe('runtime context integration', () => {
     const deniedCtx = createRuntimeContext({
       rootDir: testDir,
       actor: { id: 'agent:blocked', type: 'agent', roles: ['reviewer'] },
-      policy: { can: () => ({ allowed: false, reason: 'blocked' }) },
+      policy: { can: () => ({ allowed: false, reason: 'blocked' }), canWithContext: () => ({ allowed: false, reason: 'blocked' }) },
     });
 
     expect(() => appendMessage(deniedCtx, { type: 'general', summary: 'Nope' })).toThrow(

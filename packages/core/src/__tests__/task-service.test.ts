@@ -195,7 +195,7 @@ describe('runtime context integration', () => {
       rootDir: testDir,
       actor: { id: 'agent:blocked', type: 'agent', roles: ['reviewer'] },
       policy: {
-        can: () => ({ allowed: false, reason: 'read only' }),
+        can: () => ({ allowed: false, reason: 'read only' }), canWithContext: () => ({ allowed: false, reason: 'read only' }),
       },
     });
 

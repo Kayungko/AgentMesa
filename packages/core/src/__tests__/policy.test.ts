@@ -1,6 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { RoleBasedPolicyEngine, AllowAllMesaPolicyEngine } from '../runtime/policy.js';
-import type { MesaActor } from '../runtime/types.js';
+import type { MesaActor, MesaRuntimeContext } from '../runtime/types.js';
+import { createRuntimeContext } from '../runtime/create-runtime-context.js';
+import { FileStorageAdapter } from '../runtime/file-storage-adapter.js';
+import { initWorkspace, createTask, deleteTask } from '../index.js';
+import { PolicyDeniedError } from '../errors.js';
 
 function actor(overrides: Partial<MesaActor> = {}): MesaActor {
   return {
@@ -11,20 +18,92 @@ function actor(overrides: Partial<MesaActor> = {}): MesaActor {
   };
 }
 
+// --- Runtime context fixture helpers (Task 3) ---
+
+let testDirs: string[] = [];
+
+function makeCleanDir(): string {
+  const d = mkdtempSync(join(tmpdir(), 'agentmesa-policy-'));
+  testDirs.push(d);
+  return d;
+}
+
+/**
+ * Creates a MesaRuntimeContext with role-based policy enforcement.
+ * By default the actor has ['owner'] so tests can exercise specific roles
+ * by passing overrides.
+ */
+function makeRoleBasedContext(
+  actorOverrides?: Partial<MesaActor>,
+  policyOverrides?: Record<string, string[]>,
+): MesaRuntimeContext {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const policy = policyOverrides ? new RoleBasedPolicyEngine(policyOverrides as any) : undefined;
+  const rootDir = makeCleanDir();
+  const storage = new FileStorageAdapter();
+  initWorkspace(rootDir);
+  const configPath = join(rootDir, '.agentmesa', 'config.json');
+  storage.writeText(
+    configPath,
+    JSON.stringify({ protocolVersion: '0.2.0', policy: { mode: 'role-based' } }, null, 2) + '\n',
+  );
+  return createRuntimeContext({
+    rootDir,
+    actor: { id: 'agent:test', type: 'agent', roles: ['builder'], ...actorOverrides },
+    storage,
+    policy,
+  });
+}
+
+function makeAllowAllContext(actorOverrides?: Partial<MesaActor>): MesaRuntimeContext {
+  const rootDir = makeCleanDir();
+  const storage = new FileStorageAdapter();
+  initWorkspace(rootDir);
+  const configPath = join(rootDir, '.agentmesa', 'config.json');
+  storage.writeText(
+    configPath,
+    JSON.stringify({ protocolVersion: '0.2.0' }, null, 2) + '\n',
+  );
+  return createRuntimeContext({
+    rootDir,
+    actor: { id: 'agent:test', type: 'agent', roles: ['builder'], ...actorOverrides },
+    storage,
+  });
+}
+
+beforeEach(() => {
+  testDirs = [];
+});
+
+afterEach(() => {
+  for (const d of testDirs) {
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+
+// --- AllowAllMesaPolicyEngine ---
+
 describe('AllowAllMesaPolicyEngine', () => {
   it('allows every action', () => {
     const policy = new AllowAllMesaPolicyEngine();
     expect(policy.can(actor(), 'task.create', 't1').allowed).toBe(true);
     expect(policy.can(actor(), 'unknown.action', 'x').allowed).toBe(true);
   });
+
+  it('canWithContext also allows every action', () => {
+    const policy = new AllowAllMesaPolicyEngine();
+    expect(policy.canWithContext(actor(), 'task.create', 't1', { task: { status: 'todo' } }).allowed).toBe(true);
+    expect(policy.canWithContext(actor(), 'unknown.action', 'x').allowed).toBe(true);
+  });
 });
+
+// --- RoleBasedPolicyEngine: engine-level tests ---
 
 describe('RoleBasedPolicyEngine', () => {
   const policy = new RoleBasedPolicyEngine();
 
   it('allows owner role regardless of action', () => {
     const owner = actor({ roles: ['owner'] });
-    // Owner bypasses capability check for ANY action
     expect(policy.can(owner, 'task.create', 't1').allowed).toBe(true);
     expect(policy.can(owner, 'meeting.create', 'm1').allowed).toBe(true);
     expect(policy.can(owner, 'artifact.create', 'a1').allowed).toBe(true);
@@ -42,6 +121,11 @@ describe('RoleBasedPolicyEngine', () => {
     expect(result.allowed).toBe(false);
     expect(result.reason).toContain('lacks capability');
     expect(result.reason).toContain('delete_task');
+  });
+
+  it('denies builder from archiving tasks', () => {
+    const result = policy.can(actor({ roles: ['builder'] }), 'task.archive', 't1');
+    expect(result.allowed).toBe(false);
   });
 
   it('denies builder from managing agents', () => {
@@ -62,7 +146,7 @@ describe('RoleBasedPolicyEngine', () => {
     const r = actor({ roles: ['reviewer'] });
     expect(policy.can(r, 'task.updateStatus', 't1').allowed).toBe(true);
     expect(policy.can(r, 'artifact.create', 'a1').allowed).toBe(true);
-    expect(policy.can(r, 'message.send', 'm1').allowed).toBe(true);
+    expect(policy.can(r, 'message.append', 'm1').allowed).toBe(true);
   });
 
   it('denies reviewer from writing tasks', () => {
@@ -83,7 +167,6 @@ describe('RoleBasedPolicyEngine', () => {
   });
 
   it('checks any matching role (first match wins)', () => {
-    // A builder+reviewer can write tasks (builder allows it)
     const dual = actor({ roles: ['reviewer', 'builder'] });
     expect(policy.can(dual, 'task.create', 't1').allowed).toBe(true);
   });
@@ -107,32 +190,252 @@ describe('RoleBasedPolicyEngine', () => {
   });
 
   it('treats archive and delete as independent capabilities', () => {
-    // builder can NOT archive (no archive_task)
     const b = actor({ roles: ['builder'] });
     expect(policy.can(b, 'task.archive', 't1').allowed).toBe(false);
     expect(policy.can(b, 'task.delete', 't1').allowed).toBe(false);
 
-    // chair can both archive and delete
     const c = actor({ roles: ['chair'] });
     expect(policy.can(c, 'task.archive', 't1').allowed).toBe(true);
     expect(policy.can(c, 'task.delete', 't1').allowed).toBe(true);
 
-    // maintainer can both archive and delete
     const m = actor({ roles: ['maintainer'] });
     expect(policy.can(m, 'task.archive', 't1').allowed).toBe(true);
     expect(policy.can(m, 'task.delete', 't1').allowed).toBe(true);
   });
 
-  it('grants archive_task only to chair and maintainer', () => {
-    const chair = actor({ roles: ['chair'] });
-    expect(policy.can(chair, 'task.archive', 't1').allowed).toBe(true);
+  it('grants archive_task only to chair, maintainer, owner, and admin', () => {
+    const privileged: MesaActor['roles'] = ['chair', 'maintainer', 'owner', 'admin'] as unknown as MesaActor['roles'];
+    for (const role of privileged) {
+      expect(policy.can(actor({ roles: [role] }), 'task.archive', 't1').allowed).toBe(true);
+    }
 
-    const maintainer = actor({ roles: ['maintainer'] });
-    expect(policy.can(maintainer, 'task.archive', 't1').allowed).toBe(true);
-
-    // planner, reviewer, tester, documenter, researcher, builder lack archive_task
-    for (const role of ['planner', 'reviewer', 'tester', 'documenter', 'researcher', 'builder'] as const) {
+    const unprivileged: MesaActor['roles'] = ['planner', 'reviewer', 'tester', 'documenter', 'researcher', 'builder', 'connector', 'ci'] as unknown as MesaActor['roles'];
+    for (const role of unprivileged) {
       expect(policy.can(actor({ roles: [role] }), 'task.archive', 't1').allowed).toBe(false);
     }
+  });
+
+  // --- New role tests (Task 4) ---
+
+  it('allows admin full access', () => {
+    const a = actor({ roles: ['admin'] });
+    expect(policy.can(a, 'task.create', 't1').allowed).toBe(true);
+    expect(policy.can(a, 'task.delete', 't1').allowed).toBe(true);
+    expect(policy.can(a, 'agent.register', 'a1').allowed).toBe(true);
+    expect(policy.can(a, 'projection.rebuild', 'p1').allowed).toBe(true);
+    expect(policy.can(a, 'task.archive', 't1').allowed).toBe(true);
+  });
+
+  it('denies connector from task.delete', () => {
+    const c = actor({ roles: ['connector'] });
+    expect(policy.can(c, 'task.delete', 't1').allowed).toBe(false);
+  });
+
+  it('denies connector from task.create', () => {
+    const c = actor({ roles: ['connector'] });
+    expect(policy.can(c, 'task.create', 't1').allowed).toBe(false);
+  });
+
+  it('allows connector to post messages and create artifacts', () => {
+    const c = actor({ roles: ['connector'] });
+    expect(policy.can(c, 'message.append', 'm1').allowed).toBe(true);
+    expect(policy.can(c, 'artifact.create', 'a1').allowed).toBe(true);
+  });
+
+  it('allows connector to read events and projections', () => {
+    const c = actor({ roles: ['connector'] });
+    expect(policy.can(c, 'event.read', 'e1').allowed).toBe(true);
+    expect(policy.can(c, 'projection.read', 'p1').allowed).toBe(true);
+  });
+
+  it('allows ci to post messages and create artifacts', () => {
+    const c = actor({ id: 'ci:github', type: 'ci', roles: ['ci'] });
+    expect(policy.can(c, 'message.append', 'm1').allowed).toBe(true);
+    expect(policy.can(c, 'artifact.create', 'a1').allowed).toBe(true);
+  });
+
+  it('denies ci from task.delete', () => {
+    const c = actor({ id: 'ci:github', type: 'ci', roles: ['ci'] });
+    expect(policy.can(c, 'task.delete', 't1').allowed).toBe(false);
+  });
+
+  it('denies ci from task.create', () => {
+    const c = actor({ id: 'ci:github', type: 'ci', roles: ['ci'] });
+    expect(policy.can(c, 'task.create', 't1').allowed).toBe(false);
+  });
+
+  it('allows ci to read events and projections', () => {
+    const c = actor({ id: 'ci:github', type: 'ci', roles: ['ci'] });
+    expect(policy.can(c, 'event.read', 'e1').allowed).toBe(true);
+    expect(policy.can(c, 'projection.read', 'p1').allowed).toBe(true);
+  });
+
+  it('allows reviewer to change task status', () => {
+    const r = actor({ roles: ['reviewer'] });
+    expect(policy.can(r, 'task.updateStatus', 't1').allowed).toBe(true);
+  });
+
+  it('denies reviewer from managing agents or meetings', () => {
+    const r = actor({ roles: ['reviewer'] });
+    expect(policy.can(r, 'agent.register', 'a1').allowed).toBe(false);
+    expect(policy.can(r, 'meeting.create', 'm1').allowed).toBe(false);
+  });
+
+  it('allows system to rebuild projections', () => {
+    const s = actor({ id: 'system:core', type: 'system', roles: ['system'] });
+    expect(policy.can(s, 'projection.rebuild', 'p1').allowed).toBe(true);
+    expect(policy.can(s, 'event.read', 'e1').allowed).toBe(true);
+  });
+
+  it('denies system from writing tasks', () => {
+    const s = actor({ id: 'system:core', type: 'system', roles: ['system'] });
+    expect(policy.can(s, 'task.create', 't1').allowed).toBe(false);
+    expect(policy.can(s, 'message.append', 'm1').allowed).toBe(false);
+  });
+
+  // --- New action tests ---
+
+  it('maps message.append to post_message (not message.send)', () => {
+    // builder has post_message
+    expect(policy.can(actor({ roles: ['builder'] }), 'message.append', 'm1').allowed).toBe(true);
+    // The old action key should be denied as unknown
+    const result = policy.can(actor({ roles: ['builder'] }), 'message.send', 'm1');
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain('Unknown action');
+  });
+
+  it('maps new inspection actions correctly', () => {
+    const b = actor({ roles: ['builder'] });
+    expect(policy.can(b, 'event.read', 'e1').allowed).toBe(true);
+    expect(policy.can(b, 'projection.read', 'p1').allowed).toBe(true);
+    // builder cannot rebuild projections
+    expect(policy.can(b, 'projection.rebuild', 'p1').allowed).toBe(false);
+  });
+
+  it('denies builder from transport.inspect', () => {
+    const b = actor({ roles: ['builder'] });
+    expect(policy.can(b, 'transport.inspect', 't1').allowed).toBe(false);
+  });
+
+  it('allows transport.inspect only for owner, admin, chair, maintainer', () => {
+    const privileged: MesaActor['roles'] = ['owner', 'admin', 'chair', 'maintainer'] as unknown as MesaActor['roles'];
+    for (const role of privileged) {
+      expect(policy.can(actor({ roles: [role] }), 'transport.inspect', 't1').allowed).toBe(true);
+    }
+    const restricted: MesaActor['roles'] = ['builder', 'reviewer', 'connector', 'ci', 'system', 'tester', 'planner'] as unknown as MesaActor['roles'];
+    for (const role of restricted) {
+      expect(policy.can(actor({ roles: [role] }), 'transport.inspect', 't1').allowed).toBe(false);
+    }
+  });
+
+  // --- canWithContext tests (Task 5) ---
+
+  it('canWithContext returns same result as can for builder', () => {
+    const b = actor({ roles: ['builder'] });
+    expect(policy.canWithContext(b, 'task.create', 't1', { task: { status: 'todo' } }).allowed).toBe(true);
+    expect(policy.canWithContext(b, 'task.delete', 't1', { task: { status: 'todo' } }).allowed).toBe(false);
+  });
+
+  it('canWithContext passes through context but does not alter decision (current limit)', () => {
+    const b = actor({ roles: ['builder'] });
+    const decision = policy.canWithContext(b, 'task.create', 't1', {
+      task: { status: 'in_progress' },
+      meeting: { phase: 'active' },
+    });
+    expect(decision.allowed).toBe(true);
+  });
+
+  it('canWithContext returns deny with reason for unknown actions', () => {
+    const result = policy.canWithContext(actor({ roles: ['builder'] }), 'unknown.action', 'x', {});
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain('Unknown action');
+  });
+
+  it('canWithContext still allows owner bypass', () => {
+    const owner = actor({ roles: ['owner'] });
+    expect(policy.canWithContext(owner, 'unknown.action', 'x', {}).allowed).toBe(true);
+  });
+});
+
+// --- Enforcement tests with real services (Task 4) ---
+
+// Helper: create task with explicit meetingId to avoid auto-create-meeting
+// (which requires manage_meetings capability). Uses 'workspace' as a
+// no-op meeting id so task creation only checks task.create.
+function createTaskInMeeting(ctx: MesaRuntimeContext, title: string) {
+  return createTask(ctx, { title, meetingId: 'workspace' });
+}
+
+describe('Runtime context policy enforcement', () => {
+  it('allow-all context permits task.delete for builder', () => {
+    const ctx = makeAllowAllContext({ roles: ['builder'] });
+    const task = createTaskInMeeting(ctx, 'Delete me');
+    deleteTask(ctx, task.id);
+  });
+
+  it('role-based context denies task.delete for builder', () => {
+    const ctx = makeRoleBasedContext({ roles: ['builder'] });
+    const task = createTaskInMeeting(ctx, 'Cannot delete me');
+    expect(() => deleteTask(ctx, task.id)).toThrow(PolicyDeniedError);
+  });
+
+  it('role-based context allows task.create for builder', () => {
+    const ctx = makeRoleBasedContext({ roles: ['builder'] });
+    const task = createTaskInMeeting(ctx, 'Normal task');
+    expect(task.id).toBeDefined();
+  });
+
+  it('role-based context allows task.delete for owner', () => {
+    const ctx = makeRoleBasedContext({ roles: ['owner'] });
+    const task = createTaskInMeeting(ctx, 'Owner deletes');
+    expect(() => deleteTask(ctx, task.id)).not.toThrow();
+  });
+
+  it('role-based context allows task.delete for admin', () => {
+    const ctx = makeRoleBasedContext({ roles: ['admin'] });
+    const task = createTaskInMeeting(ctx, 'Admin deletes');
+    expect(() => deleteTask(ctx, task.id)).not.toThrow();
+  });
+
+  it('role-based context denies task.delete for connector', () => {
+    const ctx = makeRoleBasedContext({ id: 'connector:github', type: 'ci', roles: ['connector'] });
+    // Connector can't create tasks — must use same storage with owner to set up
+    const setupCtx = createRuntimeContext({
+      rootDir: ctx.rootDir,
+      actor: { id: 'user:owner', type: 'user', roles: ['owner'] },
+      storage: ctx.storage,
+      policy: ctx.policy,
+    });
+    const task = createTaskInMeeting(setupCtx, 'Connector cannot delete');
+    expect(() => deleteTask(ctx, task.id)).toThrow(PolicyDeniedError);
+  });
+
+  it('role-based context denies task.delete for ci', () => {
+    const ctx = makeRoleBasedContext({ id: 'ci:github', type: 'ci', roles: ['ci'] });
+    const setupCtx = createRuntimeContext({
+      rootDir: ctx.rootDir,
+      actor: { id: 'user:owner', type: 'user', roles: ['owner'] },
+      storage: ctx.storage,
+      policy: ctx.policy,
+    });
+    const task = createTaskInMeeting(setupCtx, 'CI cannot delete');
+    expect(() => deleteTask(ctx, task.id)).toThrow(PolicyDeniedError);
+  });
+
+  it('role-based context denies task.create for connector', () => {
+    const ctx = makeRoleBasedContext({ id: 'connector:github', type: 'ci', roles: ['connector'] });
+    expect(() => createTaskInMeeting(ctx, 'Connector create')).toThrow(PolicyDeniedError);
+  });
+
+  it('role-based context denies task.create for ci', () => {
+    const ctx = makeRoleBasedContext({ id: 'ci:github', type: 'ci', roles: ['ci'] });
+    expect(() => createTaskInMeeting(ctx, 'CI create')).toThrow(PolicyDeniedError);
+  });
+
+  it('allow-all context still permits everything (backward compat)', () => {
+    const ctx = makeAllowAllContext({ roles: ['connector'] });
+    const task = createTaskInMeeting(ctx, 'Compat test');
+    expect(task.id).toBeDefined();
+    deleteTask(ctx, task.id);
   });
 });

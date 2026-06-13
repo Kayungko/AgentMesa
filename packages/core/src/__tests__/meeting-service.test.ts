@@ -76,7 +76,7 @@ describe('meeting service', () => {
     const deniedCtx = createRuntimeContext({
       rootDir: testDir,
       actor: { id: 'agent:blocked', type: 'agent', roles: ['reviewer'] },
-      policy: { can: () => ({ allowed: false, reason: 'blocked' }) },
+      policy: { can: () => ({ allowed: false, reason: 'blocked' }), canWithContext: () => ({ allowed: false, reason: 'blocked' }) },
     });
 
     expect(() => createMeeting(deniedCtx, { title: 'Blocked' })).toThrow(
