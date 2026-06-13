@@ -169,6 +169,18 @@ Acceptance:
 
 ## Priority 7: Policy Layer
 
+Status: `role_based_engine_done`
+
+- `RoleBasedPolicyEngine` in core: maps action keys (e.g. `task.create`) → capabilities (e.g. `write_task`) with per-role capability sets. Owner bypass built in. Constructor accepts overrides.
+- `AllowAllMesaPolicyEngine` kept as development default; `RoleBasedPolicyEngine` available via `createRuntimeContext({ policy: ... })`.
+- Policy package: `PermissionChecker`, `FileAccessChecker`, `CommandPolicyChecker`, `SecretProtection`, `AuditLog` all shipped.
+- `POLICY_ENGINE.md` updated with implementation status table.
+
+Deferred:
+- Capability gating (canEditFiles, canRunShell, etc.) is not checked by core services.
+- Context-aware policy (taskState, meetingPhase, timeWindow) remains design intent.
+- `RoleBasedPolicyEngine` is not the default — `AllowAllMesaPolicyEngine` is.
+
 Direction:
 
 - Add a policy model before agent automation expands.

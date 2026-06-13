@@ -2,6 +2,21 @@
 
 AgentMesa operates in a multi-agent environment where different agents with different capabilities need controlled access to shared project state. The policy engine is the gatekeeper that enforces what each actor can do, based on who they are, what role they have, and what they are actually capable of.
 
+## Implementation Status
+
+| Capability | Status |
+|---|---|
+| **Role-based policy engine** | **Done.** `RoleBasedPolicyEngine` in core implements `MesaPolicyEngine` with action→capability mapping. Default roles: chair, planner, builder, reviewer, tester, documenter, maintainer, researcher, custom. `['owner']` PermissionLevel bypasses all checks. Constructor accepts per-role capability overrides. |
+| **Permission checker** | **Done** (policy package). `PermissionChecker` validates `(role, action)` pairs against the role-capability matrix. |
+| **File access rules** | **Done** (policy package). `FileAccessChecker` matches glob patterns against allowed/denied roles. Secret path detection built in. |
+| **Command safety** | **Done** (policy package). `CommandPolicyChecker` classifies commands as safe/blocked/approval-required. |
+| **Secret protection** | **Done** (policy package). `SecretProtection` detects secret content patterns (API keys, tokens, PEM) and sanitizes output. |
+| **Audit log** | **Done** (policy package). `AuditLog` writes append-only audit entries to `.agentmesa/logs/audit.jsonl` with query support. |
+| **Core integration** | **Partial.** `assertPolicy` calls `ctx.policy.can()` but default is `AllowAllMesaPolicyEngine`. `RoleBasedPolicyEngine` is available for injection via `createRuntimeContext({ policy: ... })`. Capability gating (canEditFiles, canRunShell, etc.) is not yet checked by core services. |
+| **Context-aware checks** | **Not yet.** Policy checks are `(actor, action, resource)` only; taskState, meetingPhase, and timeWindow are design intent. |
+
+The document below describes the full target design. Sections without an implementation row in the table above are design intent.
+
 ## Policy Model
 
 Every actionable request is a structured permission check evaluated by the policy engine before execution proceeds:
