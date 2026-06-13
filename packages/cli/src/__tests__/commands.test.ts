@@ -136,4 +136,60 @@ describe('CLI integration: timeline subcommands', () => {
     expect(events).toEqual([]);
     expect(proj).toBeNull();
   });
+
+  it('auto-detect task when no subcommand given', async () => {
+    const task = createTask(ctx, { title: 'Auto task' });
+    rebuildAllProjections(ctx);
+
+    const { listEvents, getTaskProjection, getMeetingEvents, getMeetingProjection } = await import('@agentmesa/core');
+
+    // Simulate auto-detection logic: filter by streamId + streamType='task'
+    const taskEvents = listEvents(ctx, { streamId: task.id, streamType: 'task' });
+    const taskProj = getTaskProjection(ctx, task.id);
+
+    if (taskEvents.length > 0 || taskProj) {
+      expect(taskEvents.length).toBeGreaterThanOrEqual(1);
+      expect(taskEvents[0]!.type).toBe('task_created');
+      expect(taskProj!.id).toBe(task.id);
+      return; // task detected
+    }
+
+    const meetingEvents = getMeetingEvents(ctx, task.id);
+    const meetingProj = getMeetingProjection(ctx, task.id);
+    // Should not reach here for a task id
+    expect(meetingEvents.length > 0 || meetingProj).toBe(false);
+  });
+
+  it('auto-detect meeting when no subcommand given', async () => {
+    const meeting = createMeeting(ctx, { title: 'Auto meeting' });
+    rebuildAllProjections(ctx);
+
+    const { listEvents, getTaskProjection, getMeetingEvents, getMeetingProjection } = await import('@agentmesa/core');
+
+    const taskEvents = listEvents(ctx, { streamId: meeting.id, streamType: 'task' });
+    const taskProj = getTaskProjection(ctx, meeting.id);
+    // Task lookup should fail for a meeting id (streamType filter excludes meeting events)
+    expect(taskEvents.length === 0 && !taskProj).toBe(true);
+
+    // Fall through to meeting
+    const meetingEvents = getMeetingEvents(ctx, meeting.id);
+    const meetingProj = getMeetingProjection(ctx, meeting.id);
+    expect(meetingEvents.length).toBeGreaterThanOrEqual(1);
+    expect(meetingEvents[0]!.type).toBe('meeting_created');
+    expect(meetingProj!.id).toBe(meeting.id);
+  });
+
+  it('auto-detect unknown id returns nothing', async () => {
+    const { listEvents, getTaskProjection, getMeetingEvents, getMeetingProjection } = await import('@agentmesa/core');
+
+    const taskEvents = listEvents(ctx, { streamId: 'nonexistent', streamType: 'task' });
+    const taskProj = getTaskProjection(ctx, 'nonexistent');
+    const meetingEvents = getMeetingEvents(ctx, 'nonexistent');
+    const meetingProj = getMeetingProjection(ctx, 'nonexistent');
+
+    expect(taskEvents).toEqual([]);
+    expect(taskProj).toBeNull();
+    expect(meetingEvents).toEqual([]);
+    expect(meetingProj).toBeNull();
+  });
 });

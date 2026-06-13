@@ -90,6 +90,7 @@ State Commands:
 Inspection Commands:
   doctor [--fix]              Check workspace health (--fix removes orphaned temp files)
   events list [filters]       List events (--meeting, --task, --type, --actor)
+  timeline <id>                Auto-detect task or meeting timeline
   timeline task <id>           Show task event timeline + projection
   timeline meeting <id>        Show meeting event timeline + projection
   transports                  List available transports and capabilities
@@ -103,6 +104,7 @@ Examples:
   mesa task create "Implement QR login" --assignee claude --reviewer codex
   mesa task list --json
   mesa events list --task task_e5f6a7b8 --type task_status_changed
+  mesa timeline task_e5f6a7b8    # auto-detect task or meeting
   mesa timeline task task_e5f6a7b8
   mesa transports
   mesa doctor

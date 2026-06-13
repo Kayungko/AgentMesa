@@ -59,8 +59,9 @@ export function runEvents(args: ParsedArgs): void {
         console.log('    List events with optional filters');
         console.log('');
         console.log('Also available:');
-        console.log('  mesa timeline task <id>     Show task event timeline + projection');
-        console.log('  mesa timeline meeting <id>  Show meeting event timeline + projection');
+        console.log('  mesa timeline <id>            Auto-detect task or meeting timeline');
+        console.log('  mesa timeline task <id>       Show task event timeline + projection');
+        console.log('  mesa timeline meeting <id>    Show meeting event timeline + projection');
     }
   } catch (err) {
     printError(err);
@@ -75,8 +76,9 @@ export function runTimeline(args: ParsedArgs): void {
 
   if (!targetId) {
     console.log('Usage:');
-    console.log('  mesa timeline task <taskId>');
-    console.log('  mesa timeline meeting <meetingId>');
+    console.log('  mesa timeline <id>            Auto-detect task or meeting timeline');
+    console.log('  mesa timeline task <taskId>   Show task event timeline + projection');
+    console.log('  mesa timeline meeting <meetingId> Show meeting event timeline + projection');
     return;
   }
 
@@ -86,7 +88,7 @@ export function runTimeline(args: ParsedArgs): void {
         const events = getTaskEvents(ctx, targetId);
         const projection = getTaskProjection(ctx, targetId);
         outputResult(
-          { streamType: 'task', streamId: targetId, projection, events },
+          { streamType: 'task', streamId: targetId, inferredType: null, projection, events },
           json,
           () => {
             console.log(`\nTask Timeline: ${targetId}`);
@@ -110,7 +112,7 @@ export function runTimeline(args: ParsedArgs): void {
         const events = getMeetingEvents(ctx, targetId);
         const projection = getMeetingProjection(ctx, targetId);
         outputResult(
-          { streamType: 'meeting', streamId: targetId, projection, events },
+          { streamType: 'meeting', streamId: targetId, inferredType: null, projection, events },
           json,
           () => {
             console.log(`\nMeeting Timeline: ${targetId}`);
@@ -132,10 +134,70 @@ export function runTimeline(args: ParsedArgs): void {
         return;
       }
 
-      default:
-        console.log('Usage:');
-        console.log('  mesa timeline task <taskId>');
-        console.log('  mesa timeline meeting <meetingId>');
+      default: {
+        // Auto-detect: try task first, then meeting
+        const taskEvents = listEvents(ctx, { streamId: targetId, streamType: 'task' });
+        const taskProjection = getTaskProjection(ctx, targetId);
+
+        if (taskEvents.length > 0 || taskProjection) {
+          outputResult(
+            { streamType: 'task', streamId: targetId, inferredType: 'task', projection: taskProjection, events: taskEvents },
+            json,
+            () => {
+              console.log(`\nTask Timeline: ${targetId}`);
+              console.log(`${'─'.repeat(60)}`);
+              if (taskProjection) {
+                console.log(`  Status: ${(taskProjection as Record<string, unknown>).status ?? 'unknown'}`);
+                console.log(`  Title:  ${(taskProjection as Record<string, unknown>).title ?? 'unknown'}`);
+              }
+              if (taskEvents.length === 0 && !taskProjection) {
+                console.log(`  No events or projection found for "${targetId}".`);
+              } else {
+                console.log('');
+                printEventTimeline(taskEvents);
+              }
+            }
+          );
+          return;
+        }
+
+        const meetingEvents = getMeetingEvents(ctx, targetId);
+        const meetingProjection = getMeetingProjection(ctx, targetId);
+
+        if (meetingEvents.length > 0 || meetingProjection) {
+          outputResult(
+            { streamType: 'meeting', streamId: targetId, inferredType: 'meeting', projection: meetingProjection, events: meetingEvents },
+            json,
+            () => {
+              console.log(`\nMeeting Timeline: ${targetId}`);
+              console.log(`${'─'.repeat(60)}`);
+              if (meetingProjection) {
+                const p = meetingProjection as Record<string, unknown>;
+                console.log(`  Status: ${p.status ?? 'unknown'}`);
+                console.log(`  Title:  ${p.title ?? 'unknown'}`);
+                console.log(`  Tasks:  ${JSON.stringify(p.taskIds ?? p.tasks ?? [])}`);
+              }
+              if (meetingEvents.length === 0 && !meetingProjection) {
+                console.log(`  No events or projection found for "${targetId}".`);
+              } else {
+                console.log('');
+                printEventTimeline(meetingEvents);
+              }
+            }
+          );
+          return;
+        }
+
+        // Not found
+        outputResult(
+          { streamType: 'unknown', streamId: targetId, inferredType: 'none', projection: null, events: [] },
+          json,
+          () => {
+            console.log(`No task or meeting found for "${targetId}".`);
+          }
+        );
+        return;
+      }
     }
   } catch (err) {
     printError(err);
