@@ -15,9 +15,18 @@ export function getTaskEvents(
   return ctx.eventStore.list({ streamId: taskId });
 }
 
-export function getMeetingEvents(
+/** Events belonging to the meeting's own stream (streamId === meetingId). */
+export function getMeetingStreamEvents(
   ctx: MesaRuntimeContext,
   meetingId: string,
 ): MesaEvent[] {
   return ctx.eventStore.list({ streamId: meetingId });
+}
+
+/** All events for a meeting across every stream (meetingId === meetingId). */
+export function getMeetingEvents(
+  ctx: MesaRuntimeContext,
+  meetingId: string,
+): MesaEvent[] {
+  return ctx.eventStore.list({ meetingId });
 }
