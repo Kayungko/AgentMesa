@@ -7,6 +7,7 @@ import {
 import type { MesaEvent, EventType } from '@agentmesa/protocol';
 import { PolicyDeniedError } from '../errors.js';
 import type { MesaRuntimeContext } from '../runtime/types.js';
+import { withLock } from './lock-manager.js';
 
 export function assertPolicy(
   ctx: MesaRuntimeContext,
@@ -60,21 +61,23 @@ export function appendRuntimeEvent(
     data?: Record<string, unknown>;
   }
 ): void {
-  // TODO: sequence is not concurrency-safe — derived from list().length before append.
-  // Multi-client concurrent writes require the EventStore to atomically allocate
-  // sequence inside the append call (locked increment). Safe for single-client use today.
-  const sequence = ctx.eventStore.list({ streamId: input.streamId }).length;
-  const event: MesaEvent = MesaEventSchema.parse({
-    protocolVersion: currentProtocolVersion,
-    id: generateEventId(),
-    meetingId: input.meetingId,
-    type: input.type,
-    streamId: input.streamId,
-    streamType: input.streamType,
-    data: input.data ?? {},
-    actor: ctx.actor.id,
-    sequence,
-    timestamp: new Date().toISOString(),
+  // Lock the entire event log so sequence is derived and appended atomically.
+  // Without this lock, two concurrent clients could both read list().length === N,
+  // both assign sequence N, and produce a duplicate-sequence event.
+  withLock(ctx, 'event_log', () => {
+    const sequence = ctx.eventStore.list({ streamId: input.streamId }).length;
+    const event: MesaEvent = MesaEventSchema.parse({
+      protocolVersion: currentProtocolVersion,
+      id: generateEventId(),
+      meetingId: input.meetingId,
+      type: input.type,
+      streamId: input.streamId,
+      streamType: input.streamType,
+      data: input.data ?? {},
+      actor: ctx.actor.id,
+      sequence,
+      timestamp: new Date().toISOString(),
+    });
+    ctx.eventStore.append(event);
   });
-  ctx.eventStore.append(event);
 }

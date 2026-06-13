@@ -4,10 +4,22 @@ import {
   createWorkspacePaths,
   cleanOrphanedTempFiles,
   findOrphanedTempFiles,
+  createRuntimeContext,
+  validateEventLog,
+  checkProjectionConsistency,
+  findOrphanedLocks,
 } from '@agentmesa/core';
+import type { DiagnosticFinding } from '@agentmesa/core';
 import { existsSync } from 'node:fs';
 import type { ParsedArgs } from '../parse-args.js';
 import { printSuccess, printWarning, printError, printInfo } from '../output.js';
+
+function printFinding(f: DiagnosticFinding): void {
+  const icon = f.level === 'error' ? '✗' : f.level === 'warn' ? '!' : '✓';
+  const fn =
+    f.level === 'error' ? printError : f.level === 'warn' ? printWarning : printSuccess;
+  fn(`${icon} ${f.message}`);
+}
 
 export function runDoctor(args: ParsedArgs): void {
   const rootDir = process.cwd();
@@ -45,9 +57,11 @@ export function runDoctor(args: ParsedArgs): void {
     printInfo('No node_modules found. Run your package manager install first.');
   }
 
-  // Check agents and clean orphaned temp files
+  // Workspace diagnostics
   if (isWorkspaceInitialized(rootDir)) {
     const paths = createWorkspacePaths(rootDir);
+
+    // Agent dir
     if (existsSync(paths.agentsDir)) {
       printSuccess('Agents directory exists');
     } else {
@@ -55,6 +69,7 @@ export function runDoctor(args: ParsedArgs): void {
       issues++;
     }
 
+    // Orphaned temp files
     const tempDirs = [
       paths.tasksDir,
       paths.messagesDir,
@@ -80,6 +95,36 @@ export function runDoctor(args: ParsedArgs): void {
       } else {
         printSuccess('No orphaned temp files.');
       }
+    }
+
+    // Event log validation
+    const eventFindings = validateEventLog(paths.eventsDir);
+    for (const f of eventFindings) {
+      printFinding(f);
+      if (f.level !== 'ok') issues++;
+    }
+
+    // Runtime diagnostics (needs ctx for projection + lock checks)
+    try {
+      const ctx = createRuntimeContext({
+        rootDir,
+        actor: { id: 'user:doctor', type: 'user', roles: ['owner'] },
+      });
+
+      const projFindings = checkProjectionConsistency(ctx);
+      for (const f of projFindings) {
+        printFinding(f);
+        if (f.level !== 'ok') issues++;
+      }
+
+      const lockFindings = findOrphanedLocks(ctx.paths);
+      for (const f of lockFindings) {
+        printFinding(f);
+        if (f.level !== 'ok') issues++;
+      }
+    } catch (err) {
+      printWarning(`Skipping runtime diagnostics — ${String(err)}`);
+      issues++;
     }
   }
 

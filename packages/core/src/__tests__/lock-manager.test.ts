@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { initWorkspace } from '../workspace.js';
@@ -118,5 +118,37 @@ describe('withLock', () => {
       }),
     ).toThrow('boom');
     expect(isLocked(ctx, 'task-T-0001')).toBe(false);
+  });
+});
+
+describe('lock token', () => {
+  it('includes a unique UUID token in each lock', () => {
+    acquireLock(ctx, 'token-test');
+    expect(isLocked(ctx, 'token-test')).toBe(true);
+
+    const lockFiles = readdirSync(ctx.paths.locksDir).filter((f) => f.endsWith('.lock'));
+    expect(lockFiles).toHaveLength(1);
+
+    const content = readFileSync(join(ctx.paths.locksDir, lockFiles[0]!), 'utf-8');
+    const data = JSON.parse(content);
+    expect(data.token).toBeDefined();
+    expect(typeof data.token).toBe('string');
+    expect(data.token).toMatch(/^[0-9a-f-]{36}$/); // UUID v4 pattern
+
+    releaseLock(ctx, 'token-test');
+  });
+
+  it('generates different tokens for different locks', () => {
+    acquireLock(ctx, 'token-a');
+    const filesA = readdirSync(ctx.paths.locksDir).filter((f) => f.endsWith('.lock'));
+    const dataA = JSON.parse(readFileSync(join(ctx.paths.locksDir, filesA[0]!), 'utf-8'));
+    releaseLock(ctx, 'token-a');
+
+    acquireLock(ctx, 'token-b');
+    const filesB = readdirSync(ctx.paths.locksDir).filter((f) => f.endsWith('.lock'));
+    const dataB = JSON.parse(readFileSync(join(ctx.paths.locksDir, filesB[0]!), 'utf-8'));
+    releaseLock(ctx, 'token-b');
+
+    expect(dataA.token).not.toBe(dataB.token);
   });
 });

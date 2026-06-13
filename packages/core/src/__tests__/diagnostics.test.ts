@@ -1,0 +1,154 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { initWorkspace } from '../workspace.js';
+import type { MesaWorkspacePaths } from '../workspace.js';
+import { createRuntimeContext } from '../runtime/create-runtime-context.js';
+import type { MesaRuntimeContext } from '../runtime/types.js';
+import { createTask, deleteTask } from '../services/task-service.js';
+import { createMeeting } from '../services/meeting-service.js';
+import { registerAgent } from '../services/agent-registry.js';
+import { rebuildAllProjections } from '../services/projection-service.js';
+import {
+  validateEventLog,
+  checkProjectionConsistency,
+  findOrphanedLocks,
+  runAllDiagnostics,
+} from '../services/diagnostics.js';
+import type { DiagnosticFinding } from '../services/diagnostics.js';
+
+let testDir: string;
+let paths: MesaWorkspacePaths;
+let ctx: MesaRuntimeContext;
+
+beforeEach(() => {
+  testDir = mkdtempSync(join(tmpdir(), 'agentmesa-diag-'));
+  paths = initWorkspace(testDir);
+  ctx = createRuntimeContext({
+    rootDir: testDir,
+    actor: { id: 'user:test', type: 'user', roles: ['owner'] },
+  });
+});
+
+afterEach(() => {
+  rmSync(testDir, { recursive: true, force: true });
+});
+
+describe('validateEventLog', () => {
+  it('returns ok for empty workspace (no events.jsonl)', () => {
+    const findings = validateEventLog(paths.eventsDir);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.level).toBe('ok');
+    expect(findings[0]?.message).toContain('No events log');
+  });
+
+  it('validates a healthy event log', () => {
+    createTask(ctx, { title: 'Health check' });
+    const findings = validateEventLog(paths.eventsDir);
+    const ok = findings.filter((f) => f.level === 'ok');
+    expect(ok.length).toBeGreaterThanOrEqual(1);
+    expect(ok[0]?.message).toContain('Event log valid');
+  });
+
+  it('detects corrupted JSON in event log', () => {
+    const eventsPath = join(paths.eventsDir, 'events.jsonl');
+    writeFileSync(eventsPath, '{not valid json\n', 'utf-8');
+    const findings = validateEventLog(paths.eventsDir);
+    const errors = findings.filter((f) => f.level === 'error');
+    expect(errors.length).toBeGreaterThanOrEqual(1);
+    expect(errors[0]?.message).toContain('corrupted');
+  });
+
+  it('detects invalid event schema', () => {
+    const eventsPath = join(paths.eventsDir, 'events.jsonl');
+    writeFileSync(eventsPath, '{"id":"e_1","type":"bogus_type","streamId":"s1","data":{},"actor":"a","timestamp":"2024-01-01T00:00:00.000Z","sequence":0}\n', 'utf-8');
+    const findings = validateEventLog(paths.eventsDir);
+    const errors = findings.filter((f) => f.level === 'error');
+    expect(errors.length).toBeGreaterThanOrEqual(1);
+    expect(errors[0]?.message).toContain('invalid event');
+  });
+});
+
+describe('checkProjectionConsistency', () => {
+  it('returns nothing when there are no events', () => {
+    const findings = checkProjectionConsistency(ctx);
+    expect(findings).toEqual([]);
+  });
+
+  it('detects missing task projections', () => {
+    createTask(ctx, { title: 'No rebuild' });
+    const findings = checkProjectionConsistency(ctx);
+    const warns = findings.filter((f) => f.level === 'warn');
+    expect(warns.length).toBeGreaterThanOrEqual(1);
+    expect(warns.some((f) => f.message.includes('no projection'))).toBe(true);
+  });
+
+  it('reports ok when projections are consistent', () => {
+    createTask(ctx, { title: 'Consistent' });
+    createMeeting(ctx, { title: 'Consistent mtg' });
+    registerAgent(ctx, { id: 'agent-diag', name: 'Diag', client: 'claude', roles: ['reviewer'], status: 'available' });
+    rebuildAllProjections(ctx);
+
+    const findings = checkProjectionConsistency(ctx);
+    const ok = findings.filter((f) => f.level === 'ok');
+    expect(ok.length).toBeGreaterThanOrEqual(1);
+    expect(ok[0]?.message).toContain('consistent');
+  });
+
+  it('counts tombstones for deleted tasks', () => {
+    const task = createTask(ctx, { title: 'Tombstone' });
+    deleteTask(ctx, task.id);
+    rebuildAllProjections(ctx);
+
+    const findings = checkProjectionConsistency(ctx);
+    expect(findings.some((f) => f.message.includes('Tombstones: 1'))).toBe(true);
+  });
+});
+
+describe('findOrphanedLocks', () => {
+  it('returns ok when no locks exist', () => {
+    const findings = findOrphanedLocks(ctx.paths);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.message).toContain('No lock files');
+  });
+
+  it('detects an orphaned lock (dead pid)', () => {
+    // Write a fake lock file with a non-existent PID
+    const lockPath = join(paths.locksDir, 'ffffffffffff.lock');
+    writeFileSync(
+      lockPath,
+      JSON.stringify({ resource: 'test_res', pid: 99999, token: 'abc', acquiredAt: new Date().toISOString() }),
+      'utf-8',
+    );
+    const findings = findOrphanedLocks(ctx.paths);
+    const warns = findings.filter((f) => f.level === 'warn');
+    expect(warns.length).toBeGreaterThanOrEqual(1);
+    expect(warns[0]?.message).toContain('Orphaned');
+  });
+
+  it('detects corrupt lock files', () => {
+    const lockPath = join(paths.locksDir, 'corrupt.lock');
+    writeFileSync(lockPath, 'not json', 'utf-8');
+    const findings = findOrphanedLocks(ctx.paths);
+    const warns = findings.filter((f) => f.level === 'warn');
+    expect(warns.some((f) => f.message.includes('Corrupt'))).toBe(true);
+  });
+});
+
+describe('runAllDiagnostics', () => {
+  it('returns findings from all categories', () => {
+    const findings = runAllDiagnostics(ctx);
+    // We expect at least events and locks findings for empty workspace
+    const categories = new Set(findings.map((f) => f.category));
+    expect(categories.has('events')).toBe(true);
+    expect(categories.has('locks')).toBe(true);
+  });
+
+  it('returns projection findings when events exist', () => {
+    createTask(ctx, { title: 'Diag task' });
+    const findings = runAllDiagnostics(ctx);
+    const categories = new Set(findings.map((f) => f.category));
+    expect(categories.has('projections')).toBe(true);
+  });
+});

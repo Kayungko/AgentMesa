@@ -131,6 +131,15 @@ Acceptance:
 
 ## Priority 5: Storage Hardening
 
+Status: `durable_and_diagnosed`
+
+- All durable writes go through `FileStorageAdapter` (atomic temp+fsync+rename).
+- `FileEventStore.append` fsyncs after each append; `appendRuntimeEvent` locks the event log to prevent interleaved sequence allocation across concurrent clients.
+- `withLock` (atomic wx create) + UUID `token` per lock enables precise lock-holder identification.
+- `archiveTask` preserves the task file (archived=true) instead of hard-deleting.
+- `validateEventLog` / `checkProjectionConsistency` / `findOrphanedLocks` wired into `mesa doctor` for local diagnostics.
+- Lock token, fsync behavior, event-durability, and diagnostic findings are all tested.
+
 Direction:
 
 - Route durable file writes through a storage adapter.

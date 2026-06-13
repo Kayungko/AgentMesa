@@ -130,4 +130,21 @@ describe('FileEventStore.list edge cases', () => {
     expect(() => store.list()).toThrow(MesaError);
     expect(() => store.list()).toThrow('Invalid event');
   });
+
+  it('survives a fresh store instance (durability)', () => {
+    store.append(makeEvent({ id: 'e_persist', type: 'task_created', streamId: 's1' }));
+    expect(store.list()).toHaveLength(1);
+
+    // Create a fresh store pointing at the same file
+    const store2 = new FileEventStore(testDir);
+    expect(store2.list()).toHaveLength(1);
+    expect(store2.list()[0]?.id).toBe('e_persist');
+  });
+
+  it('appends are immediately visible to the same store instance', () => {
+    store.append(makeEvent({ id: 'e_a', type: 'task_created', streamId: 'sa' }));
+    store.append(makeEvent({ id: 'e_b', type: 'task_status_changed', streamId: 'sa' }));
+    expect(store.list()).toHaveLength(2);
+    expect(store.list({ streamId: 'sa' })).toHaveLength(2);
+  });
 });

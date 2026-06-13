@@ -1,12 +1,13 @@
 import { join } from 'node:path';
 import { existsSync, writeFileSync, readFileSync, unlinkSync } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { MesaRuntimeContext } from '../runtime/types.js';
 import { LockError } from '../errors.js';
 
 interface LockData {
   resource: string;
   pid: number;
+  token: string;
   acquiredAt: string;
 }
 
@@ -26,6 +27,7 @@ export function acquireLock(ctx: MesaRuntimeContext, resource: string): void {
   const lockData: LockData = {
     resource,
     pid: process.pid,
+    token: randomUUID(),
     acquiredAt: new Date().toISOString(),
   };
 
