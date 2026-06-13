@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { initWorkspace } from '../workspace.js';
@@ -72,6 +72,32 @@ describe('lock lifecycle', () => {
 
     releaseLock(ctx, 'task-T-0001');
     expect(isLocked(ctx, 'task-T-0001')).toBe(false);
+  });
+});
+
+describe('resource filename safety', () => {
+  it.each(['task:T-0001', 'meeting/abc', 'a*b?c', '../escape'])(
+    'locks resources with unsafe chars: %s',
+    (resource) => {
+      acquireLock(ctx, resource);
+      expect(isLocked(ctx, resource)).toBe(true);
+
+      const lockFiles = readdirSync(ctx.paths.locksDir);
+      expect(lockFiles).toHaveLength(1);
+      // The on-disk name must contain none of the unsafe chars and must not
+      // escape the locks directory.
+      expect(lockFiles[0]).toMatch(/^[0-9a-f]{64}\.lock$/);
+
+      releaseLock(ctx, resource);
+      expect(isLocked(ctx, resource)).toBe(false);
+      expect(readdirSync(ctx.paths.locksDir)).toHaveLength(0);
+    },
+  );
+
+  it('maps distinct resources to distinct lock files', () => {
+    acquireLock(ctx, 'task:T-0001');
+    acquireLock(ctx, 'meeting/abc');
+    expect(readdirSync(ctx.paths.locksDir)).toHaveLength(2);
   });
 });
 

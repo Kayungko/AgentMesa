@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { existsSync, writeFileSync, readFileSync, unlinkSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import type { MesaRuntimeContext } from '../runtime/types.js';
 import { LockError } from '../errors.js';
 
@@ -10,7 +11,12 @@ interface LockData {
 }
 
 function lockPathFor(ctx: MesaRuntimeContext, resource: string): string {
-  return join(ctx.paths.locksDir, `${resource}.lock`);
+  // Hash the resource into the filename: a resource id may contain ':', '/', or
+  // Windows-illegal chars like '*', and a raw id could also escape locksDir via
+  // path traversal. A sha256 hex digest is collision-resistant, fixed-length,
+  // and safe on every filesystem. The original resource lives in the lock body.
+  const safeName = createHash('sha256').update(resource).digest('hex');
+  return join(ctx.paths.locksDir, `${safeName}.lock`);
 }
 
 export function acquireLock(ctx: MesaRuntimeContext, resource: string): void {
