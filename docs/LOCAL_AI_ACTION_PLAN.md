@@ -189,16 +189,21 @@ Acceptance:
 
 ## Priority 7: Policy Layer
 
-Status: `role_based_engine_implemented_not_default`
+Status: `enforcement_tests_and_cli_added`
 
-- `RoleBasedPolicyEngine` in core: maps action keys (e.g. `task.create`) → capabilities (e.g. `write_task`) with per-role capability sets. Owner bypass built in. Constructor accepts overrides.
-- `AllowAllMesaPolicyEngine` kept as development default; `RoleBasedPolicyEngine` available via `createRuntimeContext({ policy: ... })`.
-- Policy package: `PermissionChecker`, `FileAccessChecker`, `CommandPolicyChecker`, `SecretProtection`, `AuditLog` all shipped.
-- `POLICY_ENGINE.md` updated with implementation status table.
+- `RoleBasedPolicyEngine` in core: maps 16 action keys (task.*, meeting.*, message.append, artifact.create, agent.register, event.read, projection.read, projection.rebuild, transport.inspect) → 13 capabilities with per-role capability sets. Owner bypass built in. Constructor accepts overrides.
+- Production roles added: `owner`, `admin`, `builder`, `reviewer`, `connector`, `ci`, `system`.
+- Legacy roles preserved: `chair`, `planner`, `builder`, `reviewer`, `tester`, `documenter`, `maintainer`, `researcher`, `custom`.
+- Unknown actions are denied by default.
+- `canWithContext(actor, action, resource, context?)` interface added to `MesaPolicyEngine` — context-aware policy entry point without breaking changes.
+- `mesa policy check <action> <resource> --actor <id> --role <role>` queries policy decisions; `mesa policy inspect` prints full role-capability matrix; both support `--json`.
+- Policy enforcement tests cover: builder deny delete/archive, connector deny delete/create, ci deny delete/create, reviewer deny manage agents/meetings, system deny write tasks, owner/admin bypass, allow-all backward compat, canWithContext pass-through, unknown action deny.
+- CLI uses the same `MesaRuntimeContext` as all other consumers.
+- `AllowAllMesaPolicyEngine` kept as development default; `RoleBasedPolicyEngine` available via config `policy.mode: "role-based"` or injection.
 
 Deferred:
 - Capability gating (canEditFiles, canRunShell, etc.) is not checked by core services.
-- Context-aware policy (taskState, meetingPhase, timeWindow) remains design intent.
+- Context-aware policy (taskState, meetingPhase, timeWindow) interface exists but decisions do not yet use context data.
 - `RoleBasedPolicyEngine` is not the default — `AllowAllMesaPolicyEngine` is.
 
 Direction:

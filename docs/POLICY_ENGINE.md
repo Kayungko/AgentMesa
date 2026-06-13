@@ -6,14 +6,17 @@ AgentMesa operates in a multi-agent environment where different agents with diff
 
 | Capability | Status |
 |---|---|
-| **Role-based policy engine** | **Done (not default).** `RoleBasedPolicyEngine` in core implements `MesaPolicyEngine` with action→capability mapping. Default roles: chair, planner, builder, reviewer, tester, documenter, maintainer, researcher, custom. `['owner']` PermissionLevel bypasses all checks. Constructor accepts per-role capability overrides. The **default** engine remains `AllowAllMesaPolicyEngine` — `RoleBasedPolicyEngine` must be explicitly selected via config `policy.mode: "role-based"` or injected via `createRuntimeContext({ policy: ... })`. |
+| **Role-based policy engine** | **Done (expanded, not default).** `RoleBasedPolicyEngine` in core implements `MesaPolicyEngine` with action→capability mapping for all 16 actions. Roles: owner, admin, builder, reviewer, connector, ci, system, chair, planner, tester, documenter, maintainer, researcher, custom. `['owner']` bypasses all checks. Constructor accepts per-role capability overrides. The **default** engine remains `AllowAllMesaPolicyEngine` — `RoleBasedPolicyEngine` must be explicitly selected via config `policy.mode: "role-based"` or injected via `createRuntimeContext({ policy: ... })`. Test fixture `makeRoleBasedContext()` enables policy enforcement tests. |
+| **Action/capability completeness** | **Done.** All service actions (task.*, meeting.*, message.append, artifact.create, agent.register, event.read, projection.read, projection.rebuild, transport.inspect) are mapped. Unknown actions are denied by default. |
 | **Permission checker** | **Done** (policy package). `PermissionChecker` validates `(role, action)` pairs against the role-capability matrix. |
 | **File access rules** | **Done** (policy package). `FileAccessChecker` matches glob patterns against allowed/denied roles. Secret path detection built in. |
 | **Command safety** | **Done** (policy package). `CommandPolicyChecker` classifies commands as safe/blocked/approval-required. |
 | **Secret protection** | **Done** (policy package). `SecretProtection` detects secret content patterns (API keys, tokens, PEM) and sanitizes output. |
 | **Audit log** | **Done** (policy package). `AuditLog` writes append-only audit entries to `.agentmesa/logs/audit.jsonl` with query support. |
-| **Core integration** | **Partial.** `assertPolicy` calls `ctx.policy.can()` but default is `AllowAllMesaPolicyEngine`. `RoleBasedPolicyEngine` is available for injection via `createRuntimeContext({ policy: ... })`. Capability gating (canEditFiles, canRunShell, etc.) is not yet checked by core services. |
-| **Context-aware checks** | **Not yet.** Policy checks are `(actor, action, resource)` only; taskState, meetingPhase, and timeWindow are design intent. |
+| **Core integration** | **Partial.** `assertPolicy` calls `ctx.policy.can()` in all state-changing services. Default remains `AllowAllMesaPolicyEngine` for local dev; production mode should use `role-based`. Capability gating (canEditFiles, canRunShell, etc.) is not yet checked by core services. |
+| **Context-aware checks** | **Started.** `MesaPolicyEngine` interface now includes `canWithContext(actor, action, resource, context?)`. `RoleBasedPolicyEngine` accepts the context parameter but does not yet use it for decisions (taskState, meetingPhase, timeWindow are deferred). The interface is in place so callers can begin passing context without breaking changes. |
+| **CLI policy commands** | **Done.** `mesa policy check <action> <resource> --actor --role` queries policy decision; `mesa policy inspect` prints the full role-capability matrix. Both support `--json`. |
+| **Enforcement tests** | **Done.** Policy tests cover: builder deny delete/archive, connector deny delete/create, ci deny delete/create, reviewer deny manage agents/meetings, system deny write tasks, owner/admin bypass, allow-all backward compat, canWithContext pass-through, unknown action deny, all new roles and actions. |
 
 The document below describes the full target design. Sections without an implementation row in the table above are design intent.
 
@@ -98,7 +101,29 @@ The order matters. A denied actor never reaches role matching. A role mismatch n
 
 ## Role-Based Capability Matrix
 
-Roles are the coarse-grained permission layer. Every actor is assigned one or more roles. The role determines which actions the actor may attempt. The matrix below defines the complete permission surface.
+Roles are the coarse-grained permission layer. Every actor is assigned one or more roles. The role determines which actions the actor may attempt. The matrices below define the complete permission surface.
+
+### Production Roles (v0.7+)
+
+| Action | owner | admin | builder | reviewer | connector | ci | system |
+|---|---|---|---|---|---|---|---|
+| `read_task` (task.get) | Y | Y | Y | Y | Y | Y | Y |
+| `write_task` (task.create/assign) | Y | Y | Y | — | — | — | — |
+| `change_status` (task.updateStatus) | Y | Y | Y | Y* | — | — | — |
+| `post_message` (message.append) | Y | Y | Y | Y | Y | Y | — |
+| `create_artifact` (artifact.create) | Y | Y | Y | Y | Y | Y | — |
+| `archive_task` (task.archive) | Y | Y | — | — | — | — | — |
+| `delete_task` (task.delete) | Y | Y | — | — | — | — | — |
+| `manage_agents` (agent.register) | Y | Y | — | — | — | — | — |
+| `manage_meetings` (meeting.*) | Y | Y | — | — | — | — | — |
+| `read_events` (event.read) | Y | Y | Y | Y | Y | Y | Y |
+| `read_projections` (projection.read) | Y | Y | Y | Y | Y | Y | Y |
+| `rebuild_projections` (projection.rebuild) | Y | Y | — | — | — | — | Y |
+| `inspect_transports` (transport.inspect) | Y | Y | — | — | — | — | — |
+
+`*` reviewer may only transition status to `approved` or `changes_requested`. Any other transition is denied.
+
+### Legacy Roles (backward compat)
 
 | Action | chair | planner | builder | reviewer | tester | documenter | maintainer |
 |---|---|---|---|---|---|---|---|
@@ -107,24 +132,34 @@ Roles are the coarse-grained permission layer. Every actor is assigned one or mo
 | `change_status` | Y | — | Y | Y* | — | — | Y |
 | `post_message` | Y | Y | Y | Y | Y | Y | Y |
 | `create_artifact` | Y | — | Y | Y | Y | Y | Y |
-| `modify_source` | Y | — | Y | — | — | — | Y |
-| `run_command` | Y | — | Y | — | Y | — | Y |
-| `push_code` | Y | — | — | — | — | — | Y |
-| `merge_pr` | Y | — | — | — | — | — | — |
+| `archive_task` | Y | — | — | — | — | — | Y |
+| `delete_task` | Y | — | — | — | — | — | Y |
 | `manage_agents` | Y | — | — | — | — | — | Y |
 | `manage_meetings` | Y | Y | — | — | — | — | Y |
-
-`*` reviewer may only transition status to `approved` or `changes_requested`. Any other transition is denied.
+| `read_events` | Y | Y | Y | Y | Y | Y | Y |
+| `read_projections` | Y | Y | Y | Y | Y | Y | Y |
+| `rebuild_projections` | Y | — | — | — | — | — | Y |
+| `inspect_transports` | Y | — | — | — | — | — | Y |
 
 ### Role Definitions
 
-- **chair** — full authority across all actions and resources. Typically the human user. The only role that can merge PRs and override requires_approval decisions.
-- **planner** — defines and organizes work. Reads and writes tasks, posts messages, manages meetings. Cannot touch source code or run commands. The architect role.
-- **builder** — the primary implementation role. Can read, write, change status, post messages, create artifacts, modify source, and run commands. Cannot push code or manage other agents.
-- **reviewer** — inspects and evaluates work. Reads tasks, posts messages, creates review artifacts, and changes status only to `approved` or `changes_requested`. Cannot modify source code under any circumstance.
+- **owner** — workspace owner. Full authority across all actions and resources. Bypasses all policy checks. Typically the human user.
+- **admin** — workspace administrator. Same full authority as owner for management operations.
+- **builder** — the primary implementation role. Can read, write, change status, post messages, create artifacts. Cannot delete/archive tasks or manage agents/meetings.
+- **reviewer** — inspects and evaluates work. Reads tasks, posts messages, creates review artifacts, and changes status only to `approved` or `changes_requested`. Cannot modify source code or manage infrastructure.
+- **connector** — external system connector (GitHub, Git, Shell). Posts messages, creates artifacts, reads events/projections. Cannot create/delete tasks or manage meetings.
+- **ci** — CI/CD automation actor. Posts messages, creates check_result artifacts, reads events/projections. Cannot modify tasks or meetings.
+- **system** — Core runtime internal actor. Rebuilds projections, reads events/projections. Cannot write tasks, post messages, or create artifacts.
+
+### Legacy Role Definitions (backward compat)
+
+- **chair** — full authority across all actions and resources. The only legacy role that can merge PRs and override requires_approval decisions.
+- **planner** — defines and organizes work. Reads and writes tasks, posts messages, manages meetings. Cannot touch source code or run commands.
+- **builder** — the primary implementation role (matches production builder capabilities above).
+- **reviewer** — inspects and evaluates work (matches production reviewer capabilities above).
 - **tester** — validates work through automated and manual testing. Reads tasks, posts messages, creates test artifacts, and runs commands. Cannot modify source code.
-- **documenter** — produces documentation artifacts. Reads tasks, posts messages, creates documentation artifacts. Cannot modify source code or run commands.
-- **maintainer** — builder capabilities plus `manage_agents` and `manage_meetings`. Can push code but cannot merge PRs. Typically a trusted automation role or lead developer.
+- **documenter** — produces documentation artifacts. Reads tasks, posts messages, creates documentation artifacts.
+- **maintainer** — builder capabilities plus `manage_agents` and `manage_meetings`, archive, delete, rebuild, inspect. Can push code but cannot merge PRs.
 
 ## Agent Capability Declaration
 
