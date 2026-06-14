@@ -10,9 +10,14 @@ export type PolicyAction =
   | 'run_command'
   | 'push_code'
   | 'merge_pr'
+  | 'archive_task'
   | 'delete_task'
   | 'manage_agents'
-  | 'manage_meetings';
+  | 'manage_meetings'
+  | 'read_events'
+  | 'read_projections'
+  | 'rebuild_projections'
+  | 'inspect_transports';
 
 export type RoleCapability = Record<AgentRole, PolicyAction[]>;
 

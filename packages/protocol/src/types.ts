@@ -37,6 +37,7 @@ export { currentProtocolVersion } from './version.js';
 // --- Enum-style literal unions ---
 
 export type AgentRole =
+  | 'owner'
   | 'chair'
   | 'planner'
   | 'builder'

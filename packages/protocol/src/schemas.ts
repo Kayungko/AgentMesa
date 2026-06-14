@@ -10,6 +10,7 @@ const protocolVersionSchema = z
   .default(currentProtocolVersion);
 
 const agentRoleSchema = z.enum([
+  'owner',
   'chair',
   'planner',
   'builder',

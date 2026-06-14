@@ -226,6 +226,24 @@ export class RoleBasedPolicyEngine implements MesaPolicyEngine {
       };
     }
 
+    // Before checking capability: enforce context-sensitive reviewer status limit.
+    // Reviewer may only transition task status to "approved" or "changes_requested".
+    // This is checked before the capability gate so the deny reason is specific.
+    if (
+      action === 'task.updateStatus' &&
+      actor.roles.includes('reviewer') &&
+      !actor.roles.includes('admin') &&
+      !actor.roles.includes('maintainer')
+    ) {
+      const targetStatus = _context?.targetStatus as string | undefined;
+      if (!targetStatus || !['approved', 'changes_requested'].includes(targetStatus)) {
+        return {
+          allowed: false,
+          reason: `Reviewer may only transition status to "approved" or "changes_requested", not "${targetStatus ?? 'unknown'}"`,
+        };
+      }
+    }
+
     for (const role of actor.roles) {
       const roleCaps = this.capabilities[role];
       if (roleCaps?.has(requiredCap)) {

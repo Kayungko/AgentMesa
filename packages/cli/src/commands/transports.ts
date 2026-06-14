@@ -1,6 +1,7 @@
 import {
   createRuntimeContext,
   getAvailableTransports,
+  PolicyDeniedError,
 } from '@agentmesa/core';
 import type { ParsedArgs } from '../parse-args.js';
 import { printError, outputResult } from '../output.js';
@@ -13,6 +14,11 @@ export function runTransports(args: ParsedArgs): void {
   const json = !!args.flags['json'];
 
   try {
+    const decision = ctx.policy.can(ctx.actor, 'transport.inspect', 'transport:*');
+    if (!decision.allowed) {
+      throw new PolicyDeniedError('transport.inspect', 'transport:*', decision.reason);
+    }
+
     const available = getAvailableTransports(ctx.transports);
 
     outputResult(available, json, () => {

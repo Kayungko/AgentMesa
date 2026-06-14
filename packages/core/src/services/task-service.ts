@@ -21,6 +21,7 @@ import { createMeeting } from './meeting-service.js';
 import {
   appendRuntimeEvent,
   assertPolicy,
+  assertPolicyWithContext,
   listJsonFromStorage,
   readJsonFromStorage,
   writeJsonToStorage,
@@ -107,7 +108,7 @@ export function updateTaskStatus(
   taskId: string,
   newStatus: TaskStatus
 ): MesaTask {
-  assertPolicy(ctx, 'task.updateStatus', `task:${taskId}`);
+  assertPolicyWithContext(ctx, 'task.updateStatus', `task:${taskId}`, { targetStatus: newStatus });
   const task = getTask(ctx, taskId);
 
   if (!canTransitionTaskStatus(task.status, newStatus)) {

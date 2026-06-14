@@ -7,6 +7,7 @@ import {
   type ProjectionMeta,
 } from './projection-schemas.js';
 import type { MesaRuntimeContext } from '../runtime/types.js';
+import { assertPolicy } from './runtime-service-utils.js';
 
 export interface RebuildOptions {
   /** Remove all existing projection files before rebuilding. */
@@ -276,6 +277,7 @@ export function rebuildAgentProjections(ctx: MesaRuntimeContext, options?: Rebui
 }
 
 export function rebuildAllProjections(ctx: MesaRuntimeContext, options?: RebuildOptions): { tasks: number; meetings: number; agents: number } {
+  assertPolicy(ctx, 'projection.rebuild', 'projection:*');
   return {
     tasks: rebuildTaskProjections(ctx, options),
     meetings: rebuildMeetingProjections(ctx, options),

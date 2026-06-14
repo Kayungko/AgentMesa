@@ -1,71 +1,148 @@
 import {
   createRuntimeContext,
+  RoleBasedPolicyEngine,
+  PolicyDeniedError,
 } from '@agentmesa/core';
+import type { AgentRole } from '@agentmesa/protocol';
 import type { MesaActor } from '@agentmesa/core';
 import type { ParsedArgs } from '../parse-args.js';
 import { printError, outputResult } from '../output.js';
 
+const VALID_ROLES: readonly AgentRole[] = [
+  'owner', 'admin', 'builder', 'reviewer', 'connector', 'ci', 'system',
+  'chair', 'planner', 'tester', 'documenter', 'maintainer', 'researcher', 'custom',
+] as const;
+
+function validateRole(input: string): AgentRole {
+  if ((VALID_ROLES as readonly string[]).includes(input)) {
+    return input as AgentRole;
+  }
+  throw new PolicyDeniedError(
+    'policy.check',
+    `role:${input}`,
+    `Invalid role "${input}". Valid roles: ${VALID_ROLES.join(', ')}`,
+  );
+}
+
+function parseRoles(raw: string): AgentRole[] {
+  return raw.split(',').map((r) => validateRole(r.trim()));
+}
+
+type PolicyMode = 'role-based' | 'current';
+
+function resolveMode(args: ParsedArgs, defaultMode: PolicyMode): PolicyMode {
+  const raw = args.flags['mode'];
+  if (raw === 'role-based' || raw === 'current') return raw;
+  if (raw) {
+    printError(new Error(`Invalid --mode "${raw}". Must be "role-based" or "current".`));
+    process.exitCode = 1;
+  }
+  return defaultMode;
+}
+
+function buildActor(args: ParsedArgs, defaultRole: AgentRole): MesaActor {
+  const rolesRaw = args.flags['roles'];
+  let roles: AgentRole[];
+  if (typeof rolesRaw === 'string') {
+    roles = parseRoles(rolesRaw);
+  } else {
+    const single = args.flags['role'];
+    const role = typeof single === 'string' ? validateRole(single) : defaultRole;
+    roles = [role];
+  }
+
+  const actorId = args.flags['actor'];
+  return {
+    id: typeof actorId === 'string' ? actorId : 'cli:user',
+    type: 'user',
+    roles: roles as MesaActor['roles'],
+  };
+}
+
 export function runPolicyCheck(args: ParsedArgs): void {
   const json = !!args.flags['json'];
+  const mode = resolveMode(args, 'role-based');
   const action = args.positional[0];
   const resource = args.positional[1] ?? '*';
-  const actorId = args.flags['actor'] ?? 'cli:user';
-  const role = args.flags['role'] ?? 'builder';
 
   if (!action) {
-    printError(new Error('Usage: mesa policy check <action> <resource> --actor <id> --role <role>'));
+    printError(new Error('Usage: mesa policy check <action> <resource> --actor <id> --role <role> [--mode role-based|current]'));
     process.exitCode = 1;
     return;
   }
 
-  const ctx = createRuntimeContext({
-    rootDir: process.cwd(),
-    actor: {
-      id: typeof actorId === 'string' ? actorId : 'cli:user',
-      type: 'user',
-      roles: [(typeof role === 'string' ? role : 'builder') as 'builder'],
-    },
-  });
-
   try {
-    const decision = ctx.policy.can(ctx.actor, action, resource);
-    outputResult(
-      {
-        action,
-        resource,
-        actor: ctx.actor.id,
-        roles: ctx.actor.roles,
-        allowed: decision.allowed,
-        reason: decision.reason ?? null,
-        requiresApproval: decision.requiresApproval ?? false,
-      },
-      json,
-      () => {
-        const status = decision.allowed ? 'ALLOWED' : 'DENIED';
-        console.log(`\n  Policy check: ${status}`);
-        console.log(`    Action  : ${action}`);
-        console.log(`    Resource: ${resource}`);
-        console.log(`    Actor   : ${ctx.actor.id} (roles: ${ctx.actor.roles.join(', ')})`);
-        if (decision.reason) console.log(`    Reason  : ${decision.reason}`);
-        if (decision.requiresApproval) console.log(`    Note    : This action requires manual approval`);
-        console.log('');
-      },
-    );
+    const actor = buildActor(args, 'builder');
+
+    if (mode === 'role-based') {
+      const engine = new RoleBasedPolicyEngine();
+      const decision = engine.can(actor, action, resource);
+      outputResult(
+        {
+          mode: 'role-based',
+          action,
+          resource,
+          actor: actor.id,
+          roles: actor.roles,
+          allowed: decision.allowed,
+          reason: decision.reason ?? null,
+          requiresApproval: decision.requiresApproval ?? false,
+        },
+        json,
+        () => printHumanCheck('role-based', action, resource, actor, decision.allowed, decision.reason, false),
+      );
+    } else {
+      const ctx = createRuntimeContext({
+        rootDir: process.cwd(),
+        actor,
+      });
+      const decision = ctx.policy.can(ctx.actor, action, resource);
+      const effectiveMode = ctx.config.policy?.mode ?? 'allow-all';
+      outputResult(
+        {
+          mode: effectiveMode,
+          action,
+          resource,
+          actor: ctx.actor.id,
+          roles: ctx.actor.roles,
+          allowed: decision.allowed,
+          reason: decision.reason ?? null,
+          requiresApproval: decision.requiresApproval ?? false,
+        },
+        json,
+        () => printHumanCheck(effectiveMode, action, resource, actor, decision.allowed, decision.reason, decision.requiresApproval ?? false),
+      );
+    }
   } catch (err) {
     printError(err);
     process.exitCode = 1;
   }
 }
 
+function printHumanCheck(
+  mode: string,
+  action: string,
+  resource: string,
+  actor: MesaActor,
+  allowed: boolean,
+  reason: string | undefined,
+  requiresApproval: boolean,
+): void {
+  const status = allowed ? 'ALLOWED' : 'DENIED';
+  console.log(`\n  Policy check: ${status}`);
+  console.log(`    Mode    : ${mode}`);
+  console.log(`    Action  : ${action}`);
+  console.log(`    Resource: ${resource}`);
+  console.log(`    Actor   : ${actor.id} (roles: ${(actor.roles as string[]).join(', ')})`);
+  if (reason) console.log(`    Reason  : ${reason}`);
+  if (requiresApproval) console.log(`    Note    : This action requires manual approval`);
+  console.log('');
+}
+
 export function runPolicyInspect(args: ParsedArgs): void {
   const json = !!args.flags['json'];
+  const mode = resolveMode(args, 'role-based');
 
-  const ctx = createRuntimeContext({
-    rootDir: process.cwd(),
-    actor: { id: 'cli:user', type: 'user', roles: ['owner'] },
-  });
-
-  // Collect all known actions from the engine by probing common actions
   const knownActions = [
     'task.create', 'task.updateStatus', 'task.assign', 'task.archive', 'task.delete',
     'meeting.create', 'meeting.updateStatus', 'meeting.addTask', 'meeting.addAgent',
@@ -75,39 +152,70 @@ export function runPolicyInspect(args: ParsedArgs): void {
 
   const roles = ['owner', 'admin', 'builder', 'reviewer', 'connector', 'ci', 'system'] as const;
 
-  const results = knownActions.map((action) => {
-    const roleResults: Record<string, boolean> = {};
-    for (const role of roles) {
-      const actor = { id: `inspect:${role}`, type: 'system' as const, roles: [role] as unknown as MesaActor['roles'] };
-      roleResults[role] = ctx.policy.can(actor, action, '*').allowed;
-    }
-    return { action, ...roleResults };
-  });
-
   try {
-    outputResult(
-      {
-        mode: ctx.config.policy?.mode ?? 'allow-all',
-        actions: results,
-        roles,
-      },
-      json,
-      () => {
-        console.log(`\n  Policy mode: ${ctx.config.policy?.mode ?? 'allow-all'}\n`);
-        console.log(`  ${'Action'.padEnd(24)} ${roles.map((r) => r.slice(0, 5).padEnd(7)).join('')}`);
-        console.log(`  ${'─'.repeat(24)} ${'─'.repeat(7 * roles.length)}`);
-        for (const row of results) {
-          const cells = roles.map((r) => {
-            const ok = (row as Record<string, unknown>)[r] as boolean;
-            return ok ? ' ✓    ' : ' ✗    ';
-          }).join('');
-          console.log(`  ${row.action.padEnd(24)} ${cells}`);
+    if (mode === 'role-based') {
+      const engine = new RoleBasedPolicyEngine();
+      const results = knownActions.map((action) => {
+        const roleResults: Record<string, boolean> = {};
+        for (const role of roles) {
+          const actor = {
+            id: `inspect:${role}`,
+            type: 'system' as const,
+            roles: [role] as unknown as MesaActor['roles'],
+          };
+          roleResults[role] = engine.can(actor, action, '*').allowed;
         }
-        console.log('');
-      },
-    );
+        return { action, ...roleResults };
+      });
+      outputResult(
+        { mode: 'role-based', actions: results, roles },
+        json,
+        () => printHumanMatrix('role-based', roles, results),
+      );
+    } else {
+      const ctx = createRuntimeContext({
+        rootDir: process.cwd(),
+        actor: { id: 'cli:user', type: 'user', roles: ['owner'] },
+      });
+      const effectiveMode = ctx.config.policy?.mode ?? 'allow-all';
+      const results = knownActions.map((action) => {
+        const roleResults: Record<string, boolean> = {};
+        for (const role of roles) {
+          const actor = {
+            id: `inspect:${role}`,
+            type: 'system' as const,
+            roles: [role] as unknown as MesaActor['roles'],
+          };
+          roleResults[role] = ctx.policy.can(actor, action, '*').allowed;
+        }
+        return { action, ...roleResults };
+      });
+      outputResult(
+        { mode: effectiveMode, actions: results, roles },
+        json,
+        () => printHumanMatrix(effectiveMode, roles, results),
+      );
+    }
   } catch (err) {
     printError(err);
     process.exitCode = 1;
   }
+}
+
+function printHumanMatrix(
+  mode: string,
+  roles: readonly string[],
+  results: { action: string }[],
+): void {
+  console.log(`\n  Policy mode: ${mode}\n`);
+  console.log(`  ${'Action'.padEnd(24)} ${roles.map((r) => r.slice(0, 5).padEnd(7)).join('')}`);
+  console.log(`  ${'─'.repeat(24)} ${'─'.repeat(7 * roles.length)}`);
+  for (const row of results) {
+    const cells = roles.map((r) => {
+      const ok = (row as Record<string, unknown>)[r] as boolean;
+      return ok ? ' ✓    ' : ' ✗    ';
+    }).join('');
+    console.log(`  ${(row as { action: string }).action.padEnd(24)} ${cells}`);
+  }
+  console.log('');
 }

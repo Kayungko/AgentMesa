@@ -6,7 +6,7 @@ import { RoleBasedPolicyEngine, AllowAllMesaPolicyEngine } from '../runtime/poli
 import type { MesaActor, MesaRuntimeContext } from '../runtime/types.js';
 import { createRuntimeContext } from '../runtime/create-runtime-context.js';
 import { FileStorageAdapter } from '../runtime/file-storage-adapter.js';
-import { initWorkspace, createTask, deleteTask } from '../index.js';
+import { initWorkspace, createTask, deleteTask, updateTaskStatus } from '../index.js';
 import { PolicyDeniedError } from '../errors.js';
 
 function actor(overrides: Partial<MesaActor> = {}): MesaActor {
@@ -144,7 +144,7 @@ describe('RoleBasedPolicyEngine', () => {
 
   it('allows reviewer to read tasks and create artifacts', () => {
     const r = actor({ roles: ['reviewer'] });
-    expect(policy.can(r, 'task.updateStatus', 't1').allowed).toBe(true);
+    expect(policy.canWithContext(r, 'task.updateStatus', 't1', { targetStatus: 'approved' }).allowed).toBe(true);
     expect(policy.can(r, 'artifact.create', 'a1').allowed).toBe(true);
     expect(policy.can(r, 'message.append', 'm1').allowed).toBe(true);
   });
@@ -270,9 +270,14 @@ describe('RoleBasedPolicyEngine', () => {
     expect(policy.can(c, 'projection.read', 'p1').allowed).toBe(true);
   });
 
-  it('allows reviewer to change task status', () => {
+  it('denies reviewer task.updateStatus without targetStatus context', () => {
     const r = actor({ roles: ['reviewer'] });
-    expect(policy.can(r, 'task.updateStatus', 't1').allowed).toBe(true);
+    // can() delegates to canWithContext() — reviewer requires context with targetStatus
+    expect(policy.can(r, 'task.updateStatus', 't1').allowed).toBe(false);
+  });
+
+  it('allows reviewer to change task status when context provided', () => {
+    expect(policy.canWithContext(actor({ roles: ['reviewer'] }), 'task.updateStatus', 't1', { targetStatus: 'approved' }).allowed).toBe(true);
   });
 
   it('denies reviewer from managing agents or meetings', () => {
@@ -328,6 +333,35 @@ describe('RoleBasedPolicyEngine', () => {
     }
   });
 
+  // --- Read/inspect/rebuild action coverage ---
+
+  it('allows connector to read events and projections', () => {
+    const c = actor({ roles: ['connector'] });
+    expect(policy.can(c, 'event.read', 'e1').allowed).toBe(true);
+    expect(policy.can(c, 'projection.read', 'p1').allowed).toBe(true);
+    expect(policy.can(c, 'projection.rebuild', 'p1').allowed).toBe(false);
+  });
+
+  it('allows ci to read events and projections', () => {
+    const c = actor({ id: 'ci:github', type: 'ci', roles: ['ci'] });
+    expect(policy.can(c, 'event.read', 'e1').allowed).toBe(true);
+    expect(policy.can(c, 'projection.read', 'p1').allowed).toBe(true);
+  });
+
+  it('allows system to rebuild projections', () => {
+    const s = actor({ id: 'system:core', type: 'system', roles: ['system'] });
+    expect(policy.can(s, 'projection.rebuild', 'p1').allowed).toBe(true);
+    expect(policy.can(s, 'event.read', 'e1').allowed).toBe(true);
+    expect(policy.can(s, 'projection.read', 'p1').allowed).toBe(true);
+  });
+
+  it('allows admin to read events and rebuild projections', () => {
+    const a = actor({ roles: ['admin'] });
+    expect(policy.can(a, 'event.read', 'e1').allowed).toBe(true);
+    expect(policy.can(a, 'projection.rebuild', 'p1').allowed).toBe(true);
+    expect(policy.can(a, 'transport.inspect', 't1').allowed).toBe(true);
+  });
+
   // --- canWithContext tests (Task 5) ---
 
   it('canWithContext returns same result as can for builder', () => {
@@ -354,6 +388,53 @@ describe('RoleBasedPolicyEngine', () => {
   it('canWithContext still allows owner bypass', () => {
     const owner = actor({ roles: ['owner'] });
     expect(policy.canWithContext(owner, 'unknown.action', 'x', {}).allowed).toBe(true);
+  });
+
+  // --- Reviewer context-aware status restrictions ---
+
+  it('allows reviewer to set status to approved', () => {
+    const r = actor({ roles: ['reviewer'] });
+    expect(policy.canWithContext(r, 'task.updateStatus', 't1', { targetStatus: 'approved' }).allowed).toBe(true);
+  });
+
+  it('allows reviewer to set status to changes_requested', () => {
+    const r = actor({ roles: ['reviewer'] });
+    expect(policy.canWithContext(r, 'task.updateStatus', 't1', { targetStatus: 'changes_requested' }).allowed).toBe(true);
+  });
+
+  it('denies reviewer from setting status to in_progress', () => {
+    const r = actor({ roles: ['reviewer'] });
+    const result = policy.canWithContext(r, 'task.updateStatus', 't1', { targetStatus: 'in_progress' });
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain('Reviewer may only transition');
+  });
+
+  it('denies reviewer from setting status to todo', () => {
+    const r = actor({ roles: ['reviewer'] });
+    const result = policy.canWithContext(r, 'task.updateStatus', 't1', { targetStatus: 'todo' });
+    expect(result.allowed).toBe(false);
+  });
+
+  it('allows builder to set status to in_progress (no reviewer limit)', () => {
+    const b = actor({ roles: ['builder'] });
+    expect(policy.canWithContext(b, 'task.updateStatus', 't1', { targetStatus: 'in_progress' }).allowed).toBe(true);
+  });
+
+  it('allows admin with reviewer role to set any status', () => {
+    const a = actor({ roles: ['reviewer', 'admin'] });
+    expect(policy.canWithContext(a, 'task.updateStatus', 't1', { targetStatus: 'in_progress' }).allowed).toBe(true);
+  });
+
+  it('allows maintainer with reviewer role to set any status', () => {
+    const m = actor({ roles: ['reviewer', 'maintainer'] });
+    expect(policy.canWithContext(m, 'task.updateStatus', 't1', { targetStatus: 'todo' }).allowed).toBe(true);
+  });
+
+  it('denies reviewer when no targetStatus context provided', () => {
+    const r = actor({ roles: ['reviewer'] });
+    const result = policy.canWithContext(r, 'task.updateStatus', 't1');
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain('unknown');
   });
 });
 
@@ -437,5 +518,59 @@ describe('Runtime context policy enforcement', () => {
     const task = createTaskInMeeting(ctx, 'Compat test');
     expect(task.id).toBeDefined();
     deleteTask(ctx, task.id);
+  });
+
+  // --- Reviewer context-aware status enforcement ---
+
+  it('role-based reviewer can set status to approved', () => {
+    const ctx = makeRoleBasedContext({ roles: ['reviewer'] });
+    const setupCtx = createRuntimeContext({
+      rootDir: ctx.rootDir,
+      actor: { id: 'user:owner', type: 'user', roles: ['owner'] },
+      storage: ctx.storage,
+      policy: ctx.policy,
+    });
+    const task = createTaskInMeeting(setupCtx, 'Reviewer approve');
+    // Transition task through: todo -> in_progress -> ready_for_review -> reviewing (requires owner)
+    updateTaskStatus(setupCtx, task.id, 'in_progress');
+    updateTaskStatus(setupCtx, task.id, 'ready_for_review');
+    updateTaskStatus(setupCtx, task.id, 'reviewing');
+    expect(() => updateTaskStatus(ctx, task.id, 'approved')).not.toThrow();
+  });
+
+  it('role-based reviewer can set status to changes_requested', () => {
+    const ctx = makeRoleBasedContext({ roles: ['reviewer'] });
+    const setupCtx = createRuntimeContext({
+      rootDir: ctx.rootDir,
+      actor: { id: 'user:owner', type: 'user', roles: ['owner'] },
+      storage: ctx.storage,
+      policy: ctx.policy,
+    });
+    const task = createTaskInMeeting(setupCtx, 'Reviewer changes req');
+    updateTaskStatus(setupCtx, task.id, 'in_progress');
+    updateTaskStatus(setupCtx, task.id, 'ready_for_review');
+    updateTaskStatus(setupCtx, task.id, 'reviewing');
+    expect(() => updateTaskStatus(ctx, task.id, 'changes_requested')).not.toThrow();
+  });
+
+  it('role-based reviewer cannot set status to in_progress', () => {
+    const ctx = makeRoleBasedContext({ roles: ['reviewer'] });
+    const setupCtx = createRuntimeContext({
+      rootDir: ctx.rootDir,
+      actor: { id: 'user:owner', type: 'user', roles: ['owner'] },
+      storage: ctx.storage,
+      policy: ctx.policy,
+    });
+    const task = createTaskInMeeting(setupCtx, 'Reviewer blocked');
+    updateTaskStatus(setupCtx, task.id, 'in_progress');
+    updateTaskStatus(setupCtx, task.id, 'ready_for_review');
+    updateTaskStatus(setupCtx, task.id, 'reviewing');
+    expect(() => updateTaskStatus(ctx, task.id, 'in_progress')).toThrow(PolicyDeniedError);
+  });
+
+  it('role-based builder can set status to in_progress', () => {
+    const ctx = makeRoleBasedContext({ roles: ['builder'] });
+    const task = createTaskInMeeting(ctx, 'Builder progress');
+    expect(() => updateTaskStatus(ctx, task.id, 'in_progress')).not.toThrow();
   });
 });

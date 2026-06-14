@@ -20,6 +20,18 @@ export function assertPolicy(
   }
 }
 
+export function assertPolicyWithContext(
+  ctx: MesaRuntimeContext,
+  action: string,
+  resource: string,
+  context?: Record<string, unknown>,
+): void {
+  const decision = ctx.policy.canWithContext(ctx.actor, action, resource, context);
+  if (!decision.allowed) {
+    throw new PolicyDeniedError(action, resource, decision.reason);
+  }
+}
+
 export function readJsonFromStorage<T>(
   ctx: MesaRuntimeContext,
   filePath: string

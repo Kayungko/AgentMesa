@@ -14,6 +14,7 @@ import {
   isMeetingProjectionFresh,
   isAgentProjectionFresh,
 } from './projection-read-service.js';
+import { assertPolicy } from './runtime-service-utils.js';
 
 function readMode(ctx: MesaRuntimeContext): ReadModelMode {
   return ctx.config.readModel!.mode!;
@@ -31,6 +32,7 @@ function getReadModelViaProjection<T extends Record<string, unknown>>(
 
   // projection mode: strict — missing/stale/corrupt all throw
   if (mode === 'projection') {
+    assertPolicy(ctx, 'projection.read', `projection:${label}:${id}`);
     const proj = getProjFn();
     if (!proj) {
       throw new MesaError('PROJECTION_MISSING', `No projection found for ${label} "${id}". Run "mesa rebuild".`);
@@ -43,6 +45,7 @@ function getReadModelViaProjection<T extends Record<string, unknown>>(
 
   // hybrid mode: fallback to legacy with warn on any projection issue
   if (mode === 'hybrid') {
+    assertPolicy(ctx, 'projection.read', `projection:${label}:${id}`);
     let proj: T | null;
     try {
       proj = getProjFn();
@@ -103,6 +106,7 @@ export function listTaskReadModels(ctx: MesaRuntimeContext): Record<string, unkn
   const mode = readMode(ctx);
 
   if (mode === 'projection') {
+    assertPolicy(ctx, 'projection.read', 'projection:task:*');
     const projs = listTaskProjections(ctx);
     for (const p of projs) {
       const id = p.id as string;
@@ -114,6 +118,7 @@ export function listTaskReadModels(ctx: MesaRuntimeContext): Record<string, unkn
   }
 
   if (mode === 'hybrid') {
+    assertPolicy(ctx, 'projection.read', 'projection:task:*');
     const projs = tryListProjections(ctx, () => listTaskProjections(ctx), 'task');
     if (projs !== null && projs.length > 0) {
       let anyStale = false;
@@ -151,6 +156,7 @@ export function listMeetingReadModels(ctx: MesaRuntimeContext): Record<string, u
   const mode = readMode(ctx);
 
   if (mode === 'projection') {
+    assertPolicy(ctx, 'projection.read', 'projection:meeting:*');
     const projs = listMeetingProjections(ctx);
     for (const p of projs) {
       const id = p.id as string;
@@ -162,6 +168,7 @@ export function listMeetingReadModels(ctx: MesaRuntimeContext): Record<string, u
   }
 
   if (mode === 'hybrid') {
+    assertPolicy(ctx, 'projection.read', 'projection:meeting:*');
     const projs = tryListProjections(ctx, () => listMeetingProjections(ctx), 'meeting');
     if (projs !== null && projs.length > 0) {
       let anyStale = false;
@@ -199,6 +206,7 @@ export function listAgentReadModels(ctx: MesaRuntimeContext): Record<string, unk
   const mode = readMode(ctx);
 
   if (mode === 'projection') {
+    assertPolicy(ctx, 'projection.read', 'projection:agent:*');
     const projs = listAgentProjections(ctx);
     for (const p of projs) {
       const id = p.id as string;
@@ -210,6 +218,7 @@ export function listAgentReadModels(ctx: MesaRuntimeContext): Record<string, unk
   }
 
   if (mode === 'hybrid') {
+    assertPolicy(ctx, 'projection.read', 'projection:agent:*');
     const projs = tryListProjections(ctx, () => listAgentProjections(ctx), 'agent');
     if (projs !== null && projs.length > 0) {
       let anyStale = false;
