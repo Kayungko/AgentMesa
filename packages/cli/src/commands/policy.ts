@@ -60,7 +60,6 @@ function buildActor(args: ParsedArgs, defaultRole: AgentRole): MesaActor {
 
 export function runPolicyCheck(args: ParsedArgs): void {
   const json = !!args.flags['json'];
-  const mode = resolveMode(args, 'role-based');
   const action = args.positional[0];
   const resource = args.positional[1] ?? '*';
 
@@ -71,6 +70,7 @@ export function runPolicyCheck(args: ParsedArgs): void {
   }
 
   try {
+    const mode = resolveMode(args, 'role-based');
     const actor = buildActor(args, 'builder');
 
     if (mode === 'role-based') {
@@ -140,7 +140,6 @@ function printHumanCheck(
 
 export function runPolicyInspect(args: ParsedArgs): void {
   const json = !!args.flags['json'];
-  const mode = resolveMode(args, 'role-based');
 
   const knownActions = [
     'task.create', 'task.updateStatus', 'task.assign', 'task.archive', 'task.delete',
@@ -152,6 +151,7 @@ export function runPolicyInspect(args: ParsedArgs): void {
   const roles = ['owner', 'admin', 'builder', 'reviewer', 'connector', 'ci', 'system'] as const;
 
   try {
+    const mode = resolveMode(args, 'role-based');
     if (mode === 'role-based') {
       const engine = new RoleBasedPolicyEngine();
       const results = knownActions.map((action) => {

@@ -7,6 +7,8 @@ import type { MesaActor, MesaRuntimeContext } from '../runtime/types.js';
 import { createRuntimeContext } from '../runtime/create-runtime-context.js';
 import { FileStorageAdapter } from '../runtime/file-storage-adapter.js';
 import { initWorkspace, createTask, deleteTask, updateTaskStatus } from '../index.js';
+import { getTaskProjection, listTaskProjections } from '../services/projection-read-service.js';
+import { rebuildAllProjections } from '../services/projection-service.js';
 import { PolicyDeniedError } from '../errors.js';
 
 function actor(overrides: Partial<MesaActor> = {}): MesaActor {
@@ -611,5 +613,48 @@ describe('Runtime context policy enforcement', () => {
     const ctx = makeRoleBasedContext({ roles: ['reviewer', 'owner'] });
     const task = createTaskInMeeting(ctx, 'Reviewer owner');
     expect(() => updateTaskStatus(ctx, task.id, 'in_progress')).not.toThrow();
+  });
+
+  // --- Projection read enforcement on public API ---
+
+  it('public getTaskProjection denied for role lacking projection.read', () => {
+    const customCtx = makeRoleBasedContext({ roles: ['custom'] });
+    const ownerCtx = createRuntimeContext({
+      rootDir: customCtx.rootDir,
+      actor: { id: 'user:owner', type: 'user', roles: ['owner'] },
+      storage: customCtx.storage,
+      policy: customCtx.policy,
+    });
+    const task = createTaskInMeeting(ownerCtx, 'Task for custom');
+    rebuildAllProjections(ownerCtx);
+    expect(() => getTaskProjection(customCtx, task.id)).toThrow(PolicyDeniedError);
+  });
+
+  it('public listTaskProjections denied for role lacking projection.read', () => {
+    const customCtx = makeRoleBasedContext({ roles: ['custom'] });
+    const ownerCtx = createRuntimeContext({
+      rootDir: customCtx.rootDir,
+      actor: { id: 'user:owner', type: 'user', roles: ['owner'] },
+      storage: customCtx.storage,
+      policy: customCtx.policy,
+    });
+    const task = createTaskInMeeting(ownerCtx, 'Task for custom list');
+    rebuildAllProjections(ownerCtx);
+    expect(() => listTaskProjections(customCtx)).toThrow(PolicyDeniedError);
+  });
+
+  it('public getTaskProjection allowed for builder (has projection.read)', () => {
+    const builderCtx = makeRoleBasedContext({ roles: ['builder'] });
+    const ownerCtx = createRuntimeContext({
+      rootDir: builderCtx.rootDir,
+      actor: { id: 'user:owner', type: 'user', roles: ['owner'] },
+      storage: builderCtx.storage,
+      policy: builderCtx.policy,
+    });
+    const task = createTaskInMeeting(ownerCtx, 'Task for builder');
+    rebuildAllProjections(ownerCtx);
+    const proj = getTaskProjection(builderCtx, task.id);
+    expect(proj).not.toBeNull();
+    expect(proj!.id).toBe(task.id);
   });
 });

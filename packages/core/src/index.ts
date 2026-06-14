@@ -18,6 +18,17 @@ export * from './services/lock-manager.js';
 export * from './services/event-service.js';
 export * from './services/projection-schemas.js';
 export * from './services/projection-service.js';
-export * from './services/projection-read-service.js';
+export {
+  getTaskProjection,
+  getMeetingProjection,
+  getAgentProjection,
+  listTaskProjections,
+  listMeetingProjections,
+  listAgentProjections,
+  isTaskProjectionFresh,
+  isMeetingProjectionFresh,
+  isAgentProjectionFresh,
+} from './services/projection-read-service.js';
+export type { ReadProjectionOptions, TaskProjection, MeetingProjection, AgentProjection } from './services/projection-read-service.js';
 export * from './services/read-model-service.js';
 export * from './services/diagnostics.js';
