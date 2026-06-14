@@ -84,7 +84,7 @@ describe('PermissionChecker.canPerform', () => {
   });
 
   it('all roles can read tasks', () => {
-    const roles: AgentRole[] = ['chair', 'planner', 'builder', 'reviewer', 'tester', 'documenter', 'maintainer'];
+    const roles: AgentRole[] = ['chair', 'planner', 'builder', 'reviewer', 'tester', 'documenter', 'maintainer', 'researcher', 'custom', 'admin', 'connector', 'ci', 'system'];
     for (const role of roles) {
       expect(checker.canPerform(role, 'read_task')).toBe(true);
     }
@@ -136,13 +136,14 @@ describe('PermissionChecker.getRolesForAction', () => {
 
   it('returns roles that can read_task', () => {
     const roles = checker.getRolesForAction('read_task');
-    expect(roles).toHaveLength(9);
+    expect(roles).toHaveLength(13);
   });
 
   it('returns roles that can manage_agents', () => {
     const roles = checker.getRolesForAction('manage_agents');
     expect(roles).toContain('chair');
     expect(roles).toContain('maintainer');
-    expect(roles).toHaveLength(2);
+    expect(roles).toContain('admin');
+    expect(roles).toHaveLength(3);
   });
 });
