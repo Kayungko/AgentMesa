@@ -19,6 +19,7 @@ import type { MesaWorkspacePaths } from '@agentmesa/core';
 import type { MesaRuntimeContext } from '@agentmesa/core';
 import { runTimeline } from '../commands/events.js';
 import { runPolicyCheck, runPolicyInspect } from '../commands/policy.js';
+import { runTransports } from '../commands/transports.js';
 import type { ParsedArgs } from '../parse-args.js';
 
 let testDir: string;
@@ -333,6 +334,249 @@ describe('CLI policy commands', () => {
         process.exitCode = prevExitCode;
         errorSpy.mockRestore();
         logSpy.mockRestore();
+      }
+    });
+  });
+});
+
+describe('CLI transports subcommands', () => {
+  function makeArgs(overrides: Partial<ParsedArgs> = {}): ParsedArgs {
+    return {
+      command: 'transports',
+      subcommand: 'list',
+      positional: [],
+      flags: {},
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    // Ensure we're in an initialized workspace for transport commands
+    testDir = mkdtempSync(join(tmpdir(), 'agentmesa-cli-test-'));
+    paths = initWorkspace(testDir);
+    ctx = createRuntimeContext({
+      rootDir: testDir,
+      actor: { id: 'user:local', type: 'user', roles: ['owner'] },
+    });
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  describe('transports list', () => {
+    it('outputs transport table', () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const origCwd = process.cwd;
+        process.cwd = () => testDir;
+        const args = makeArgs();
+        runTransports(args);
+        const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        expect(stdout).toContain('File Transport');
+        expect(stdout).toContain('file');
+        process.cwd = origCwd;
+      } finally {
+        logSpy.mockRestore();
+      }
+    });
+
+    it('outputs JSON when --json flag set', () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const origCwd = process.cwd;
+        process.cwd = () => testDir;
+        const args = makeArgs({ flags: { json: true } });
+        runTransports(args);
+        const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        expect(() => JSON.parse(stdout)).not.toThrow();
+        process.cwd = origCwd;
+      } finally {
+        logSpy.mockRestore();
+      }
+    });
+  });
+
+  describe('transports inspect', () => {
+    it('outputs transport details', () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const origCwd = process.cwd;
+        process.cwd = () => testDir;
+        const args = makeArgs({
+          subcommand: 'inspect',
+          positional: ['File Transport'],
+        });
+        runTransports(args);
+        const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        expect(stdout).toContain('File Transport');
+        expect(stdout).toContain('file');
+        expect(stdout).toContain('0.2.0');
+        process.cwd = origCwd;
+      } finally {
+        logSpy.mockRestore();
+      }
+    });
+
+    it('outputs JSON when --json flag set', () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const origCwd = process.cwd;
+        process.cwd = () => testDir;
+        const args = makeArgs({
+          subcommand: 'inspect',
+          positional: ['File Transport'],
+          flags: { json: true },
+        });
+        runTransports(args);
+        const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        const parsed = JSON.parse(stdout) as Record<string, unknown>;
+        expect(parsed.name).toBe('File Transport');
+        expect(parsed.type).toBe('file');
+        process.cwd = origCwd;
+      } finally {
+        logSpy.mockRestore();
+      }
+    });
+
+    it('throws error without name argument', () => {
+      const prevExitCode = process.exitCode;
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      process.exitCode = 0;
+      try {
+        const origCwd = process.cwd;
+        process.cwd = () => testDir;
+        const args = makeArgs({ subcommand: 'inspect' });
+        runTransports(args);
+        expect(process.exitCode).toBe(1);
+        process.cwd = origCwd;
+      } finally {
+        process.exitCode = prevExitCode;
+        errorSpy.mockRestore();
+      }
+    });
+  });
+
+  describe('transports inbox', () => {
+    it('shows inbox (empty) for File Transport', () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const origCwd = process.cwd;
+        process.cwd = () => testDir;
+        const args = makeArgs({
+          subcommand: 'inbox',
+          positional: ['File Transport'],
+        });
+        runTransports(args);
+        const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        expect(stdout).toContain('Inbound');
+        process.cwd = origCwd;
+      } finally {
+        logSpy.mockRestore();
+      }
+    });
+
+    it('outputs JSON inbox', () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const origCwd = process.cwd;
+        process.cwd = () => testDir;
+        const args = makeArgs({
+          subcommand: 'inbox',
+          positional: ['File Transport'],
+          flags: { json: true },
+        });
+        runTransports(args);
+        const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        const parsed = JSON.parse(stdout) as Record<string, unknown>;
+        expect(parsed.transport).toBe('File Transport');
+        expect(Array.isArray(parsed.envelopes)).toBe(true);
+        process.cwd = origCwd;
+      } finally {
+        logSpy.mockRestore();
+      }
+    });
+  });
+
+  describe('transports outbox', () => {
+    it('shows outbox (empty) for File Transport', () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const origCwd = process.cwd;
+        process.cwd = () => testDir;
+        const args = makeArgs({
+          subcommand: 'outbox',
+          positional: ['File Transport'],
+        });
+        runTransports(args);
+        const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        expect(stdout).toContain('Outbound');
+        process.cwd = origCwd;
+      } finally {
+        logSpy.mockRestore();
+      }
+    });
+
+    it('outputs JSON outbox', () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const origCwd = process.cwd;
+        process.cwd = () => testDir;
+        const args = makeArgs({
+          subcommand: 'outbox',
+          positional: ['File Transport'],
+          flags: { json: true },
+        });
+        runTransports(args);
+        const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        const parsed = JSON.parse(stdout) as Record<string, unknown>;
+        expect(parsed.transport).toBe('File Transport');
+        expect(Array.isArray(parsed.envelopes)).toBe(true);
+        process.cwd = origCwd;
+      } finally {
+        logSpy.mockRestore();
+      }
+    });
+  });
+
+  describe('transports unknown subcommand', () => {
+    it('sets exitCode=1 for unknown subcommand', () => {
+      const prevExitCode = process.exitCode;
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      process.exitCode = 0;
+      try {
+        const origCwd = process.cwd;
+        process.cwd = () => testDir;
+        const args = makeArgs({ subcommand: 'foobar' });
+        runTransports(args);
+        expect(process.exitCode).toBe(1);
+        process.cwd = origCwd;
+      } finally {
+        process.exitCode = prevExitCode;
+        errorSpy.mockRestore();
+      }
+    });
+  });
+
+  describe('transports inbox for unsupported transport', () => {
+    it('throws error for transport without inbox support', () => {
+      const prevExitCode = process.exitCode;
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      process.exitCode = 0;
+      try {
+        const origCwd = process.cwd;
+        process.cwd = () => testDir;
+        // MCPTransport does not support inbox
+        const args = makeArgs({
+          subcommand: 'inbox',
+          positional: ['MCP Transport'],
+        });
+        runTransports(args);
+        expect(process.exitCode).toBe(1);
+        process.cwd = origCwd;
+      } finally {
+        process.exitCode = prevExitCode;
+        errorSpy.mockRestore();
       }
     });
   });
