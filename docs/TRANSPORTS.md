@@ -12,13 +12,18 @@ Every transport implements the same contract:
 
 ```ts
 interface MesaTransport {
-  name: string;
-  type: 'file' | 'mcp' | 'http' | 'websocket' | 'github' | 'ci';
-  capabilities: TransportCapabilities;
-  version: string;           // protocol version this transport speaks
-  connect(): Promise<void>;  // connect to the meeting layer
-  disconnect(): Promise<void>;
-  isAvailable(): boolean;    // whether this transport works in the current environment
+  readonly name: string;
+  readonly type: TransportKind;
+  readonly capabilities: MesaTransportCapabilities;
+  readonly version: string;
+  isAvailable(): boolean;
+  // v0.8 inbox/outbox (optional — only file-based transports implement this)
+  writeInbound?(envelope: TransportEnvelope): void;
+  writeOutbound?(envelope: TransportEnvelope): void;
+  listInbound?(status?: TransportEnvelopeStatus): TransportEnvelope[];
+  listOutbound?(status?: TransportEnvelopeStatus): TransportEnvelope[];
+  markProcessed?(id: string): boolean;
+  markFailed?(id: string, error: string): boolean;
 }
 ```
 
@@ -40,6 +45,57 @@ interface TransportCapabilities {
 
 The runtime selects transports based on `isAvailable()` and `capabilities`. Multiple transports may be active simultaneously for the same workspace.
 
+## Transport Envelope
+
+v0.8 introduces a structured envelope for transport-level messages. Every message between transports carries a `TransportEnvelope`:
+
+```ts
+interface TransportEnvelope {
+  id: string;
+  protocolVersion: string;
+  transport: string;           // transport name
+  direction: 'inbound' | 'outbound';
+  actor: string;
+  meetingId?: string;
+  taskId?: string;
+  type: string;                // e.g. 'task_created'
+  payload: Record<string, unknown>;
+  createdAt: string;
+  correlationId?: string;
+  replyTo?: string;
+  status: 'pending' | 'processed' | 'failed';
+  error?: string;
+}
+```
+
+The schema is defined in `packages/protocol/src/envelope.ts` using zod. All envelope writes are schema-validated. The inbox/outbox pattern uses atomic file writes through `FileStorageAdapter`.
+
+## Transport Registry
+
+v0.8 adds a transport registry for runtime transport management:
+
+| Function | Purpose |
+|---|---|
+| `registerTransport(ctx, transport)` | Register a new transport (rejects duplicates) |
+| `listTransports(ctx)` | Return all registered transports |
+| `getTransport(ctx, name)` | Find a transport by name |
+| `inspectTransport(ctx, name)` | Policy-gated inspection (`transport.inspect`) |
+
+The registry is the recommended API for transport inspection. Direct access to `ctx.transports` remains available for low-level use.
+
+## CLI Commands
+
+v0.8 expands `mesa transports` to support subcommands:
+
+```
+mesa transports list              List available transports
+mesa transports inspect <name>    Show transport details (policy-gated)
+mesa transports inbox <name>      List inbound envelopes
+mesa transports outbox <name>     List outbound envelopes
+```
+
+All subcommands support `--json` for structured output. Inbox/outbox support optional `--status pending|processed|failed` filtering.
+
 ## File Protocol Transport
 
 The lowest-friction entry. Any agent that can read and write files can participate.
@@ -47,14 +103,17 @@ The lowest-friction entry. Any agent that can read and write files can participa
 **How it works:**
 - Reads and writes JSON files under `.agentmesa/` in the project root.
 - Tasks live in `.agentmesa/tasks/`, messages in `.agentmesa/messages/`, artifacts in `.agentmesa/artifacts/`, meetings in `.agentmesa/meetings/`.
+- Inbox/outbox directories (`.agentmesa/inbox/`, `.agentmesa/outbox/`) store `TransportEnvelope` objects for async message passing between transports.
 - No daemon, no network, no server process required.
 - Concurrency is managed through file locks in `.agentmesa/locks/`.
+- All writes use atomic temp+fsync+rename through `FileStorageAdapter`.
+- Envelope writes are schema-validated before storage.
 
-**Capabilities:** read/write tasks, messages, artifacts, meetings, and agent registrations. No push support.
+**Capabilities:** read/write tasks, messages, artifacts, meetings, and agent registrations. Full inbox/outbox support for envelope-based communication. No push support.
 
 **Availability:** always available when `.agentmesa/` exists — the agent only needs filesystem access.
 
-This is the universal fallback transport. Every agent client can use it.
+This is the universal fallback transport and the reference implementation for the inbox/outbox pattern. Every agent client can use it.
 
 ## MCP Transport
 
@@ -129,13 +188,19 @@ Bridges CI pipeline results into AgentMesa tasks.
 
 | Component | Status |
 |---|---|
+| `TransportEnvelopeSchema` (protocol) | **Done.** Full zod schema: id, direction, status, payload, correlationId, replyTo, error. Types inferred from schema. |
+| `generateEnvelopeId()` (protocol) | **Done.** Format: `env_xxxxxxxx`. |
 | `TransportCapabilitiesSchema` (protocol) | **Done.** Structured schema with `canCreateTasks`, `canReadTasks`, `canUpdateTaskStatus`, `canPostMessages`, `canAttachArtifacts`, `canCreateMeetings`, `canRegisterAgents`, `supportsPush`, `supportsBidirectional`. |
 | `MesaTransportSchema` (protocol) | **Done.** Updated to use `TransportCapabilitiesSchema` instead of loose `string[]`. |
-| `MesaTransport` interface (core) | **Done.** `{ name, type, capabilities, version, isAvailable() }` in `MesaRuntimeContext.transports`. |
-| `FileTransport` (core) | **Done.** Always-available transport with full read/write capabilities. |
-| `createDefaultTransports` (core) | **Done.** Bootstraps `[FileTransport]`. Custom transports injectable via `CreateRuntimeContextOptions.transports`. |
+| `MesaTransport` interface (core) | **Done.** `{ name, type, capabilities, version, isAvailable(), writeInbound?, writeOutbound?, listInbound?, listOutbound?, markProcessed?, markFailed? }`. |
+| `FileTransport` (core) | **Done.** Always-available transport with full read/write capabilities and inbox/outbox. |
+| `FileTransport` inbox/outbox (core) | **Done.** `writeInbound/writeOutbound` with schema validate + atomic write. `listInbound/listOutbound` with status filter. `markProcessed/markFailed` with atomic status update. Corrupted files skipped with silent resilience. |
+| `createDefaultTransports` (core) | **Done.** Bootstraps `[FileTransport]` with paths and storage. Custom transports injectable via `CreateRuntimeContextOptions.transports`. |
 | `findTransportsByType` / `getAvailableTransports` (core) | **Done.** Registry query helpers. |
-| MCP transport | **Partial.** MCP server exists and maps tools to Core services, but uses `process.cwd()` directly rather than the `MesaTransport` interface. Treated as one transport implementation, not the center — full transport-registry integration is design intent. |
+| Transport Registry (core) | **Done.** `registerTransport/listTransports/getTransport/inspectTransport` with `transport.inspect` policy enforcement. |
+| `MCPTransport` skeleton (core) | **Done.** Declares capabilities, `isAvailable()` returns false. Future integration path documented. |
+| MCP server | **Partial.** MCP server exists and maps tools to Core services, but uses `process.cwd()` directly rather than the `MesaTransport` interface. Full transport-registry integration is design intent. |
+| CLI transport subcommands | **Done.** `mesa transports list/inspect/inbox/outbox` with `--json` and `--status` filter. |
 | HTTP transport | **Design intent.** |
 | WebSocket transport | **Design intent.** |
 | GitHub transport | **Design intent.** |

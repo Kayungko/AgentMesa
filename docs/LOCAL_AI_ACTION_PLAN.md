@@ -163,21 +163,21 @@ Acceptance:
 
 ## Priority 6: Transport Layer
 
-Status: `transport_abstraction_implemented_file_only_mcp_partial`
+Status: `inbox_outbox_registry_skeleton`
 
-- `TransportCapabilitiesSchema` in protocol: structured capabilities (canCreateTasks, canReadTasks, etc.) replacing loose `string[]`.
-- `MesaTransportSchema` updated to use structured capabilities.
-- `MesaTransport` interface in core types with `{ name, type, capabilities, version, isAvailable() }`.
-- `FileTransport`: always-available reference implementation with full read/write capabilities.
-- Transport registry in `MesaRuntimeContext.transports`; custom transports injectable via options.
-- `findTransportsByType` / `getAvailableTransports` query helpers.
-- MCP server treated as one transport implementation, not the center.
+- `TransportEnvelopeSchema` in protocol: full zod schema (id, direction, status, payload, correlationId, replyTo, error). Types inferred from schema.
+- `generateEnvelopeId()`: `env_xxxxxxxx` format.
+- `FileTransport` inbox/outbox: `writeInbound/writeOutbound` with schema validate + atomic write. `listInbound/listOutbound` with status filter. `markProcessed/markFailed` with atomic status update. Corrupted files skipped with silent resilience.
+- Transport Registry: `registerTransport/listTransports/getTransport/inspectTransport` with `transport.inspect` policy enforcement.
+- `MCPTransport` skeleton: declares capabilities, `isAvailable()` returns false. Future integration path documented.
+- CLI transport subcommands: `mesa transports list/inspect/inbox/outbox` with `--json` and `--status` filter.
+- Inbox/outbox directories (`.agentmesa/inbox/`, `.agentmesa/outbox/`) for async multi-transport message passing.
 - Core runtime has zero dependency on any specific client transport.
 - HTTP, WebSocket, GitHub, CI transports remain design intent.
 
 Direction:
 
-- Define Mesa Transport as a product-level abstraction.
+- Define Mesa Transport as a product-level abstraction with envelope protocol.
 - Treat File Protocol and MCP as transport implementations.
 - Prepare future HTTP, WebSocket, GitHub, and CI transports.
 
@@ -186,6 +186,7 @@ Acceptance:
 - MCP is not treated as the center of AgentMesa.
 - Core runtime has no dependency on a specific client transport.
 - File-based participation remains possible.
+- Transports can exchange messages through inbox/outbox envelopes.
 
 ## Priority 7: Policy Layer
 
