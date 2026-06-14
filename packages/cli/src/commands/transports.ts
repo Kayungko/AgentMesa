@@ -3,18 +3,17 @@ import {
   getAvailableTransports,
   listTransports,
   inspectTransport,
-  getTransport,
   MesaError,
 } from '@agentmesa/core';
-import type { MesaTransport } from '@agentmesa/core';
+import type { MesaTransport, MesaRuntimeContext } from '@agentmesa/core';
 import type { ParsedArgs } from '../parse-args.js';
 import { outputResult, outputError } from '../output.js';
 
-export function runTransports(args: ParsedArgs): void {
+export function runTransports(args: ParsedArgs, ctxOverride?: MesaRuntimeContext): void {
   const subcommand = args.subcommand || 'list';
   const json = !!args.flags['json'];
 
-  const ctx = createRuntimeContext({
+  const ctx = ctxOverride ?? createRuntimeContext({
     rootDir: process.cwd(),
     actor: { id: 'user:local', type: 'user', roles: ['owner'] },
   });
@@ -108,6 +107,19 @@ function runInspect(
   outputResult(result, json, () => printTransportDetail(result));
 }
 
+const VALID_STATUS_VALUES = new Set(['pending', 'processed', 'failed']);
+
+function validateStatus(status: unknown, json: boolean): 'pending' | 'processed' | 'failed' | undefined {
+  if (status === undefined || status === null) return undefined;
+  if (typeof status === 'string' && VALID_STATUS_VALUES.has(status)) {
+    return status as 'pending' | 'processed' | 'failed';
+  }
+  throw new MesaError(
+    'VALIDATION_ERROR',
+    `Invalid --status value "${status}". Allowed: pending, processed, failed`,
+  );
+}
+
 function runInbox(
   ctx: ReturnType<typeof createRuntimeContext>,
   args: ParsedArgs,
@@ -120,17 +132,15 @@ function runInbox(
       'Usage: mesa transports inbox <name>',
     );
   }
-  const transport = getTransport(ctx, name);
+  const transport = inspectTransport(ctx, name);
   if (typeof transport.listInbound !== 'function') {
     throw new MesaError(
       'VALIDATION_ERROR',
       `Transport "${name}" does not support inbox`,
     );
   }
-  const status = args.flags['status'];
-  const envelopes = transport.listInbound(
-    typeof status === 'string' ? (status as 'pending' | 'processed' | 'failed') : undefined,
-  );
+  const status = validateStatus(args.flags['status'], json);
+  const envelopes = transport.listInbound(status);
   outputResult({ transport: name, envelopes }, json, () => {
     printEnvelopeList(name, 'Inbound', envelopes);
   });
@@ -148,17 +158,15 @@ function runOutbox(
       'Usage: mesa transports outbox <name>',
     );
   }
-  const transport = getTransport(ctx, name);
+  const transport = inspectTransport(ctx, name);
   if (typeof transport.listOutbound !== 'function') {
     throw new MesaError(
       'VALIDATION_ERROR',
       `Transport "${name}" does not support outbox`,
     );
   }
-  const status = args.flags['status'];
-  const envelopes = transport.listOutbound(
-    typeof status === 'string' ? (status as 'pending' | 'processed' | 'failed') : undefined,
-  );
+  const status = validateStatus(args.flags['status'], json);
+  const envelopes = transport.listOutbound(status);
   outputResult({ transport: name, envelopes }, json, () => {
     printEnvelopeList(name, 'Outbound', envelopes);
   });
