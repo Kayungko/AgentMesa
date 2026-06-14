@@ -191,6 +191,45 @@ describe('FileTransport inbox/outbox', () => {
     expect(transport.markFailed!('nonexistent', 'err')).toBe(false);
   });
 
+  it('markProcessed works for outbound', () => {
+    const env = makeEnvelope({ direction: 'outbound' });
+    transport.writeOutbound!(env);
+    const ok = transport.markProcessed!(env.id, 'outbound');
+    expect(ok).toBe(true);
+    const list = transport.listOutbound!();
+    expect(list[0]!.status).toBe('processed');
+  });
+
+  it('markFailed works for outbound', () => {
+    const env = makeEnvelope({ direction: 'outbound' });
+    transport.writeOutbound!(env);
+    const ok = transport.markFailed!(env.id, 'Outbound error', 'outbound');
+    expect(ok).toBe(true);
+    const list = transport.listOutbound!();
+    expect(list[0]!.status).toBe('failed');
+    expect(list[0]!.error).toBe('Outbound error');
+  });
+
+  it('markProcessed outbound returns false for nonexistent id', () => {
+    expect(transport.markProcessed!('nonexistent', 'outbound')).toBe(false);
+  });
+
+  it('markFailed outbound returns false for nonexistent id', () => {
+    expect(transport.markFailed!('nonexistent', 'err', 'outbound')).toBe(false);
+  });
+
+  it('same id in inbound and outbound only updates specified direction', () => {
+    const inbound = makeEnvelope({ direction: 'inbound' });
+    const outbound = makeEnvelope({ ...inbound, direction: 'outbound' });
+    transport.writeInbound!(inbound);
+    transport.writeOutbound!(outbound);
+    transport.markProcessed!(inbound.id, 'inbound');
+    const inList = transport.listInbound!();
+    const outList = transport.listOutbound!();
+    expect(inList[0]!.status).toBe('processed');
+    expect(outList[0]!.status).toBe('pending');
+  });
+
   it('validates envelope schema on write', () => {
     expect(() =>
       transport.writeInbound!({ id: 'bad', transport: 'X' } as TransportEnvelope),
@@ -290,5 +329,105 @@ describe('transport-registry', () => {
     });
     const t = inspectTransport(ctx, 'File Transport');
     expect(t.name).toBe('File Transport');
+  });
+});
+
+// --- Transport Envelope Diagnostics ---
+
+describe('checkTransportEnvelopes', () => {
+  let testDir: string;
+  let storage: FileStorageAdapter;
+  let transport: FileTransport;
+  let inboxDir: string;
+  let outboxDir: string;
+
+  const makeEnvelope = (overrides: Partial<TransportEnvelope> = {}): TransportEnvelope => ({
+    id: generateEnvelopeId(),
+    protocolVersion: '0.2.0',
+    transport: 'File Transport',
+    direction: 'inbound',
+    actor: 'user',
+    type: 'task_created',
+    payload: { title: 'Test' },
+    createdAt: new Date().toISOString(),
+    status: 'pending',
+    ...overrides,
+  } as TransportEnvelope);
+
+  async function makeCtx() {
+    const { createRuntimeContext } = await import('../runtime/create-runtime-context.js');
+    return createRuntimeContext({
+      rootDir: testDir,
+      actor: { id: 'user:test', type: 'user', roles: ['owner'] },
+    });
+  }
+
+  beforeEach(() => {
+    testDir = mkdtempSync(join(tmpdir(), 'agentmesa-diag-'));
+    storage = new FileStorageAdapter();
+    // createRuntimeContext resolves paths under .agentmesa/
+    const mesaDir = join(testDir, '.agentmesa');
+    inboxDir = join(mesaDir, 'inbox');
+    outboxDir = join(mesaDir, 'outbox');
+    storage.ensureDirectory(inboxDir);
+    storage.ensureDirectory(outboxDir);
+    transport = new FileTransport({ inboxDir, outboxDir }, storage);
+  });
+
+  afterEach(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('reports corrupted inbox envelope', async () => {
+    transport.writeInbound!(makeEnvelope());
+    // Write a corrupted json file directly
+    storage.writeText(join(inboxDir, 'corrupt.json'), 'not json {{{');
+    const ctx = await makeCtx();
+    const { checkTransportEnvelopes } = await import('../services/diagnostics.js');
+    const findings = checkTransportEnvelopes(ctx);
+    const errors = findings.filter((f) => f.level === 'error');
+    expect(errors.length).toBeGreaterThanOrEqual(1);
+    expect(errors.some((f) => f.message.includes('corrupt.json'))).toBe(true);
+    expect(errors.some((f) => f.category === 'transport')).toBe(true);
+  });
+
+  it('reports corrupted outbox envelope', async () => {
+    transport.writeOutbound!(makeEnvelope({ direction: 'outbound' }));
+    storage.writeText(join(outboxDir, 'bad.json'), '{invalid}');
+    const ctx = await makeCtx();
+    const { checkTransportEnvelopes } = await import('../services/diagnostics.js');
+    const findings = checkTransportEnvelopes(ctx);
+    const errors = findings.filter((f) => f.level === 'error');
+    expect(errors.length).toBeGreaterThanOrEqual(1);
+    expect(errors.some((f) => f.message.includes('bad.json'))).toBe(true);
+  });
+
+  it('does not report valid envelope', async () => {
+    transport.writeInbound!(makeEnvelope());
+    const ctx = await makeCtx();
+    const { checkTransportEnvelopes } = await import('../services/diagnostics.js');
+    const findings = checkTransportEnvelopes(ctx);
+    const errors = findings.filter((f) => f.level === 'error');
+    expect(errors.length).toBe(0);
+    expect(findings.some((f) => f.level === 'ok' && f.message.includes('valid'))).toBe(true);
+  });
+
+  it('reports schema-invalid envelope as corrupted', async () => {
+    const env = makeEnvelope();
+    transport.writeInbound!(env);
+    // Write a file with valid JSON but missing required schema fields
+    storage.writeText(join(inboxDir, 'bad_schema.json'), JSON.stringify({ id: 'x' }));
+    const ctx = await makeCtx();
+    const { checkTransportEnvelopes } = await import('../services/diagnostics.js');
+    const findings = checkTransportEnvelopes(ctx);
+    const errors = findings.filter((f) => f.level === 'error');
+    expect(errors.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('reports empty inbox as ok', async () => {
+    const ctx = await makeCtx();
+    const { checkTransportEnvelopes } = await import('../services/diagnostics.js');
+    const findings = checkTransportEnvelopes(ctx);
+    expect(findings.some((f) => f.level === 'ok')).toBe(true);
   });
 });

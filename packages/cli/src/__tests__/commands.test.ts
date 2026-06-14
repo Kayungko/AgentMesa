@@ -14,6 +14,7 @@ import {
   registerAgent,
   listAgents,
   rebuildAllProjections,
+  RoleBasedPolicyEngine,
 } from '@agentmesa/core';
 import type { MesaWorkspacePaths } from '@agentmesa/core';
 import type { MesaRuntimeContext } from '@agentmesa/core';
@@ -577,6 +578,234 @@ describe('CLI transports subcommands', () => {
       } finally {
         process.exitCode = prevExitCode;
         errorSpy.mockRestore();
+      }
+    });
+  });
+
+  describe('transports inbox/outbox invalid status', () => {
+    beforeEach(() => {
+      testDir = mkdtempSync(join(tmpdir(), 'agentmesa-cli-test-'));
+      paths = initWorkspace(testDir);
+      ctx = createRuntimeContext({
+        rootDir: testDir,
+        actor: { id: 'user:local', type: 'user', roles: ['owner'] },
+      });
+    });
+
+    afterEach(() => {
+      rmSync(testDir, { recursive: true, force: true });
+    });
+
+    it('invalid --status for inbox sets exitCode=1', () => {
+      const prevExitCode = process.exitCode;
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      process.exitCode = 0;
+      try {
+        const origCwd = process.cwd;
+        process.cwd = () => testDir;
+        const args = makeArgs({
+          subcommand: 'inbox',
+          positional: ['File Transport'],
+          flags: { status: 'bad' },
+        });
+        runTransports(args);
+        expect(process.exitCode).toBe(1);
+        const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        expect(stdout).not.toContain('Inbound');
+        expect(stdout).not.toContain('envelopes');
+        process.cwd = origCwd;
+      } finally {
+        process.exitCode = prevExitCode;
+        errorSpy.mockRestore();
+        logSpy.mockRestore();
+      }
+    });
+
+    it('invalid --status for outbox with --json outputs structured error', () => {
+      const prevExitCode = process.exitCode;
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      process.exitCode = 0;
+      try {
+        const origCwd = process.cwd;
+        process.cwd = () => testDir;
+        const args = makeArgs({
+          subcommand: 'outbox',
+          positional: ['File Transport'],
+          flags: { status: 'bad', json: true },
+        });
+        runTransports(args);
+        expect(process.exitCode).toBe(1);
+        let foundError = false;
+        for (const call of logSpy.mock.calls) {
+          const line = call.join(' ');
+          if (line.startsWith('{') && line.includes('"error"')) {
+            const parsed = JSON.parse(line) as { error: string; code: string };
+            expect(parsed.error).toContain('Invalid --status');
+            foundError = true;
+          }
+          if (line.startsWith('{') && line.includes('"envelopes"')) {
+            expect.fail(`stdout should not contain envelope data on bad status: ${line}`);
+          }
+        }
+        expect(foundError).toBe(true);
+        process.cwd = origCwd;
+      } finally {
+        process.exitCode = prevExitCode;
+        errorSpy.mockRestore();
+        logSpy.mockRestore();
+      }
+    });
+
+    it('valid --status values pass through correctly', () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const origCwd = process.cwd;
+        process.cwd = () => testDir;
+        const args = makeArgs({
+          subcommand: 'inbox',
+          positional: ['File Transport'],
+          flags: { status: 'processed' },
+        });
+        runTransports(args);
+        const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        expect(stdout).toContain('Inbound');
+        process.cwd = origCwd;
+      } finally {
+        logSpy.mockRestore();
+      }
+    });
+  });
+
+  describe('transports inbox/outbox policy gate', () => {
+    function makeCtx(role: 'owner' | 'builder') {
+      return createRuntimeContext({
+        rootDir: testDir,
+        actor: { id: 'user:test', type: 'user', roles: [role] },
+        policy: new RoleBasedPolicyEngine(),
+      });
+    }
+
+    beforeEach(() => {
+      testDir = mkdtempSync(join(tmpdir(), 'agentmesa-cli-test-'));
+      paths = initWorkspace(testDir);
+    });
+
+    afterEach(() => {
+      rmSync(testDir, { recursive: true, force: true });
+    });
+
+    it('builder cannot inspect inbox', () => {
+      const prevExitCode = process.exitCode;
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      process.exitCode = 0;
+      try {
+        const ctx = makeCtx('builder');
+        const args = makeArgs({
+          subcommand: 'inbox',
+          positional: ['File Transport'],
+        });
+        runTransports(args, ctx);
+        expect(process.exitCode).toBe(1);
+        const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        expect(stdout).not.toContain('Inbound');
+        expect(stdout).not.toContain('envelopes');
+      } finally {
+        process.exitCode = prevExitCode;
+        errorSpy.mockRestore();
+        logSpy.mockRestore();
+      }
+    });
+
+    it('builder cannot inspect outbox', () => {
+      const prevExitCode = process.exitCode;
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      process.exitCode = 0;
+      try {
+        const ctx = makeCtx('builder');
+        const args = makeArgs({
+          subcommand: 'outbox',
+          positional: ['File Transport'],
+        });
+        runTransports(args, ctx);
+        expect(process.exitCode).toBe(1);
+        const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        expect(stdout).not.toContain('Outbound');
+        expect(stdout).not.toContain('envelopes');
+      } finally {
+        process.exitCode = prevExitCode;
+        errorSpy.mockRestore();
+        logSpy.mockRestore();
+      }
+    });
+
+    it('owner can inspect inbox', () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const ctx = makeCtx('owner');
+        const args = makeArgs({
+          subcommand: 'inbox',
+          positional: ['File Transport'],
+        });
+        runTransports(args, ctx);
+        const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        expect(stdout).toContain('Inbound');
+      } finally {
+        logSpy.mockRestore();
+      }
+    });
+
+    it('owner can inspect outbox', () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const ctx = makeCtx('owner');
+        const args = makeArgs({
+          subcommand: 'outbox',
+          positional: ['File Transport'],
+        });
+        runTransports(args, ctx);
+        const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        expect(stdout).toContain('Outbound');
+      } finally {
+        logSpy.mockRestore();
+      }
+    });
+
+    it('denied inbox with --json outputs structured error', () => {
+      const prevExitCode = process.exitCode;
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      process.exitCode = 0;
+      try {
+        const ctx = makeCtx('builder');
+        const args = makeArgs({
+          subcommand: 'inbox',
+          positional: ['File Transport'],
+          flags: { json: true },
+        });
+        runTransports(args, ctx);
+        expect(process.exitCode).toBe(1);
+        let foundError = false;
+        for (const call of logSpy.mock.calls) {
+          const line = call.join(' ');
+          if (line.startsWith('{') && line.includes('"error"')) {
+            const parsed = JSON.parse(line) as { error: string; code: string };
+            expect(parsed.code).toBe('POLICY_DENIED');
+            expect(parsed.error).toContain('transport.inspect');
+            foundError = true;
+          }
+          if (line.startsWith('{') && line.includes('"envelopes"')) {
+            expect.fail(`stdout should not contain envelope data on denied: ${line}`);
+          }
+        }
+        expect(foundError).toBe(true);
+      } finally {
+        process.exitCode = prevExitCode;
+        errorSpy.mockRestore();
+        logSpy.mockRestore();
       }
     });
   });
