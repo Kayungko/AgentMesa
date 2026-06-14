@@ -20,6 +20,8 @@ export interface MesaWorkspacePaths {
   taskProjectionsDir: string;
   meetingProjectionsDir: string;
   agentProjectionsDir: string;
+  inboxDir: string;
+  outboxDir: string;
 }
 
 export function createWorkspacePaths(rootDir: string): MesaWorkspacePaths {
@@ -40,6 +42,8 @@ export function createWorkspacePaths(rootDir: string): MesaWorkspacePaths {
     taskProjectionsDir: join(mesaDir, 'projections', 'tasks'),
     meetingProjectionsDir: join(mesaDir, 'projections', 'meetings'),
     agentProjectionsDir: join(mesaDir, 'projections', 'agents'),
+    inboxDir: join(mesaDir, 'inbox'),
+    outboxDir: join(mesaDir, 'outbox'),
   };
 }
 
@@ -68,6 +72,8 @@ export function initWorkspace(rootDir: string): MesaWorkspacePaths {
   ensureDir(paths.taskProjectionsDir);
   ensureDir(paths.meetingProjectionsDir);
   ensureDir(paths.agentProjectionsDir);
+  ensureDir(paths.inboxDir);
+  ensureDir(paths.outboxDir);
 
   const config: MesaConfig = {
     protocolVersion: currentProtocolVersion,

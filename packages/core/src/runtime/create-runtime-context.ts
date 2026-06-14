@@ -36,6 +36,8 @@ export function createRuntimeContext(
     paths.taskProjectionsDir,
     paths.meetingProjectionsDir,
     paths.agentProjectionsDir,
+    paths.inboxDir,
+    paths.outboxDir,
   ]) {
     storage.ensureDirectory(directory);
   }
@@ -52,7 +54,12 @@ export function createRuntimeContext(
     eventStore: options.eventStore ?? new FileEventStore(paths.eventsDir),
     policy: options.policy ?? resolvePolicyEngine(config),
     logger: options.logger ?? createConsoleLogger(options.actor),
-    transports: options.transports ?? createDefaultTransports(),
+    transports:
+      options.transports ??
+      createDefaultTransports(
+        { inboxDir: paths.inboxDir, outboxDir: paths.outboxDir },
+        storage instanceof FileStorageAdapter ? storage : undefined,
+      ),
   };
 }
 

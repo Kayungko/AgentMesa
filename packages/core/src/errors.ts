@@ -11,7 +11,8 @@ export type MesaErrorCode =
   | 'VALIDATION_ERROR'
   | 'STORAGE_ERROR'
   | 'PROJECTION_MISSING'
-  | 'PROJECTION_STALE';
+  | 'PROJECTION_STALE'
+  | 'TRANSPORT_NOT_FOUND';
 
 export class MesaError extends Error {
   readonly code: MesaErrorCode;

@@ -3,6 +3,8 @@ import type {
   MesaEvent,
   MesaTransportCapabilities,
   PermissionLevel,
+  TransportEnvelope,
+  TransportEnvelopeStatus,
   TransportKind,
 } from '@agentmesa/protocol';
 import type { MesaWorkspacePaths } from '../workspace.js';
@@ -84,6 +86,12 @@ export interface MesaTransport {
   readonly capabilities: MesaTransportCapabilities;
   readonly version: string;
   isAvailable(): boolean;
+  writeInbound?(envelope: TransportEnvelope): void;
+  writeOutbound?(envelope: TransportEnvelope): void;
+  listInbound?(status?: TransportEnvelopeStatus): TransportEnvelope[];
+  listOutbound?(status?: TransportEnvelopeStatus): TransportEnvelope[];
+  markProcessed?(id: string): boolean;
+  markFailed?(id: string, error: string): boolean;
 }
 
 export interface MesaRuntimeContext {

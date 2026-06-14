@@ -9,6 +9,8 @@ export * from './runtime/file-event-store.js';
 export * from './runtime/policy.js';
 export * from './runtime/logger.js';
 export * from './runtime/transports.js';
+export * from './runtime/transport-registry.js';
+export { MCPTransport } from './runtime/mcp-transport.js';
 export * from './services/task-service.js';
 export * from './services/meeting-service.js';
 export * from './services/message-service.js';
