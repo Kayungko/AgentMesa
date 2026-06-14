@@ -111,12 +111,12 @@ export class FileTransport implements MesaTransport {
     return this.listEnvelopes(dir, storage, status);
   }
 
-  markProcessed(id: string): boolean {
-    return this.updateStatus(id, 'processed');
+  markProcessed(id: string, direction: 'inbound' | 'outbound' = 'inbound'): boolean {
+    return this.updateStatus(id, 'processed', direction);
   }
 
-  markFailed(id: string, error: string): boolean {
-    return this.updateStatus(id, 'failed', error);
+  markFailed(id: string, error: string, direction: 'inbound' | 'outbound' = 'inbound'): boolean {
+    return this.updateStatus(id, 'failed', direction, error);
   }
 
   private listEnvelopes(
@@ -146,9 +146,10 @@ export class FileTransport implements MesaTransport {
   private updateStatus(
     id: string,
     status: TransportEnvelopeStatus,
+    direction: 'inbound' | 'outbound',
     error?: string,
   ): boolean {
-    const dir = this.requireInboxDir();
+    const dir = direction === 'outbound' ? this.requireOutboxDir() : this.requireInboxDir();
     const storage = this.requireStorage();
     const file = join(dir, safeEnvelopeFilename(id));
     const content = storage.readText(file);

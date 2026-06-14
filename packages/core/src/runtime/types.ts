@@ -90,8 +90,8 @@ export interface MesaTransport {
   writeOutbound?(envelope: TransportEnvelope): void;
   listInbound?(status?: TransportEnvelopeStatus): TransportEnvelope[];
   listOutbound?(status?: TransportEnvelopeStatus): TransportEnvelope[];
-  markProcessed?(id: string): boolean;
-  markFailed?(id: string, error: string): boolean;
+  markProcessed?(id: string, direction?: 'inbound' | 'outbound'): boolean;
+  markFailed?(id: string, error: string, direction?: 'inbound' | 'outbound'): boolean;
 }
 
 export interface MesaRuntimeContext {
