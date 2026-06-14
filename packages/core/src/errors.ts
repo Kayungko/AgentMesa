@@ -12,7 +12,8 @@ export type MesaErrorCode =
   | 'STORAGE_ERROR'
   | 'PROJECTION_MISSING'
   | 'PROJECTION_STALE'
-  | 'TRANSPORT_NOT_FOUND';
+  | 'TRANSPORT_NOT_FOUND'
+  | 'RUN_NOT_FOUND';
 
 export class MesaError extends Error {
   readonly code: MesaErrorCode;
@@ -84,6 +85,13 @@ export class ValidationError extends MesaError {
   constructor(message: string) {
     super('VALIDATION_ERROR', message);
     this.name = 'ValidationError';
+  }
+}
+
+export class RunNotFoundError extends MesaError {
+  constructor(runId: string) {
+    super('RUN_NOT_FOUND', `Agent run not found: ${runId}`);
+    this.name = 'RunNotFoundError';
   }
 }
 

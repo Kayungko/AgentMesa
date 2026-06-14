@@ -12,6 +12,7 @@ import { runEvents, runTimeline } from './commands/events.js';
 import { runTransports } from './commands/transports.js';
 import { runRebuild } from './commands/rebuild.js';
 import { runPolicyCheck, runPolicyInspect } from './commands/policy.js';
+import { runRuns } from './commands/runs.js';
 
 const args = parseArgs(process.argv);
 
@@ -65,6 +66,10 @@ switch (args.command) {
     runRebuild(args);
     break;
 
+  case 'runs':
+    runRuns(args);
+    break;
+
   case 'policy':
     if (args.subcommand === 'check') {
       runPolicyCheck(args);
@@ -116,6 +121,10 @@ Inspection Commands:
   transports inspect <name>    Show transport details (policy-gated)
   transports inbox <name>      List inbound envelopes (--status pending|processed|failed)
   transports outbox <name>     List outbound envelopes (--status pending|processed|failed)
+  runs create <input>          Create a new agent run
+  runs list                    List agent runs (--agent, --task, --status)
+  runs show <id>               Show agent run details
+  runs complete <id>           Mark agent run as completed
   policy check <action> <res>  Check if action is allowed for an actor
                    --actor <id> --role <role>
   policy inspect              Show role capability matrix
@@ -127,6 +136,8 @@ Flags:
 Examples:
   mesa init
   mesa task create "Implement QR login" --assignee claude --reviewer codex
+  mesa runs create "Implement login feature" --agent builder-1
+  mesa runs list --status pending
   mesa task list --json
   mesa events list --task task_e5f6a7b8 --type task_status_changed
   mesa timeline task_e5f6a7b8    # auto-detect task or meeting

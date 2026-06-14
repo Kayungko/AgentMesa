@@ -427,7 +427,7 @@ describe('MesaEventSchema', () => {
   it('accepts event with minimal data', () => {
     const result = MesaEventSchema.safeParse({
       ...validEvent,
-      type: 'run_completed',
+      type: 'agent_run_completed',
       streamType: 'MesaAgentRun',
       data: {},
     });
@@ -480,8 +480,10 @@ describe('MesaEventSchema', () => {
       'message_sent',
       'artifact_created',
       'decision_made',
-      'run_started',
-      'run_completed',
+      'agent_run_created',
+      'agent_run_status_changed',
+      'agent_run_completed',
+      'agent_run_failed',
       'check_completed',
       'thread_created',
       'thread_resolved',

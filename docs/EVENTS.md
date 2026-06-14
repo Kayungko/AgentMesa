@@ -152,8 +152,10 @@ The current state of any entity is a **projection** rebuilt by replaying its str
 
 | Type | Payload | Meaning |
 |---|---|---|
-| `run_started` | `{ runId, agentId, taskId?, prompt }` | An agent run is started |
-| `run_completed` | `{ runId, exitCode, output?, error? }` | An agent run finishes (success or failure) |
+| `agent_run_created` | `{ run }` | An agent run is created |
+| `agent_run_status_changed` | `{ previousStatus, newStatus, run }` | Run status transitions |
+| `agent_run_completed` | `{ previousStatus, newStatus, run }` | Run finishes successfully |
+| `agent_run_failed` | `{ previousStatus, newStatus, run }` | Run fails with error |
 
 The remaining frozen types `thread_created` and `thread_resolved` track discussion-thread lifecycle within a meeting.
 

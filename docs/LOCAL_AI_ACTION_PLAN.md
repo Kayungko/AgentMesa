@@ -206,7 +206,7 @@ Status: `baseline_complete` — policy enforcement foundation is in place. This 
 - `canWithContext(actor, action, resource, context?)` enforces reviewer status transition gate: pure reviewer may only transition to `approved` or `changes_requested`. Multi-role actors (reviewer+builder, reviewer+chair, reviewer+admin, reviewer+maintainer, reviewer+owner) bypass the gate via non-reviewer `change_status` capability. `updateTaskStatus` passes `targetStatus` via `assertPolicyWithContext()`.
 - `mesa policy check` / `mesa policy inspect` default to `--mode role-based` (canonical `RoleBasedPolicyEngine`). `--mode current` uses workspace config. `--role` validated against known AgentRole values; `--roles a,b` supports multi-role. Both commands output `mode` in JSON. `policy inspect` covers all 14 VALID_ROLES (owner, admin, builder, reviewer, connector, ci, system, chair, planner, tester, documenter, maintainer, researcher, custom). Missing `action` in `policy check` with `--json` outputs structured error via `outputError`.
 - Read path enforcement: `listEvents`/`getTaskEvents`/`getMeetingEvents` → `event.read`; `getTaskProjection`/`getMeetingProjection`/`getAgentProjection`/`listTaskProjections`/`listMeetingProjections`/`listAgentProjections` → `projection.read`; `rebuildTaskProjections`/`rebuildMeetingProjections`/`rebuildAgentProjections` → `projection.rebuild`; `runTransports` → `transport.inspect`. Internal helpers (`_get*`/`_list*`) and freshness helpers (`isTaskProjectionFresh`, etc.) are excluded from the `@agentmesa/core` public index — freshness checks are computed internally by `read-model-service` and `doctor`. Callers cannot bypass `projection.read` enforcement through public API.
-- Policy enforcement tests cover: builder deny delete/archive, connector deny delete/create, ci deny delete/create, reviewer context-aware status gate (pure reviewer only approved/changes_requested; reviewer+builder/chair/admin/maintainer/owner bypass), system deny write tasks, owner/admin bypass, allow-all backward compat, event/projection/rebuild/transport enforcement, all 17 actions and 14 roles.
+- Policy enforcement tests cover: builder deny delete/archive, connector deny delete/create, ci deny delete/create, reviewer context-aware status gate (pure reviewer only approved/changes_requested; reviewer+builder/chair/admin/maintainer/owner bypass), system deny write tasks, owner/admin bypass, allow-all backward compat, event/projection/rebuild/transport enforcement, all 20 actions and 14 roles.
 - CLI `resolveMode` throws on invalid `--mode`; error is caught and formatted via `outputError(err, json)` — structured JSON when `--json` is set, human-readable to stderr otherwise. Always sets `exitCode = 1`.
 - `packages/policy` definitions (`PolicyAction`, `RoleCapability`, `PermissionChecker`) aligned with core policy engine (17 actions, 14 roles including `owner`).
 - CLI uses the same `MesaRuntimeContext` as all other consumers.
@@ -253,6 +253,25 @@ Acceptance:
 - CLI is not a special case.
 - CLI can be used by local AI safely and predictably.
 - CLI validates workspace health.
+
+## Priority 9: Agent Run Lifecycle + Handoff Loop (RUN-001)
+
+Status: `complete`
+
+Completed:
+- Agent run domain model (run id, task id, meeting id, agent id, action, status, input/output, timestamps) integrated into protocol schema.
+- Agent run events: `agent_run_created`, `agent_run_status_changed`, `agent_run_completed`, `agent_run_failed` added to event vocabulary.
+- Agent run service: `createAgentRun`, `updateAgentRunStatus`, `getAgentRun`, `listAgentRuns` with policy enforcement via `manage_runs` capability.
+- Runs directory (`.agentmesa/runs/`) added to workspace paths.
+- Policy actions: `run.create`, `run.updateStatus`, `run.read` mapped to `manage_runs` capability.
+- FileTransport handoff loop: `writeReviewRequest` (outbox), `writeReviewResult` (inbox), `listOutboundHandoffs`, `listInboundHandoffs`.
+- CLI: `mesa runs create|list|show|complete` with `--json` support.
+- Tests: AgentRun CRUD, event append, policy denied, FileTransport review_request/review_result, corrupted envelope resilience.
+
+Deferred:
+- Runner integration (agent execution engines remain a separate concern).
+- Orchestrator integration.
+- Claude/Codex plugin-specific run hooks.
 
 ## Do Not Start Yet
 

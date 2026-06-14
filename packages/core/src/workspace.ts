@@ -22,6 +22,7 @@ export interface MesaWorkspacePaths {
   agentProjectionsDir: string;
   inboxDir: string;
   outboxDir: string;
+  runsDir: string;
 }
 
 export function createWorkspacePaths(rootDir: string): MesaWorkspacePaths {
@@ -44,6 +45,7 @@ export function createWorkspacePaths(rootDir: string): MesaWorkspacePaths {
     agentProjectionsDir: join(mesaDir, 'projections', 'agents'),
     inboxDir: join(mesaDir, 'inbox'),
     outboxDir: join(mesaDir, 'outbox'),
+    runsDir: join(mesaDir, 'runs'),
   };
 }
 
@@ -74,6 +76,7 @@ export function initWorkspace(rootDir: string): MesaWorkspacePaths {
   ensureDir(paths.agentProjectionsDir);
   ensureDir(paths.inboxDir);
   ensureDir(paths.outboxDir);
+  ensureDir(paths.runsDir);
 
   const config: MesaConfig = {
     protocolVersion: currentProtocolVersion,

@@ -36,7 +36,8 @@ type Capability =
   | 'read_events'
   | 'read_projections'
   | 'rebuild_projections'
-  | 'inspect_transports';
+  | 'inspect_transports'
+  | 'manage_runs';
 
 /**
  * Maps core service action keys to the least-privilege capability required.
@@ -59,6 +60,9 @@ const ACTION_CAPABILITY: Record<string, Capability> = {
   'projection.read': 'read_projections',
   'projection.rebuild': 'rebuild_projections',
   'transport.inspect': 'inspect_transports',
+  'run.create': 'manage_runs',
+  'run.updateStatus': 'manage_runs',
+  'run.read': 'manage_runs',
 };
 
 const ROLE_CAPABILITIES: Record<string, Capability[]> = {
@@ -76,6 +80,7 @@ const ROLE_CAPABILITIES: Record<string, Capability[]> = {
     'read_projections',
     'rebuild_projections',
     'inspect_transports',
+    'manage_runs',
   ],
   admin: [
     'read_task',
@@ -91,6 +96,7 @@ const ROLE_CAPABILITIES: Record<string, Capability[]> = {
     'read_projections',
     'rebuild_projections',
     'inspect_transports',
+    'manage_runs',
   ],
   builder: [
     'read_task',
@@ -100,6 +106,7 @@ const ROLE_CAPABILITIES: Record<string, Capability[]> = {
     'create_artifact',
     'read_events',
     'read_projections',
+    'manage_runs',
   ],
   reviewer: [
     'read_task',
@@ -108,6 +115,7 @@ const ROLE_CAPABILITIES: Record<string, Capability[]> = {
     'create_artifact',
     'read_events',
     'read_projections',
+    'manage_runs',
   ],
   connector: [
     'read_task',
@@ -122,6 +130,7 @@ const ROLE_CAPABILITIES: Record<string, Capability[]> = {
     'create_artifact',
     'read_events',
     'read_projections',
+    'manage_runs',
   ],
   system: [
     'read_task',
@@ -144,6 +153,7 @@ const ROLE_CAPABILITIES: Record<string, Capability[]> = {
     'read_projections',
     'rebuild_projections',
     'inspect_transports',
+    'manage_runs',
   ],
   planner: [
     'read_task',
@@ -152,6 +162,7 @@ const ROLE_CAPABILITIES: Record<string, Capability[]> = {
     'manage_meetings',
     'read_events',
     'read_projections',
+    'manage_runs',
   ],
   tester: [
     'read_task',
@@ -159,6 +170,7 @@ const ROLE_CAPABILITIES: Record<string, Capability[]> = {
     'create_artifact',
     'read_events',
     'read_projections',
+    'manage_runs',
   ],
   documenter: [
     'read_task',
@@ -181,6 +193,7 @@ const ROLE_CAPABILITIES: Record<string, Capability[]> = {
     'read_projections',
     'rebuild_projections',
     'inspect_transports',
+    'manage_runs',
   ],
   researcher: [
     'read_task',

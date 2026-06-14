@@ -326,7 +326,7 @@ Produced during `MesaAgentRun` execution or by a CI transport. Append-only. Mult
 - `createdAt`
 
 **Event types (representative):**
-`task_created | task_status_changed | task_assigned | meeting_created | agent_joined | agent_left | message_sent | artifact_created | decision_made | run_started | run_completed | check_completed | thread_created | thread_resolved`
+`task_created | task_status_changed | task_assigned | meeting_created | agent_joined | agent_left | message_sent | artifact_created | decision_made | agent_run_created | agent_run_status_changed | agent_run_completed | agent_run_failed | check_completed | thread_created | thread_resolved`
 
 **Relationships:**
 - Scoped to one `MesaMeeting`
