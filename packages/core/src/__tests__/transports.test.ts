@@ -230,6 +230,16 @@ describe('FileTransport inbox/outbox', () => {
     expect(outList[0]!.status).toBe('pending');
   });
 
+  it('writeInbound rejects outbound envelope', () => {
+    const env = makeEnvelope({ direction: 'outbound' });
+    expect(() => transport.writeInbound!(env)).toThrow(MesaError);
+  });
+
+  it('writeOutbound rejects inbound envelope', () => {
+    const env = makeEnvelope({ direction: 'inbound' });
+    expect(() => transport.writeOutbound!(env)).toThrow(MesaError);
+  });
+
   it('validates envelope schema on write', () => {
     expect(() =>
       transport.writeInbound!({ id: 'bad', transport: 'X' } as TransportEnvelope),
@@ -428,6 +438,53 @@ describe('checkTransportEnvelopes', () => {
     const ctx = await makeCtx();
     const { checkTransportEnvelopes } = await import('../services/diagnostics.js');
     const findings = checkTransportEnvelopes(ctx);
+    expect(findings.some((f) => f.level === 'ok')).toBe(true);
+  });
+
+  it('reports outbound envelope in inbox', async () => {
+    const env = makeEnvelope({ direction: 'outbound' });
+    const content = JSON.stringify(env, null, 2);
+    storage.writeText(join(inboxDir, `${env.id}.json`), content);
+    const ctx = await makeCtx();
+    const { checkTransportEnvelopes } = await import('../services/diagnostics.js');
+    const findings = checkTransportEnvelopes(ctx);
+    const errors = findings.filter((f) => f.level === 'error');
+    expect(errors.some((f) => f.message.includes('Misdirected inbox'))).toBe(true);
+    expect(errors.some((f) => f.recommendation?.includes('Move the envelope'))).toBe(true);
+  });
+
+  it('reports inbound envelope in outbox', async () => {
+    const env = makeEnvelope({ direction: 'inbound' });
+    const content = JSON.stringify(env, null, 2);
+    storage.writeText(join(outboxDir, `${env.id}.json`), content);
+    const ctx = await makeCtx();
+    const { checkTransportEnvelopes } = await import('../services/diagnostics.js');
+    const findings = checkTransportEnvelopes(ctx);
+    const errors = findings.filter((f) => f.level === 'error');
+    expect(errors.some((f) => f.message.includes('Misdirected outbox'))).toBe(true);
+  });
+
+  it('valid inbound in inbox does not report error', async () => {
+    const env = makeEnvelope({ direction: 'inbound' });
+    const content = JSON.stringify(env, null, 2);
+    storage.writeText(join(inboxDir, `${env.id}.json`), content);
+    const ctx = await makeCtx();
+    const { checkTransportEnvelopes } = await import('../services/diagnostics.js');
+    const findings = checkTransportEnvelopes(ctx);
+    const errors = findings.filter((f) => f.level === 'error');
+    expect(errors.length).toBe(0);
+    expect(findings.some((f) => f.level === 'ok')).toBe(true);
+  });
+
+  it('valid outbound in outbox does not report error', async () => {
+    const env = makeEnvelope({ direction: 'outbound' });
+    const content = JSON.stringify(env, null, 2);
+    storage.writeText(join(outboxDir, `${env.id}.json`), content);
+    const ctx = await makeCtx();
+    const { checkTransportEnvelopes } = await import('../services/diagnostics.js');
+    const findings = checkTransportEnvelopes(ctx);
+    const errors = findings.filter((f) => f.level === 'error');
+    expect(errors.length).toBe(0);
     expect(findings.some((f) => f.level === 'ok')).toBe(true);
   });
 });

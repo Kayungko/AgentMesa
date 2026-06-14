@@ -370,6 +370,8 @@ export function checkTransportEnvelopes(ctx: MesaRuntimeContext): DiagnosticFind
     let valid = 0;
     let corrupted = 0;
 
+    const expectedDirection = label === 'inbox' ? 'inbound' : 'outbound';
+
     for (const file of files) {
       const filePath = join(dir, file);
       try {
@@ -377,7 +379,21 @@ export function checkTransportEnvelopes(ctx: MesaRuntimeContext): DiagnosticFind
         const json = JSON.parse(raw);
         const result = TransportEnvelopeSchema.safeParse(json);
         if (result.success) {
-          valid++;
+          const env = result.data;
+          if (env.direction !== expectedDirection) {
+            corrupted++;
+            findings.push({
+              level: 'error',
+              category: 'transport',
+              message: `Misdirected ${label} envelope "${file}": direction is "${env.direction}", expected "${expectedDirection}"`,
+              path: filePath,
+              resourceId: env.id,
+              fixable: false,
+              recommendation: 'Move the envelope to the correct mailbox or fix its direction',
+            });
+          } else {
+            valid++;
+          }
         } else {
           corrupted++;
           const issues = result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');

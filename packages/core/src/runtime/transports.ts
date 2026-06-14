@@ -78,6 +78,9 @@ export class FileTransport implements MesaTransport {
   }
 
   writeInbound(envelope: TransportEnvelope): void {
+    if (envelope.direction !== 'inbound') {
+      throw new MesaError('VALIDATION_ERROR', `Cannot write envelope with direction "${envelope.direction}" to inbox`);
+    }
     const dir = this.requireInboxDir();
     const storage = this.requireStorage();
     const parsed = TransportEnvelopeSchema.safeParse(envelope);
@@ -89,6 +92,9 @@ export class FileTransport implements MesaTransport {
   }
 
   writeOutbound(envelope: TransportEnvelope): void {
+    if (envelope.direction !== 'outbound') {
+      throw new MesaError('VALIDATION_ERROR', `Cannot write envelope with direction "${envelope.direction}" to outbox`);
+    }
     const dir = this.requireOutboxDir();
     const storage = this.requireStorage();
     const parsed = TransportEnvelopeSchema.safeParse(envelope);

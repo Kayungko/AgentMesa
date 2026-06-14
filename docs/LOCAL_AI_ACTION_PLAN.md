@@ -171,7 +171,9 @@ Status: `transport_hardening_done`
 - Transport Registry: `registerTransport/listTransports/getTransport/inspectTransport` with `transport.inspect` policy enforcement.
 - `MCPTransport` skeleton: declares capabilities, `isAvailable()` returns false. Future integration path documented.
 - CLI transport subcommands: `mesa transports list/inspect/inbox/outbox` with `--json` and `--status` filter. Inbox and outbox inspection are policy-gated via `inspectTransport` (enforces `transport.inspect`). `--status` validates against allowed values and rejects invalid input.
-- Transport envelope diagnostics: `checkTransportEnvelopes(ctx)` validates all inbox/outbox envelope JSON files against `TransportEnvelopeSchema`. Corrupted files reported as error findings. Wired into `mesa doctor` and `mesa doctor --json`.
+- Transport envelope diagnostics: `checkTransportEnvelopes(ctx)` validates all inbox/outbox envelope JSON files against `TransportEnvelopeSchema`. Detects corrupted files, schema-invalid envelopes, and direction/mailbox mismatches (e.g., outbound envelope in inbox directory). All findings include category, path, resourceId, and recommendation. Wired into `mesa doctor` and `mesa doctor --json`.
+- Inbox/outbox direction consistency: `writeInbound` rejects outbound-direction envelopes; `writeOutbound` rejects inbound-direction envelopes. `checkTransportEnvelopes` detects direction/mailbox mismatches. `markProcessed`/`markFailed` accept optional `direction` parameter for outbound envelopes.
+- Doctor JSON output: `record()` preserves `category`, `path`, `resourceId`, `fixable`, and `recommendation` from `DiagnosticFinding`. `recordSimple()` uses `category: "general"`.
 - Inbox/outbox directories (`.agentmesa/inbox/`, `.agentmesa/outbox/`) for async multi-transport message passing.
 - Core runtime has zero dependency on any specific client transport.
 - HTTP, WebSocket, GitHub, CI transports remain design intent.
@@ -189,7 +191,10 @@ Acceptance:
 - File-based participation remains possible.
 - Transports can exchange messages through inbox/outbox envelopes.
 - Inbox/outbox inspection is policy-gated.
+- Envelope direction is enforced: inbound only in inbox, outbound only in outbox.
+- Direction/mailbox mismatches are detected by diagnostics.
 - Corrupted transport envelopes are detectable via doctor diagnostics.
+- Doctor --json preserves category, path, and recommendation on all findings.
 
 ## Priority 7: Policy Layer
 

@@ -25,11 +25,12 @@ export function runDoctor(args: ParsedArgs): void {
   const rootDir = process.cwd();
   const json = !!args.flags['json'];
   let issues = 0;
-  const findings: Array<{ level: string; message: string; path?: string; resourceId?: string; fixable?: boolean; recommendation?: string }> = [];
+  const findings: Array<{ level: string; category?: string; message: string; path?: string; resourceId?: string; fixable?: boolean; recommendation?: string }> = [];
 
   function record(finding: DiagnosticFinding): void {
     const item: typeof findings[number] = {
       level: finding.level,
+      category: finding.category,
       message: finding.message,
     };
     if (finding.path) item.path = finding.path;
@@ -41,7 +42,7 @@ export function runDoctor(args: ParsedArgs): void {
   }
 
   function recordSimple(level: string, message: string): void {
-    findings.push({ level, message });
+    findings.push({ level, category: 'general', message });
     if (level === 'error' || level === 'warn') issues++;
   }
 

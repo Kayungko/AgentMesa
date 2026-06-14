@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -21,6 +21,7 @@ import type { MesaRuntimeContext } from '@agentmesa/core';
 import { runTimeline } from '../commands/events.js';
 import { runPolicyCheck, runPolicyInspect } from '../commands/policy.js';
 import { runTransports } from '../commands/transports.js';
+import { runDoctor } from '../commands/doctor.js';
 import type { ParsedArgs } from '../parse-args.js';
 
 let testDir: string;
@@ -805,6 +806,54 @@ describe('CLI transports subcommands', () => {
       } finally {
         process.exitCode = prevExitCode;
         errorSpy.mockRestore();
+        logSpy.mockRestore();
+      }
+    });
+  });
+
+  describe('doctor --json transport findings', () => {
+    let doctorDir: string;
+    beforeEach(() => {
+      doctorDir = mkdtempSync(join(tmpdir(), 'agentmesa-doctor-'));
+      initWorkspace(doctorDir);
+    });
+    afterEach(() => {
+      rmSync(doctorDir, { recursive: true, force: true });
+    });
+    it('corrupted transport envelope includes category "transport" in --json', () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const inboxDir = join(doctorDir, '.agentmesa', 'inbox');
+        writeFileSync(join(inboxDir, 'bad.json'), 'not-valid-json{{{');
+        const origCwd = process.cwd;
+        process.cwd = () => doctorDir;
+        runDoctor({ command: 'doctor', subcommand: '', positional: [], flags: { json: true } });
+        process.cwd = origCwd;
+        const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        const parsed = JSON.parse(stdout) as { findings: Array<Record<string, unknown>> };
+        const transportErrors = parsed.findings.filter((f) => f.category === 'transport' && f.level === 'error');
+        expect(transportErrors.length).toBeGreaterThanOrEqual(1);
+        expect(transportErrors[0]!.category).toBe('transport');
+        expect(transportErrors[0]!.level).toBe('error');
+        expect(transportErrors[0]!.recommendation).toBeTruthy();
+      } finally {
+        logSpy.mockRestore();
+      }
+    });
+    it('doctor --json ok findings have category', () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const origCwd = process.cwd;
+        process.cwd = () => doctorDir;
+        runDoctor({ command: 'doctor', subcommand: '', positional: [], flags: { json: true } });
+        process.cwd = origCwd;
+        const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        const parsed = JSON.parse(stdout) as { findings: Array<Record<string, unknown>> };
+        const generalFindings = parsed.findings.filter((f) => f.category === 'general');
+        expect(generalFindings.length).toBeGreaterThan(0);
+        const transportOk = parsed.findings.filter((f) => f.category === 'transport' && f.level === 'ok');
+        expect(transportOk.length).toBeGreaterThanOrEqual(1);
+      } finally {
         logSpy.mockRestore();
       }
     });

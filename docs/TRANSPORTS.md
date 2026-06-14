@@ -22,8 +22,8 @@ interface MesaTransport {
   writeOutbound?(envelope: TransportEnvelope): void;
   listInbound?(status?: TransportEnvelopeStatus): TransportEnvelope[];
   listOutbound?(status?: TransportEnvelopeStatus): TransportEnvelope[];
-  markProcessed?(id: string): boolean;
-  markFailed?(id: string, error: string): boolean;
+  markProcessed?(id: string, direction?: 'inbound' | 'outbound'): boolean;
+  markFailed?(id: string, error: string, direction?: 'inbound' | 'outbound'): boolean;
 }
 ```
 
@@ -98,6 +98,8 @@ All subcommands support `--json` for structured output. Inbox/outbox support opt
 
 Inbox and outbox inspection is policy-gated via `inspectTransport(ctx, name)`, which enforces `transport.inspect`. Only actors whose role grants `transport.inspect` (by default: owner, admin, system, reviewer) can inspect transport envelopes.
 
+`doctor --json` preserves `category`, `path`, `resourceId`, `fixable`, and `recommendation` fields on all diagnostic findings. `recordSimple()` findings use `category: "general"`.
+
 ## File Protocol Transport
 
 The lowest-friction entry. Any agent that can read and write files can participate.
@@ -112,6 +114,8 @@ The lowest-friction entry. Any agent that can read and write files can participa
 - Envelope writes are schema-validated before storage.
 
 **Capabilities:** read/write tasks, messages, artifacts, meetings, and agent registrations. Full inbox/outbox support for envelope-based communication. No push support.
+
+`writeInbound` rejects envelopes with direction `outbound`; `writeOutbound` rejects envelopes with direction `inbound`. `checkTransportEnvelopes` in diagnostics detects direction/mailbox mismatches (e.g., an outbound envelope in the inbox directory) and reports them as errors with clear repair recommendations.
 
 **Availability:** always available when `.agentmesa/` exists — the agent only needs filesystem access.
 
@@ -203,7 +207,9 @@ Bridges CI pipeline results into AgentMesa tasks.
 | `MCPTransport` skeleton (core) | **Done.** Declares capabilities, `isAvailable()` returns false. Future integration path documented. |
 | MCP server | **Partial.** MCP server exists and maps tools to Core services, but uses `process.cwd()` directly rather than the `MesaTransport` interface. Full transport-registry integration is design intent. |
 | CLI transport subcommands | **Done.** `mesa transports list/inspect/inbox/outbox` with `--json` and `--status` filter. Inbox/outbox are policy-gated via `transport.inspect`. `--status` validates against allowed values and rejects invalid input. |
-| Transport envelope diagnostics | **Done.** `checkTransportEnvelopes(ctx)` validates all inbox/outbox envelope JSON files against `TransportEnvelopeSchema`. Corrupted files reported as error findings. Wired into `mesa doctor` and `mesa doctor --json`. |
+| Transport envelope diagnostics | **Done.** `checkTransportEnvelopes(ctx)` validates all inbox/outbox envelope JSON files against `TransportEnvelopeSchema`. Detects corrupted files, schema-invalid envelopes, and direction/mailbox mismatches (e.g., outbound envelope in inbox). All findings reported with category, path, resourceId, and recommendation. Wired into `mesa doctor` and `mesa doctor --json`. |
+| Transport direction consistency (hardening) | **Done.** `writeInbound` rejects outbound-direction envelopes. `writeOutbound` rejects inbound-direction envelopes. `checkTransportEnvelopes` detects direction/mailbox mismatches. `markProcessed`/`markFailed` accept optional `direction` parameter for outbound envelopes. |
+| Doctor `--json` category preservation (hardening) | **Done.** `record()` includes `category`, `path`, `resourceId`, `fixable`, and `recommendation` from `DiagnosticFinding`. `recordSimple()` uses `category: "general"`. |
 | HTTP transport | **Design intent.** |
 | WebSocket transport | **Design intent.** |
 | GitHub transport | **Design intent.** |
