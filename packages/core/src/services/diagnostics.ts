@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { MesaEventSchema } from '@agentmesa/protocol';
+import { MesaEventSchema, TransportEnvelopeSchema } from '@agentmesa/protocol';
 import type { MesaWorkspacePaths } from '../workspace.js';
 import type { MesaRuntimeContext } from '../runtime/types.js';
 import { listEvents } from './event-service.js';
@@ -345,10 +345,90 @@ export function findOrphanedLocks(paths: MesaWorkspacePaths): DiagnosticFinding[
   return findings;
 }
 
+export function checkTransportEnvelopes(ctx: MesaRuntimeContext): DiagnosticFinding[] {
+  const findings: DiagnosticFinding[] = [];
+  const dirs: Array<{ dir: string; label: string }> = [];
+
+  if (existsSync(ctx.paths.inboxDir)) {
+    dirs.push({ dir: ctx.paths.inboxDir, label: 'inbox' });
+  }
+  if (existsSync(ctx.paths.outboxDir)) {
+    dirs.push({ dir: ctx.paths.outboxDir, label: 'outbox' });
+  }
+
+  if (dirs.length === 0) {
+    findings.push({ level: 'ok', category: 'transport', message: 'No transport envelope directories.' });
+    return findings;
+  }
+
+  let totalValid = 0;
+  let totalCorrupted = 0;
+
+  for (const { dir, label } of dirs) {
+    if (!existsSync(dir)) continue;
+    const files = readdirSync(dir).filter((f) => f.endsWith('.json'));
+    let valid = 0;
+    let corrupted = 0;
+
+    for (const file of files) {
+      const filePath = join(dir, file);
+      try {
+        const raw = readFileSync(filePath, 'utf-8');
+        const json = JSON.parse(raw);
+        const result = TransportEnvelopeSchema.safeParse(json);
+        if (result.success) {
+          valid++;
+        } else {
+          corrupted++;
+          const issues = result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
+          findings.push({
+            level: 'error',
+            category: 'transport',
+            message: `Corrupted ${label} envelope "${file}": ${issues}`,
+            path: filePath,
+            fixable: false,
+            recommendation: 'Remove or repair corrupted transport envelope',
+          });
+        }
+      } catch {
+        corrupted++;
+        findings.push({
+          level: 'error',
+          category: 'transport',
+          message: `Corrupted ${label} envelope "${file}": not valid JSON`,
+          path: filePath,
+          fixable: false,
+          recommendation: 'Remove or repair corrupted transport envelope',
+        });
+      }
+    }
+
+    totalValid += valid;
+    totalCorrupted += corrupted;
+  }
+
+  if (totalCorrupted === 0) {
+    findings.push({
+      level: 'ok',
+      category: 'transport',
+      message: `Transport envelopes valid: ${totalValid} envelope(s).`,
+    });
+  } else {
+    findings.push({
+      level: 'warn',
+      category: 'transport',
+      message: `${totalValid} valid, ${totalCorrupted} corrupted transport envelope(s).`,
+    });
+  }
+
+  return findings;
+}
+
 export function runAllDiagnostics(ctx: MesaRuntimeContext): DiagnosticFinding[] {
   return [
     ...validateEventLog(ctx.paths.eventsDir),
     ...checkProjectionConsistency(ctx),
+    ...checkTransportEnvelopes(ctx),
     ...findOrphanedLocks(ctx.paths),
   ];
 }

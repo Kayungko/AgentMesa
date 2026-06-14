@@ -7,6 +7,7 @@ import {
   createRuntimeContext,
   validateEventLog,
   checkProjectionConsistency,
+  checkTransportEnvelopes,
   findOrphanedLocks,
   isTaskProjectionFresh,
   isMeetingProjectionFresh,
@@ -175,6 +176,11 @@ export function runDoctor(args: ParsedArgs): void {
 
       const lockFindings = findOrphanedLocks(ctx.paths);
       for (const f of lockFindings) {
+        record(f);
+      }
+
+      const transportFindings = checkTransportEnvelopes(ctx);
+      for (const f of transportFindings) {
         record(f);
       }
     } catch (err) {
