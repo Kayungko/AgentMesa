@@ -7,8 +7,8 @@ const checker = new PermissionChecker();
 const capabilities = defineRoleCapabilities();
 
 describe('defineRoleCapabilities', () => {
-  it('chair has all 17 actions', () => {
-    expect(capabilities.chair).toHaveLength(17);
+  it('chair has all 18 actions', () => {
+    expect(capabilities.chair).toHaveLength(18);
     expect(capabilities.chair).toContain('read_task');
     expect(capabilities.chair).toContain('write_task');
     expect(capabilities.chair).toContain('change_status');
@@ -26,6 +26,7 @@ describe('defineRoleCapabilities', () => {
     expect(capabilities.chair).toContain('read_projections');
     expect(capabilities.chair).toContain('rebuild_projections');
     expect(capabilities.chair).toContain('inspect_transports');
+    expect(capabilities.chair).toContain('manage_runs');
   });
 
   it('planner has correct actions', () => {
