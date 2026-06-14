@@ -28,6 +28,11 @@ import type {
   MesaRepositorySchema,
   eventTypeSchema,
 } from './schemas.js';
+import type {
+  transportDirectionSchema,
+  transportEnvelopeStatusSchema,
+  TransportEnvelopeSchema,
+} from './envelope.js';
 
 import type { z } from 'zod';
 
@@ -140,6 +145,10 @@ export type EventType = z.infer<typeof eventTypeSchema>;
 
 export type TransportKind = 'file' | 'mcp' | 'http' | 'websocket' | 'github' | 'ci';
 
+export type TransportDirection = z.infer<typeof transportDirectionSchema>;
+
+export type TransportEnvelopeStatus = z.infer<typeof transportEnvelopeStatusSchema>;
+
 export type ClientType =
   | 'claude-code'
   | 'codex'
@@ -183,6 +192,8 @@ export type MesaTransportCapabilities = z.infer<typeof TransportCapabilitiesSche
 export type MesaAgentRun = z.infer<typeof MesaAgentRunSchema>;
 export type MesaCheckResult = z.infer<typeof MesaCheckResultSchema>;
 export type MesaRepository = z.infer<typeof MesaRepositorySchema>;
+
+export type TransportEnvelope = z.infer<typeof TransportEnvelopeSchema>;
 
 // --- Deprecated: keep the old TaskContext interface for compatibility ---
 

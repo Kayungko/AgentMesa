@@ -1,6 +1,7 @@
 export * from './version.js';
 export * from './ids.js';
 export * from './schemas.js';
+export * from './envelope.js';
 // types.ts infers from schemas — only export explicit types to avoid name conflicts with schemas
 export type {
   MesaAgent,
@@ -31,6 +32,9 @@ export type {
   ThreadResolution,
   EventType,
   TransportKind,
+  TransportDirection,
+  TransportEnvelope,
+  TransportEnvelopeStatus,
   ClientType,
   RunAction,
   RunStatus,

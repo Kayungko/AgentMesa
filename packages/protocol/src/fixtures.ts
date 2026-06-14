@@ -13,6 +13,7 @@ import type {
   MesaAgentRun,
   MesaCheckResult,
   MesaRepository,
+  TransportEnvelope,
 } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -354,4 +355,23 @@ export const fixtureRepository: MesaRepository = {
   currentBranch: 'feature/qr-login',
   provider: 'github',
   providerMetadata: { org: 'agentmesa', repo: 'agentmesa' },
+};
+
+// ---------------------------------------------------------------------------
+// Transport Envelope
+// ---------------------------------------------------------------------------
+
+export const fixtureTransportEnvelope: TransportEnvelope = {
+  protocolVersion: '0.2.0',
+  id: 'env_e1e2e3e4',
+  transport: 'File Transport',
+  direction: 'inbound',
+  actor: 'user',
+  meetingId,
+  taskId,
+  type: 'task_created',
+  payload: { title: 'Implement QR login' },
+  createdAt: '2026-06-01T10:00:00Z',
+  correlationId: 'corr_c1c2c3c4',
+  status: 'pending',
 };

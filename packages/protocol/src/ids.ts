@@ -55,3 +55,8 @@ export function generateAgentRunId(): string {
 export function generateClientId(): string {
   return `client_${shortId()}`;
 }
+
+/** Generate a Transport Envelope ID. Format: `env_xxxxxxxx` */
+export function generateEnvelopeId(): string {
+  return `env_${shortId()}`;
+}
