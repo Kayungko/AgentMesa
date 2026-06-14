@@ -71,7 +71,9 @@ The Transport Layer now has:
 - **Inbox/outbox pattern**: `.agentmesa/inbox/` and `.agentmesa/outbox/` directories for async message passing between transports using atomic writes.
 - **Transport Registry**: `registerTransport/listTransports/getTransport/inspectTransport` with `transport.inspect` policy enforcement.
 - **MCPTransport skeleton**: Declares MCP capabilities, `isAvailable()` returns false until full MCP lifecycle integration.
-- **CLI inspection**: `mesa transports list/inspect/inbox/outbox` with `--json` support.
+- **Direction semantics**: `markProcessed(id, direction?)` and `markFailed(id, error, direction?)` accept optional `direction` parameter (default `'inbound'`), supporting both inbound and outbound status updates.
+- **CLI inspection**: `mesa transports list/inspect/inbox/outbox` with `--json` support. Inbox/outbox are policy-gated via `inspectTransport`. `--status` validates against allowed values.
+- **Transport envelope diagnostics**: `checkTransportEnvelopes(ctx)` validates all inbox/outbox envelope files. Corrupted files (JSON parse failure, schema failure) reported as error findings. Wired into `mesa doctor`.
 
 Deferred: HTTP, WebSocket, GitHub, CI transports. Runner, Desk, Plugins still deferred per Do Not Start Yet.
 

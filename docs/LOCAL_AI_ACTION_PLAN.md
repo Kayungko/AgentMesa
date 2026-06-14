@@ -163,14 +163,15 @@ Acceptance:
 
 ## Priority 6: Transport Layer
 
-Status: `inbox_outbox_registry_skeleton`
+Status: `transport_hardening_done`
 
 - `TransportEnvelopeSchema` in protocol: full zod schema (id, direction, status, payload, correlationId, replyTo, error). Types inferred from schema.
 - `generateEnvelopeId()`: `env_xxxxxxxx` format.
-- `FileTransport` inbox/outbox: `writeInbound/writeOutbound` with schema validate + atomic write. `listInbound/listOutbound` with status filter. `markProcessed/markFailed` with atomic status update. Corrupted files skipped with silent resilience.
+- `FileTransport` inbox/outbox: `writeInbound/writeOutbound` with schema validate + atomic write. `listInbound/listOutbound` with status filter. `markProcessed/markFailed` with optional `direction` parameter (default `'inbound'`, supports `'outbound'`). Corrupted files skipped with silent resilience.
 - Transport Registry: `registerTransport/listTransports/getTransport/inspectTransport` with `transport.inspect` policy enforcement.
 - `MCPTransport` skeleton: declares capabilities, `isAvailable()` returns false. Future integration path documented.
-- CLI transport subcommands: `mesa transports list/inspect/inbox/outbox` with `--json` and `--status` filter.
+- CLI transport subcommands: `mesa transports list/inspect/inbox/outbox` with `--json` and `--status` filter. Inbox and outbox inspection are policy-gated via `inspectTransport` (enforces `transport.inspect`). `--status` validates against allowed values and rejects invalid input.
+- Transport envelope diagnostics: `checkTransportEnvelopes(ctx)` validates all inbox/outbox envelope JSON files against `TransportEnvelopeSchema`. Corrupted files reported as error findings. Wired into `mesa doctor` and `mesa doctor --json`.
 - Inbox/outbox directories (`.agentmesa/inbox/`, `.agentmesa/outbox/`) for async multi-transport message passing.
 - Core runtime has zero dependency on any specific client transport.
 - HTTP, WebSocket, GitHub, CI transports remain design intent.
@@ -187,6 +188,8 @@ Acceptance:
 - Core runtime has no dependency on a specific client transport.
 - File-based participation remains possible.
 - Transports can exchange messages through inbox/outbox envelopes.
+- Inbox/outbox inspection is policy-gated.
+- Corrupted transport envelopes are detectable via doctor diagnostics.
 
 ## Priority 7: Policy Layer
 

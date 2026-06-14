@@ -85,16 +85,18 @@ The registry is the recommended API for transport inspection. Direct access to `
 
 ## CLI Commands
 
-v0.8 expands `mesa transports` to support subcommands:
+v0.8 expands `mesa transports` with subcommands and policy enforcement:
 
 ```
 mesa transports list              List available transports
-mesa transports inspect <name>    Show transport details (policy-gated)
-mesa transports inbox <name>      List inbound envelopes
-mesa transports outbox <name>     List outbound envelopes
+mesa transports inspect <name>    Show transport details (transport.inspect policy-gated)
+mesa transports inbox <name>      List inbound envelopes (transport.inspect policy-gated)
+mesa transports outbox <name>     List outbound envelopes (transport.inspect policy-gated)
 ```
 
-All subcommands support `--json` for structured output. Inbox/outbox support optional `--status pending|processed|failed` filtering.
+All subcommands support `--json` for structured output. Inbox/outbox support optional `--status pending|processed|failed` filtering. Invalid status values are rejected with a validation error (exit code 1).
+
+Inbox and outbox inspection is policy-gated via `inspectTransport(ctx, name)`, which enforces `transport.inspect`. Only actors whose role grants `transport.inspect` (by default: owner, admin, system, reviewer) can inspect transport envelopes.
 
 ## File Protocol Transport
 
@@ -194,13 +196,14 @@ Bridges CI pipeline results into AgentMesa tasks.
 | `MesaTransportSchema` (protocol) | **Done.** Updated to use `TransportCapabilitiesSchema` instead of loose `string[]`. |
 | `MesaTransport` interface (core) | **Done.** `{ name, type, capabilities, version, isAvailable(), writeInbound?, writeOutbound?, listInbound?, listOutbound?, markProcessed?, markFailed? }`. |
 | `FileTransport` (core) | **Done.** Always-available transport with full read/write capabilities and inbox/outbox. |
-| `FileTransport` inbox/outbox (core) | **Done.** `writeInbound/writeOutbound` with schema validate + atomic write. `listInbound/listOutbound` with status filter. `markProcessed/markFailed` with atomic status update. Corrupted files skipped with silent resilience. |
+| `FileTransport` inbox/outbox (core) | **Done.** `writeInbound/writeOutbound` with schema validate + atomic write. `listInbound/listOutbound` with status filter. `markProcessed/markFailed` with optional `direction` parameter (default `'inbound'`, supports `'outbound'`). Corrupted files skipped with silent resilience. |
 | `createDefaultTransports` (core) | **Done.** Bootstraps `[FileTransport]` with paths and storage. Custom transports injectable via `CreateRuntimeContextOptions.transports`. |
 | `findTransportsByType` / `getAvailableTransports` (core) | **Done.** Registry query helpers. |
 | Transport Registry (core) | **Done.** `registerTransport/listTransports/getTransport/inspectTransport` with `transport.inspect` policy enforcement. |
 | `MCPTransport` skeleton (core) | **Done.** Declares capabilities, `isAvailable()` returns false. Future integration path documented. |
 | MCP server | **Partial.** MCP server exists and maps tools to Core services, but uses `process.cwd()` directly rather than the `MesaTransport` interface. Full transport-registry integration is design intent. |
-| CLI transport subcommands | **Done.** `mesa transports list/inspect/inbox/outbox` with `--json` and `--status` filter. |
+| CLI transport subcommands | **Done.** `mesa transports list/inspect/inbox/outbox` with `--json` and `--status` filter. Inbox/outbox are policy-gated via `transport.inspect`. `--status` validates against allowed values and rejects invalid input. |
+| Transport envelope diagnostics | **Done.** `checkTransportEnvelopes(ctx)` validates all inbox/outbox envelope JSON files against `TransportEnvelopeSchema`. Corrupted files reported as error findings. Wired into `mesa doctor` and `mesa doctor --json`. |
 | HTTP transport | **Design intent.** |
 | WebSocket transport | **Design intent.** |
 | GitHub transport | **Design intent.** |
