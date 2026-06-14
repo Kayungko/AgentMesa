@@ -38,6 +38,7 @@ export function createRuntimeContext(
     paths.agentProjectionsDir,
     paths.inboxDir,
     paths.outboxDir,
+    paths.runsDir,
   ]) {
     storage.ensureDirectory(directory);
   }

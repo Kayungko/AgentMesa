@@ -74,8 +74,8 @@ describe('writeReviewRequest (outbox)', () => {
 
     const outbound = listOutboundHandoffs(ctx);
     expect(outbound).toHaveLength(2);
-    expect(outbound[0].type).toBe('review_request');
-    expect(outbound[1].type).toBe('review_request');
+    expect(outbound[0]!.type).toBe('review_request');
+    expect(outbound[1]!.type).toBe('review_request');
   });
 
   it('includes correlationId linked to runId', () => {
@@ -178,12 +178,12 @@ describe('handoff end-to-end loop', () => {
     // Verify outbound shows the request
     const outbound = listOutboundHandoffs(ctx);
     expect(outbound).toHaveLength(1);
-    expect(outbound[0].type).toBe('review_request');
+    expect(outbound[0]!.type).toBe('review_request');
 
     // Verify inbound shows the result
     const inbound = listInboundHandoffs(ctx);
     expect(inbound).toHaveLength(1);
-    expect(inbound[0].type).toBe('review_result');
+    expect(inbound[0]!.type).toBe('review_result');
   });
 });
 

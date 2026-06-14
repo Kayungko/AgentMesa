@@ -95,12 +95,13 @@ describe('listAgentRuns', () => {
 
   it('filters by status', () => {
     const r1 = createAgentRun(ctx, { agentId: 'a1', input: 'Task A' });
+    updateAgentRunStatus(ctx, r1.id, 'running');
     updateAgentRunStatus(ctx, r1.id, 'completed');
     createAgentRun(ctx, { agentId: 'a2', input: 'Task B' });
 
     const completed = listAgentRuns(ctx, { status: 'completed' });
     expect(completed).toHaveLength(1);
-    expect(completed[0].id).toBe(r1.id);
+    expect(completed[0]!.id).toBe(r1.id);
 
     const pending = listAgentRuns(ctx, { status: 'pending' });
     expect(pending).toHaveLength(1);
@@ -111,7 +112,7 @@ describe('listAgentRuns', () => {
     createAgentRun(ctx, { agentId: 'agent-y', input: 'Task B' });
     const filtered = listAgentRuns(ctx, { agentId: 'agent-x' });
     expect(filtered).toHaveLength(1);
-    expect(filtered[0].agentId).toBe('agent-x');
+    expect(filtered[0]!.agentId).toBe('agent-x');
   });
 
   it('filters by taskId', () => {
@@ -135,6 +136,7 @@ describe('updateAgentRunStatus', () => {
 
   it('transitions to completed with output', () => {
     const run = createAgentRun(ctx, { agentId: 'a1', input: 'Test' });
+    updateAgentRunStatus(ctx, run.id, 'running');
     const updated = updateAgentRunStatus(ctx, run.id, 'completed', {
       output: 'All tests passed',
       outputSummary: 'Feature implemented',
@@ -150,6 +152,7 @@ describe('updateAgentRunStatus', () => {
 
   it('transitions to failed with error', () => {
     const run = createAgentRun(ctx, { agentId: 'a1', input: 'Test' });
+    updateAgentRunStatus(ctx, run.id, 'running');
     const updated = updateAgentRunStatus(ctx, run.id, 'failed', {
       error: 'Build failed',
     });
@@ -172,6 +175,19 @@ describe('updateAgentRunStatus', () => {
     const updated = updateAgentRunStatus(ctx, run.id, 'completed', { producedArtifactIds: ['art_a'] });
     expect(updated.producedArtifactIds).toHaveLength(1);
   });
+
+  it('rejects invalid status transitions', () => {
+    const run = createAgentRun(ctx, { agentId: 'a1', input: 'Test' });
+    expect(() => updateAgentRunStatus(ctx, run.id, 'completed')).toThrow(/Invalid status transition/);
+  });
+
+  it('rejects reverse terminal state transitions', () => {
+    const run = createAgentRun(ctx, { agentId: 'a1', input: 'Test' });
+    updateAgentRunStatus(ctx, run.id, 'running');
+    updateAgentRunStatus(ctx, run.id, 'completed');
+    expect(() => updateAgentRunStatus(ctx, run.id, 'running')).toThrow(/Invalid status transition/);
+    expect(() => updateAgentRunStatus(ctx, run.id, 'pending')).toThrow(/Invalid status transition/);
+  });
 });
 
 describe('agent run events', () => {
@@ -179,8 +195,8 @@ describe('agent run events', () => {
     const run = createAgentRun(ctx, { agentId: 'a1', input: 'Test' });
     const events = ctx.eventStore.list({ streamId: run.id });
     expect(events).toHaveLength(1);
-    expect(events[0].type).toBe('agent_run_created');
-    expect(events[0].data.run).toBeDefined();
+    expect(events[0]!.type).toBe('agent_run_created');
+    expect(events[0]!.data.run).toBeDefined();
   });
 
   it('appends agent_run_status_changed event on status update', () => {
@@ -189,8 +205,8 @@ describe('agent run events', () => {
     const events = ctx.eventStore.list({ streamId: run.id });
     const statusEvents = events.filter((e) => e.type === 'agent_run_status_changed');
     expect(statusEvents).toHaveLength(1);
-    expect(statusEvents[0].data.previousStatus).toBe('pending');
-    expect(statusEvents[0].data.newStatus).toBe('running');
+    expect(statusEvents[0]!.data.previousStatus).toBe('pending');
+    expect(statusEvents[0]!.data.newStatus).toBe('running');
   });
 
   it('appends agent_run_completed event on completion', () => {
@@ -204,6 +220,7 @@ describe('agent run events', () => {
 
   it('appends agent_run_failed event on failure', () => {
     const run = createAgentRun(ctx, { agentId: 'a1', input: 'Test' });
+    updateAgentRunStatus(ctx, run.id, 'running');
     updateAgentRunStatus(ctx, run.id, 'failed', { error: 'crash' });
     const events = ctx.eventStore.list({ streamId: run.id });
     const failedEvents = events.filter((e) => e.type === 'agent_run_failed');
@@ -237,13 +254,12 @@ describe('policy denied', () => {
     ).toThrow(PolicyDeniedError);
   });
 
-  it('denies run.create for ci role', () => {
+  it('allows run.create for ci role', () => {
     const ciCtx = createRuntimeContext({
       rootDir: testDir,
       actor: { id: 'ci:test', type: 'ci', roles: ['ci'] },
       policy: new RoleBasedPolicyEngine(),
     });
-    // CI has manage_runs capability - let me verify
     expect(() =>
       createAgentRun(ciCtx, { agentId: 'a1', input: 'Test' }),
     ).not.toThrow();

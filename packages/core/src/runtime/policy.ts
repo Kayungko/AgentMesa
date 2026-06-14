@@ -63,6 +63,8 @@ const ACTION_CAPABILITY: Record<string, Capability> = {
   'run.create': 'manage_runs',
   'run.updateStatus': 'manage_runs',
   'run.read': 'manage_runs',
+  'handoff.write': 'manage_runs',
+  'handoff.read': 'manage_runs',
 };
 
 const ROLE_CAPABILITIES: Record<string, Capability[]> = {

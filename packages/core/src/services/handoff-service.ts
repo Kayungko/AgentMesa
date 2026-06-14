@@ -2,6 +2,7 @@ import { generateEnvelopeId, currentProtocolVersion } from '@agentmesa/protocol'
 import type { TransportEnvelope } from '@agentmesa/protocol';
 import { MesaError } from '../errors.js';
 import type { MesaRuntimeContext, MesaTransport } from '../runtime/types.js';
+import { assertPolicy } from './runtime-service-utils.js';
 
 function findFileTransport(ctx: MesaRuntimeContext): MesaTransport {
   const transport = ctx.transports.find((t) => t.type === 'file');
@@ -33,6 +34,7 @@ export function writeReviewRequest(
   ctx: MesaRuntimeContext,
   payload: ReviewRequestPayload,
 ): TransportEnvelope {
+  assertPolicy(ctx, 'handoff.write', `run:${payload.runId}`);
   const transport = findFileTransport(ctx);
   if (typeof transport.writeOutbound !== 'function') {
     throw new MesaError('TRANSPORT_NOT_FOUND', 'File transport does not support writeOutbound');
@@ -66,6 +68,7 @@ export function writeReviewResult(
   ctx: MesaRuntimeContext,
   payload: ReviewResultPayload,
 ): TransportEnvelope {
+  assertPolicy(ctx, 'handoff.write', `run:${payload.runId}`);
   const transport = findFileTransport(ctx);
   if (typeof transport.writeInbound !== 'function') {
     throw new MesaError('TRANSPORT_NOT_FOUND', 'File transport does not support writeInbound');
@@ -100,6 +103,7 @@ export function writeReviewResult(
 export function listOutboundHandoffs(
   ctx: MesaRuntimeContext,
 ): TransportEnvelope[] {
+  assertPolicy(ctx, 'handoff.read', 'transport:outbox');
   const transport = findFileTransport(ctx);
   if (typeof transport.listOutbound !== 'function') {
     return [];
@@ -110,6 +114,7 @@ export function listOutboundHandoffs(
 export function listInboundHandoffs(
   ctx: MesaRuntimeContext,
 ): TransportEnvelope[] {
+  assertPolicy(ctx, 'handoff.read', 'transport:inbox');
   const transport = findFileTransport(ctx);
   if (typeof transport.listInbound !== 'function') {
     return [];

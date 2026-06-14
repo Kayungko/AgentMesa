@@ -17,7 +17,8 @@ export type PolicyAction =
   | 'read_events'
   | 'read_projections'
   | 'rebuild_projections'
-  | 'inspect_transports';
+  | 'inspect_transports'
+  | 'manage_runs';
 
 export type RoleCapability = Record<AgentRole, PolicyAction[]>;
 

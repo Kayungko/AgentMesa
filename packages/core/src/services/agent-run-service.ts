@@ -6,7 +6,7 @@ import {
   currentProtocolVersion,
 } from '@agentmesa/protocol';
 import type { MesaAgentRun, CreateAgentRunInput, RunStatus } from '@agentmesa/protocol';
-import { RunNotFoundError } from '../errors.js';
+import { RunNotFoundError, InvalidStatusTransitionError } from '../errors.js';
 import type { MesaRuntimeContext } from '../runtime/types.js';
 import {
   appendRuntimeEvent,
@@ -76,6 +76,19 @@ export function updateAgentRunStatus(
   assertPolicy(ctx, 'run.updateStatus', `run:${runId}`);
   const run = getAgentRun(ctx, runId);
 
+  const VALID_TRANSITIONS: Record<string, string[]> = {
+    pending: ['running', 'cancelled'],
+    running: ['completed', 'failed', 'cancelled'],
+    completed: [],
+    failed: [],
+    cancelled: [],
+  };
+
+  const allowed = VALID_TRANSITIONS[run.status];
+  if (!allowed || !allowed.includes(status)) {
+    throw new InvalidStatusTransitionError(run.status, status);
+  }
+
   const now = new Date().toISOString();
   const updated: MesaAgentRun = {
     ...run,
@@ -99,6 +112,7 @@ export function updateAgentRunStatus(
   const eventType =
     status === 'completed' ? 'agent_run_completed' as const :
     status === 'failed' ? 'agent_run_failed' as const :
+    status === 'cancelled' ? 'agent_run_cancelled' as const :
     'agent_run_status_changed' as const;
 
   appendRuntimeEvent(ctx, {

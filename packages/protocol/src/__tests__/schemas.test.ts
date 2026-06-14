@@ -484,6 +484,7 @@ describe('MesaEventSchema', () => {
       'agent_run_status_changed',
       'agent_run_completed',
       'agent_run_failed',
+      'agent_run_cancelled',
       'check_completed',
       'thread_created',
       'thread_resolved',

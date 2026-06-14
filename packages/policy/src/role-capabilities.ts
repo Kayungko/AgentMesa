@@ -16,6 +16,7 @@ export function defineRoleCapabilities(): RoleCapability {
       'read_projections',
       'rebuild_projections',
       'inspect_transports',
+      'manage_runs',
     ],
     chair: [
       'read_task',
@@ -35,6 +36,7 @@ export function defineRoleCapabilities(): RoleCapability {
       'read_projections',
       'rebuild_projections',
       'inspect_transports',
+      'manage_runs',
     ],
     planner: [
       'read_task',
@@ -43,6 +45,7 @@ export function defineRoleCapabilities(): RoleCapability {
       'manage_meetings',
       'read_events',
       'read_projections',
+      'manage_runs',
     ],
     builder: [
       'read_task',
@@ -54,6 +57,7 @@ export function defineRoleCapabilities(): RoleCapability {
       'run_command',
       'read_events',
       'read_projections',
+      'manage_runs',
     ],
     reviewer: [
       'read_task',
@@ -62,6 +66,7 @@ export function defineRoleCapabilities(): RoleCapability {
       'change_status',
       'read_events',
       'read_projections',
+      'manage_runs',
     ],
     tester: [
       'read_task',
@@ -70,6 +75,7 @@ export function defineRoleCapabilities(): RoleCapability {
       'run_command',
       'read_events',
       'read_projections',
+      'manage_runs',
     ],
     documenter: [
       'read_task',
@@ -93,6 +99,7 @@ export function defineRoleCapabilities(): RoleCapability {
       'read_projections',
       'rebuild_projections',
       'inspect_transports',
+      'manage_runs',
     ],
     researcher: [
       'read_task',
@@ -118,6 +125,7 @@ export function defineRoleCapabilities(): RoleCapability {
       'read_projections',
       'rebuild_projections',
       'inspect_transports',
+      'manage_runs',
     ],
     connector: [
       'read_task',
@@ -132,6 +140,7 @@ export function defineRoleCapabilities(): RoleCapability {
       'create_artifact',
       'read_events',
       'read_projections',
+      'manage_runs',
     ],
     system: [
       'read_task',

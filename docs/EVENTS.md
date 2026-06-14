@@ -156,6 +156,7 @@ The current state of any entity is a **projection** rebuilt by replaying its str
 | `agent_run_status_changed` | `{ previousStatus, newStatus, run }` | Run status transitions |
 | `agent_run_completed` | `{ previousStatus, newStatus, run }` | Run finishes successfully |
 | `agent_run_failed` | `{ previousStatus, newStatus, run }` | Run fails with error |
+| `agent_run_cancelled` | `{ previousStatus, newStatus, run }` | Run is cancelled (terminal) |
 
 The remaining frozen types `thread_created` and `thread_resolved` track discussion-thread lifecycle within a meeting.
 
