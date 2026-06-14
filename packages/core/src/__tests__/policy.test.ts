@@ -10,6 +10,7 @@ import { initWorkspace, createTask, deleteTask, updateTaskStatus } from '../inde
 import { getTaskProjection, listTaskProjections } from '../services/projection-read-service.js';
 import { rebuildAllProjections } from '../services/projection-service.js';
 import { PolicyDeniedError } from '../errors.js';
+import * as CorePublicAPI from '../index.js';
 
 function actor(overrides: Partial<MesaActor> = {}): MesaActor {
   return {
@@ -656,5 +657,60 @@ describe('Runtime context policy enforcement', () => {
     const proj = getTaskProjection(builderCtx, task.id);
     expect(proj).not.toBeNull();
     expect(proj!.id).toBe(task.id);
+  });
+
+  // --- Public API boundary: internal helpers not leaked ---
+
+  it('internal _getTaskProjection is not in public API', () => {
+    expect(CorePublicAPI).not.toHaveProperty('_getTaskProjection');
+  });
+  it('internal _getMeetingProjection is not in public API', () => {
+    expect(CorePublicAPI).not.toHaveProperty('_getMeetingProjection');
+  });
+  it('internal _getAgentProjection is not in public API', () => {
+    expect(CorePublicAPI).not.toHaveProperty('_getAgentProjection');
+  });
+  it('internal _listTaskProjections is not in public API', () => {
+    expect(CorePublicAPI).not.toHaveProperty('_listTaskProjections');
+  });
+  it('internal _listMeetingProjections is not in public API', () => {
+    expect(CorePublicAPI).not.toHaveProperty('_listMeetingProjections');
+  });
+  it('internal _listAgentProjections is not in public API', () => {
+    expect(CorePublicAPI).not.toHaveProperty('_listAgentProjections');
+  });
+  it('freshness helper isTaskProjectionFresh is not in public API', () => {
+    expect(CorePublicAPI).not.toHaveProperty('isTaskProjectionFresh');
+  });
+  it('freshness helper isMeetingProjectionFresh is not in public API', () => {
+    expect(CorePublicAPI).not.toHaveProperty('isMeetingProjectionFresh');
+  });
+  it('freshness helper isAgentProjectionFresh is not in public API', () => {
+    expect(CorePublicAPI).not.toHaveProperty('isAgentProjectionFresh');
+  });
+
+  // --- Projection read enforcement: no-permission actor cannot bypass ---
+
+  it('builder read denied via public getTaskProjection if projection.read not granted', () => {
+    // Remove builder's projection.read capability via override
+    const ctx = makeRoleBasedContext({ roles: ['builder'] }, { builder: ['task.create', 'task.updateStatus', 'task.archive', 'task.delete', 'meeting.create', 'message.append', 'artifact.create', 'agent.register', 'event.read', 'projection.rebuild', 'transport.inspect', 'task.assign', 'meeting.addTask', 'meeting.addAgent', 'meeting.updateStatus'] });
+    const ownerCtx = createRuntimeContext({
+      rootDir: ctx.rootDir,
+      actor: { id: 'user:owner', type: 'user', roles: ['owner'] },
+      storage: ctx.storage,
+      policy: ctx.policy,
+    });
+    const task = createTaskInMeeting(ownerCtx, 'No projection read task');
+    rebuildAllProjections(ownerCtx);
+    expect(() => getTaskProjection(ctx, task.id)).toThrow(PolicyDeniedError);
+  });
+
+  it('public projection read APIs are present in index', () => {
+    expect(CorePublicAPI).toHaveProperty('getTaskProjection');
+    expect(CorePublicAPI).toHaveProperty('getMeetingProjection');
+    expect(CorePublicAPI).toHaveProperty('getAgentProjection');
+    expect(CorePublicAPI).toHaveProperty('listTaskProjections');
+    expect(CorePublicAPI).toHaveProperty('listMeetingProjections');
+    expect(CorePublicAPI).toHaveProperty('listAgentProjections');
   });
 });

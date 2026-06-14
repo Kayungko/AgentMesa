@@ -27,9 +27,6 @@ export {
   listTaskProjections,
   listMeetingProjections,
   listAgentProjections,
-  isTaskProjectionFresh,
-  isMeetingProjectionFresh,
-  isAgentProjectionFresh,
 } from './services/projection-read-service.js';
 export type { ReadProjectionOptions, TaskProjection, MeetingProjection, AgentProjection } from './services/projection-read-service.js';
 export * from './services/read-model-service.js';

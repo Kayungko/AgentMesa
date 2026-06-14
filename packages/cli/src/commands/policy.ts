@@ -64,7 +64,7 @@ export function runPolicyCheck(args: ParsedArgs): void {
   const resource = args.positional[1] ?? '*';
 
   if (!action) {
-    printError(new Error('Usage: mesa policy check <action> <resource> --actor <id> --role <role> [--mode role-based|current]'));
+    outputError(new Error('Usage: mesa policy check <action> <resource> --actor <id> --role <role> [--mode role-based|current]'), json);
     process.exitCode = 1;
     return;
   }
@@ -148,7 +148,7 @@ export function runPolicyInspect(args: ParsedArgs): void {
     'event.read', 'projection.read', 'projection.rebuild', 'transport.inspect',
   ];
 
-  const roles = ['owner', 'admin', 'builder', 'reviewer', 'connector', 'ci', 'system'] as const;
+  const roles = VALID_ROLES;
 
   try {
     const mode = resolveMode(args, 'role-based');

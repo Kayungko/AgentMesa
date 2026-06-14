@@ -9,17 +9,22 @@ import {
   checkProjectionConsistency,
   checkTransportEnvelopes,
   findOrphanedLocks,
-  isTaskProjectionFresh,
-  isMeetingProjectionFresh,
-  isAgentProjectionFresh,
   listTaskProjections,
   listMeetingProjections,
   listAgentProjections,
 } from '@agentmesa/core';
-import type { DiagnosticFinding } from '@agentmesa/core';
+import type { DiagnosticFinding, MesaRuntimeContext } from '@agentmesa/core';
 import { existsSync } from 'node:fs';
 import type { ParsedArgs } from '../parse-args.js';
 import { printSuccess, printWarning, printError, printInfo, outputResult } from '../output.js';
+
+function isProjectionFresh(ctx: MesaRuntimeContext, streamId: string, proj: Record<string, unknown>): boolean {
+  const events = ctx.eventStore.list({ streamId });
+  if (events.length === 0) return true;
+  const maxSeq = Math.max(...events.map((e) => e.sequence));
+  const lastSeq = (proj._meta as { lastSequence?: number } | undefined)?.lastSequence;
+  return lastSeq !== undefined && lastSeq >= maxSeq;
+}
 
 export function runDoctor(args: ParsedArgs): void {
   const rootDir = process.cwd();
@@ -137,7 +142,7 @@ export function runDoctor(args: ParsedArgs): void {
       // Stale projection freshness check
       for (const t of listTaskProjections(ctx, { strict: false })) {
         const taskId = t.id as string;
-        if (!isTaskProjectionFresh(ctx, taskId)) {
+        if (!isProjectionFresh(ctx, taskId, t)) {
           record({
             level: 'warn',
             category: 'projection',
@@ -150,7 +155,7 @@ export function runDoctor(args: ParsedArgs): void {
       }
       for (const m of listMeetingProjections(ctx, { strict: false })) {
         const meetingId = m.id as string;
-        if (!isMeetingProjectionFresh(ctx, meetingId)) {
+        if (!isProjectionFresh(ctx, meetingId, m)) {
           record({
             level: 'warn',
             category: 'projection',
@@ -163,7 +168,7 @@ export function runDoctor(args: ParsedArgs): void {
       }
       for (const a of listAgentProjections(ctx, { strict: false })) {
         const agentId = a.id as string;
-        if (!isAgentProjectionFresh(ctx, agentId)) {
+        if (!isProjectionFresh(ctx, agentId, a)) {
           record({
             level: 'warn',
             category: 'projection',
