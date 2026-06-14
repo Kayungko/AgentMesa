@@ -14,9 +14,9 @@ AgentMesa operates in a multi-agent environment where different agents with diff
 | **Secret protection** | **Done** (policy package). `SecretProtection` detects secret content patterns (API keys, tokens, PEM) and sanitizes output. |
 | **Audit log** | **Done** (policy package). `AuditLog` writes append-only audit entries to `.agentmesa/logs/audit.jsonl` with query support. |
 | **Core integration** | **Partial.** `assertPolicy` calls `ctx.policy.can()` in all state-changing services. Default remains `AllowAllMesaPolicyEngine` for local dev; production mode should use `role-based`. Capability gating (canEditFiles, canRunShell, etc.) is not yet checked by core services. |
-| **Context-aware checks** | **Started.** `MesaPolicyEngine` interface now includes `canWithContext(actor, action, resource, context?)`. `RoleBasedPolicyEngine` accepts the context parameter but does not yet use it for decisions (taskState, meetingPhase, timeWindow are deferred). The interface is in place so callers can begin passing context without breaking changes. |
-| **CLI policy commands** | **Done.** `mesa policy check <action> <resource> --actor --role` queries policy decision; `mesa policy inspect` prints the full role-capability matrix. Both support `--json`. |
-| **Enforcement tests** | **Done.** Policy tests cover: builder deny delete/archive, connector deny delete/create, ci deny delete/create, reviewer deny manage agents/meetings, system deny write tasks, owner/admin bypass, allow-all backward compat, canWithContext pass-through, unknown action deny, all new roles and actions. |
+| **Context-aware checks** | **Implemented.** `canWithContext(actor, action, resource, context?)` is the primary evaluation method. `RoleBasedPolicyEngine` enforces reviewer status transition gating: reviewer may only transition task status to `approved` or `changes_requested` when `context.targetStatus` is set. `can()` delegates to `canWithContext()` — context-less calls for reviewer+task.updateStatus will deny. `owner`, `admin`, and `maintainer` bypass the reviewer gate. |
+| **CLI policy commands** | **Done.** `mesa policy check <action> <resource> --actor --role` (default `--mode role-based`) evaluates against the canonical `RoleBasedPolicyEngine`. `mesa policy inspect` (default `--mode role-based`) prints the full role-capability matrix. `--mode current` uses the workspace's configured policy engine. `--role` validates against known AgentRole values; `--roles a,b` supports comma-separated multi-role. Both commands support `--json` output with `mode` field. |
+| **Enforcement tests** | **Done.** Policy tests cover: builder deny delete/archive, connector deny delete/create, ci deny delete/create, reviewer context-aware status gate (approved/changes_requested allowed, in_progress denied), system deny write tasks, owner/admin bypass, allow-all backward compat, canWithContext pass-through, unknown action deny, event.read/projection.read/rebuild/transport.inspect enforcement, all 17 actions and 14 roles. |
 
 The document below describes the full target design. Sections without an implementation row in the table above are design intent.
 
@@ -54,6 +54,12 @@ What the actor wants to do. Concrete, auditable operations:
 | `merge_pr` | Merge a pull request |
 | `manage_agents` | Register, configure, or remove agents |
 | `manage_meetings` | Create, configure, or close meetings |
+| `archive_task` | Soft-archive a task (preserves record, marks inactive) |
+| `delete_task` | Hard-delete a task from the filesystem |
+| `read_events` | Read event log entries (listEvents, getTaskEvents, getMeetingEvents) |
+| `read_projections` | Read task/meeting/agent projections |
+| `rebuild_projections` | Rebuild all projections from event stream |
+| `inspect_transports` | List available transports and their capabilities |
 
 ### Resource
 
@@ -283,7 +289,7 @@ ctx.policy.canPerform(actor, action, resource, context)
 
 ### Integration Points
 
-- **Core services** — `createTask`, `updateTaskStatus`, `appendMessage`, `attachArtifact`, and every other mutation calls `ctx.policy.canPerform()` before writing. If denied, the service throws a `PolicyDeniedError` with the decision reason.
+- **Core services** — Every mutation (`createTask`, `updateTaskStatus`, `appendMessage`, `attachArtifact`, …) calls `assertPolicy()` or `assertPolicyWithContext()` before writing. Read paths (`listEvents`, `getTaskEvents`, `getMeetingEvents`, projection reads via `read-model-service`, `rebuildAllProjections`, transport listing) now also enforce policy. If denied, the service throws a `PolicyDeniedError` with the decision reason.
 - **MCP tools** — each MCP tool handler (`mesa_create_task`, `mesa_request_review`, `mesa_update_status`, etc.) checks policy before accessing or mutating state. The MCP transport never bypasses Core.
 - **Runner** — before invoking any agent command, the runner checks command policy classification and file access policy against the agent's declared capabilities and assigned roles.
 - **Connectors** — external connectors (GitHub, CI) pass their actor identity through the same `ctx.policy.canPerform()` call. A GitHub PR connector acts as `ci:github`, not as the user who triggered the workflow.

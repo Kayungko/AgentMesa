@@ -18,7 +18,7 @@ AgentMesa is local-first and permission-aware by default. The policy engine enfo
 | Role-based policy engine | **Enforced in tests.** `RoleBasedPolicyEngine` maps 16 actions → 13 capabilities with per-role sets. Production roles: owner, admin, builder, reviewer, connector, ci, system. |
 | Default mode | `AllowAllMesaPolicyEngine` — no restrictions for local development. |
 | Production mode | Set `policy.mode: "role-based"` in `.agentmesa/config.json` to enable enforcement. |
-| Context-aware policy | `canWithContext()` interface exists; context data (taskState, meetingPhase) not yet used for decisions. |
+| Context-aware policy | **Enforced.** `canWithContext()` evaluates reviewer status gates — reviewer may only transition to `approved` or `changes_requested`. `updateTaskStatus` now passes `targetStatus` via `assertPolicyWithContext()`. |
 | Capability gating | `canEditFiles`, `canRunShell`, etc. not yet checked by core services (deferred). |
 
 ## Role-Based Access Matrix
