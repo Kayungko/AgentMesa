@@ -189,7 +189,7 @@ Acceptance:
 
 ## Priority 7: Policy Layer
 
-Status: `policy_enforcement_expanded_with_context_gate`
+Status: `baseline_complete` — policy enforcement foundation is in place. This is not a full security model; it enforces coarse-grained role boundaries. `RoleBasedPolicyEngine` is available but NOT the default (local dev uses `AllowAllMesaPolicyEngine`). Capability gating (canEditFiles, canRunShell) and finer-grained ABAC checks remain deferred.
 
 - `RoleBasedPolicyEngine` in core: maps 16 action keys → 13 capabilities with per-role capability sets. Owner bypass built in. Constructor accepts overrides.
 - Production roles: `owner`, `admin`, `builder`, `reviewer`, `connector`, `ci`, `system`. Legacy roles preserved.
@@ -198,7 +198,7 @@ Status: `policy_enforcement_expanded_with_context_gate`
 - `mesa policy check` / `mesa policy inspect` default to `--mode role-based` (canonical `RoleBasedPolicyEngine`). `--mode current` uses workspace config. `--role` validated against known AgentRole values; `--roles a,b` supports multi-role. Both commands output `mode` in JSON.
 - Read path enforcement: `listEvents`/`getTaskEvents`/`getMeetingEvents` → `event.read`; `getTaskProjection`/`getMeetingProjection`/`getAgentProjection`/`listTaskProjections`/`listMeetingProjections`/`listAgentProjections` → `projection.read`; `rebuildTaskProjections`/`rebuildMeetingProjections`/`rebuildAgentProjections` → `projection.rebuild`; `runTransports` → `transport.inspect`. Internal helpers (`_get*`/`_list*`) are excluded from the `@agentmesa/core` public index and only imported by `read-model-service.ts` via file path — callers cannot bypass `projection.read` enforcement.
 - Policy enforcement tests cover: builder deny delete/archive, connector deny delete/create, ci deny delete/create, reviewer context-aware status gate (pure reviewer only approved/changes_requested; reviewer+builder/chair/admin/maintainer/owner bypass), system deny write tasks, owner/admin bypass, allow-all backward compat, event/projection/rebuild/transport enforcement, all 17 actions and 14 roles.
-- CLI `resolveMode` throws on invalid `--mode` instead of continuing with default.
+- CLI `resolveMode` throws on invalid `--mode`; error is caught and formatted via `outputError(err, json)` — structured JSON when `--json` is set, human-readable to stderr otherwise. Always sets `exitCode = 1`.
 - `packages/policy` definitions (`PolicyAction`, `RoleCapability`, `PermissionChecker`) aligned with core policy engine (17 actions, 14 roles including `owner`).
 - CLI uses the same `MesaRuntimeContext` as all other consumers.
 - `AllowAllMesaPolicyEngine` kept as development default; `RoleBasedPolicyEngine` available via config `policy.mode: "role-based"` or injection.

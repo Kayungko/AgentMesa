@@ -18,6 +18,8 @@ import {
 import type { MesaWorkspacePaths } from '@agentmesa/core';
 import type { MesaRuntimeContext } from '@agentmesa/core';
 import { runTimeline } from '../commands/events.js';
+import { runPolicyCheck, runPolicyInspect } from '../commands/policy.js';
+import type { ParsedArgs } from '../parse-args.js';
 
 let testDir: string;
 let paths: MesaWorkspacePaths;
@@ -191,5 +193,147 @@ describe('CLI integration: timeline subcommands', () => {
     expect(taskProj).toBeNull();
     expect(meetingEvents).toEqual([]);
     expect(meetingProj).toBeNull();
+  });
+});
+
+describe('CLI policy commands', () => {
+  function makeArgs(overrides: Partial<ParsedArgs> = {}): ParsedArgs {
+    return {
+      command: 'policy',
+      subcommand: 'check',
+      positional: [],
+      flags: {},
+      ...overrides,
+    };
+  }
+
+  describe('policy check --mode invalid', () => {
+    it('sets exitCode=1 and does not output allowed decision', () => {
+      const prevExitCode = process.exitCode;
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      process.exitCode = 0;
+
+      try {
+        const args = makeArgs({
+          positional: ['task.delete', 'task:1'],
+          flags: { mode: 'invalid', actor: 'test', role: 'builder' },
+        });
+        runPolicyCheck(args);
+
+        expect(process.exitCode).toBe(1);
+        const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        expect(stdout).not.toContain('ALLOWED');
+        expect(stdout).not.toContain('DENIED');
+        expect(stdout).not.toContain('allowed');
+        const stderr = errorSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        expect(stderr).toContain('Invalid --mode');
+      } finally {
+        process.exitCode = prevExitCode;
+        errorSpy.mockRestore();
+        logSpy.mockRestore();
+      }
+    });
+
+    it('invalid mode with --json outputs structured error', () => {
+      const prevExitCode = process.exitCode;
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      process.exitCode = 0;
+
+      try {
+        const args = makeArgs({
+          positional: ['task.delete', 'task:1'],
+          flags: { mode: 'invalid', json: true, actor: 'test', role: 'builder' },
+        });
+        runPolicyCheck(args);
+
+        expect(process.exitCode).toBe(1);
+
+        // Find the JSON error object on stdout
+        let foundError = false;
+        for (const call of logSpy.mock.calls) {
+          const line = call.join(' ');
+          if (line.startsWith('{') && line.includes('"error"')) {
+            const parsed = JSON.parse(line) as { error: string; code: string };
+            expect(parsed.error).toContain('Invalid --mode');
+            expect(parsed.code).toBe('ERROR');
+            foundError = true;
+          }
+          if (line.startsWith('{') && line.includes('"allowed"')) {
+            expect.fail(`stdout should not contain allowed decision: ${line}`);
+          }
+        }
+        expect(foundError).toBe(true);
+      } finally {
+        process.exitCode = prevExitCode;
+        errorSpy.mockRestore();
+        logSpy.mockRestore();
+      }
+    });
+  });
+
+  describe('policy inspect --mode invalid', () => {
+    it('sets exitCode=1 and does not output matrix', () => {
+      const prevExitCode = process.exitCode;
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      process.exitCode = 0;
+
+      try {
+        const args = makeArgs({
+          subcommand: 'inspect',
+          flags: { mode: 'invalid' },
+        });
+        runPolicyInspect(args);
+
+        expect(process.exitCode).toBe(1);
+        const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        expect(stdout).not.toContain('Policy mode');
+        const stderr = errorSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        expect(stderr).toContain('Invalid --mode');
+      } finally {
+        process.exitCode = prevExitCode;
+        errorSpy.mockRestore();
+        logSpy.mockRestore();
+      }
+    });
+
+    it('invalid mode with --json outputs structured error', () => {
+      const prevExitCode = process.exitCode;
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      process.exitCode = 0;
+
+      try {
+        const args = makeArgs({
+          subcommand: 'inspect',
+          flags: { mode: 'invalid', json: true },
+        });
+        runPolicyInspect(args);
+
+        expect(process.exitCode).toBe(1);
+
+        // Find the JSON error object on stdout
+        let foundError = false;
+        for (const call of logSpy.mock.calls) {
+          const line = call.join(' ');
+          if (line.startsWith('{') && line.includes('"error"')) {
+            const parsed = JSON.parse(line) as { error: string; code: string };
+            expect(parsed.error).toContain('Invalid --mode');
+            expect(parsed.code).toBe('ERROR');
+            foundError = true;
+          }
+          if (line.startsWith('{') && line.includes('"actions"')) {
+            expect.fail(`stdout should not contain matrix: ${line}`);
+          }
+        }
+        expect(foundError).toBe(true);
+      } finally {
+        process.exitCode = prevExitCode;
+        errorSpy.mockRestore();
+        logSpy.mockRestore();
+      }
+    });
   });
 });

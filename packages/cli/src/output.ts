@@ -23,6 +23,36 @@ export function printInfo(message: string): void {
 }
 
 /**
+ * Output an error in either JSON or human-readable format.
+ * When json=true, a structured error object goes to stdout.
+ * When json=false, delegates to printError (stderr).
+ */
+export function outputError(error: unknown, json: boolean): void {
+  if (json) {
+    const message = error instanceof Error ? error.message : String(error);
+    const code =
+      error instanceof MesaError
+        ? error.code
+        : error instanceof Error
+          ? 'ERROR'
+          : 'UNKNOWN';
+    console.log(
+      JSON.stringify(
+        {
+          error: message,
+          code,
+          recommendation: null,
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+  printError(error);
+}
+
+/**
  * Output data in either JSON or human-readable format.
  * When json=true, only JSON goes to stdout — safe for local AI consumption.
  */

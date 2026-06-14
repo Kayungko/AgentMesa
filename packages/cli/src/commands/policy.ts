@@ -6,7 +6,7 @@ import {
 import type { AgentRole } from '@agentmesa/protocol';
 import type { MesaActor } from '@agentmesa/core';
 import type { ParsedArgs } from '../parse-args.js';
-import { printError, outputResult } from '../output.js';
+import { printError, outputResult, outputError } from '../output.js';
 
 const VALID_ROLES: readonly AgentRole[] = [
   'owner', 'admin', 'builder', 'reviewer', 'connector', 'ci', 'system',
@@ -113,7 +113,7 @@ export function runPolicyCheck(args: ParsedArgs): void {
       );
     }
   } catch (err) {
-    printError(err);
+    outputError(err, json);
     process.exitCode = 1;
   }
 }
@@ -196,7 +196,7 @@ export function runPolicyInspect(args: ParsedArgs): void {
       );
     }
   } catch (err) {
-    printError(err);
+    outputError(err, json);
     process.exitCode = 1;
   }
 }
