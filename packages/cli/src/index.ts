@@ -112,6 +112,10 @@ Inspection Commands:
   timeline task <id>           Show task event timeline + projection
   timeline meeting <id>        Show meeting event timeline + projection
   transports                  List available transports and capabilities
+  transports list              Same as 'mesa transports'
+  transports inspect <name>    Show transport details (policy-gated)
+  transports inbox <name>      List inbound envelopes (--status pending|processed|failed)
+  transports outbox <name>     List outbound envelopes (--status pending|processed|failed)
   policy check <action> <res>  Check if action is allowed for an actor
                    --actor <id> --role <role>
   policy inspect              Show role capability matrix
@@ -128,6 +132,8 @@ Examples:
   mesa timeline task_e5f6a7b8    # auto-detect task or meeting
   mesa timeline task task_e5f6a7b8
   mesa transports
+  mesa transports inspect "File Transport"
+  mesa transports inbox "File Transport" --status pending
   mesa doctor
 `);
 }
