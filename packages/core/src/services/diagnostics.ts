@@ -106,8 +106,6 @@ export function checkProjectionConsistency(ctx: MesaRuntimeContext): DiagnosticF
 
   // Check tasks: events exist → projection should exist
   const taskEvents = listEvents(ctx, { streamType: 'task' });
-  if (taskEvents.length === 0) return findings;
-
   const taskStreams = new Set(taskEvents.map((e) => e.streamId));
   let missing = 0;
   let corrupted = 0;

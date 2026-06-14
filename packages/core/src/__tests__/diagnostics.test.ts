@@ -91,9 +91,12 @@ describe('validateEventLog', () => {
 });
 
 describe('checkProjectionConsistency', () => {
-  it('returns nothing when there are no events', () => {
+  it('returns empty ok when there are no events', () => {
     const findings = checkProjectionConsistency(ctx);
-    expect(findings).toEqual([]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.level).toBe('ok');
+    expect(findings[0]!.message).toContain('Projections consistent');
+    expect(findings[0]!.message).toContain('0 task(s)');
   });
 
   it('detects missing task projections', () => {
@@ -219,6 +222,24 @@ describe('checkProjectionConsistency', () => {
     expect(stale!.path).toBe(projPath);
     expect(stale!.fixable).toBe(true);
     expect(stale!.recommendation).toContain('mesa rebuild');
+  });
+
+  it('detects missing meeting projection when only meeting events exist (no task events)', () => {
+    createMeeting(ctx, { title: 'Meeting-only workspace' });
+    const findings = checkProjectionConsistency(ctx);
+    const meetingMissing = findings.filter((f) => f.message.includes('Meeting') && f.message.includes('no projection'));
+    expect(meetingMissing.length).toBeGreaterThanOrEqual(1);
+    const meetingIssue = findings.find((f) => f.message.includes('missing'));
+    expect(meetingIssue).toBeDefined();
+  });
+
+  it('detects missing agent projection when only agent events exist (no task events)', () => {
+    registerAgent(ctx, { id: 'agent-only', name: 'AgentOnly', client: 'claude', roles: ['builder'], status: 'available' });
+    const findings = checkProjectionConsistency(ctx);
+    const agentMissing = findings.filter((f) => f.message.includes('Agent') && f.message.includes('no projection'));
+    expect(agentMissing.length).toBeGreaterThanOrEqual(1);
+    const agentIssue = findings.find((f) => f.message.includes('missing'));
+    expect(agentIssue).toBeDefined();
   });
 });
 
