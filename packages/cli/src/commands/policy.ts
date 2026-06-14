@@ -34,8 +34,7 @@ function resolveMode(args: ParsedArgs, defaultMode: PolicyMode): PolicyMode {
   const raw = args.flags['mode'];
   if (raw === 'role-based' || raw === 'current') return raw;
   if (raw) {
-    printError(new Error(`Invalid --mode "${raw}". Must be "role-based" or "current".`));
-    process.exitCode = 1;
+    throw new Error(`Invalid --mode "${raw}". Must be "role-based" or "current".`);
   }
   return defaultMode;
 }

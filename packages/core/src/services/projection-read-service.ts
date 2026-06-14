@@ -9,6 +9,7 @@ import {
   type AgentProjection,
 } from './projection-schemas.js';
 import type { MesaRuntimeContext } from '../runtime/types.js';
+import { assertPolicy } from './runtime-service-utils.js';
 
 export interface ReadProjectionOptions {
   /** When false, skip invalid projections instead of throwing. Default true. */
@@ -66,37 +67,67 @@ function listProjectionFiles(
     }, []);
 }
 
-export function getTaskProjection(ctx: MesaRuntimeContext, taskId: string, options?: ReadProjectionOptions): Record<string, unknown> | null {
+export function _getTaskProjection(ctx: MesaRuntimeContext, taskId: string, options?: ReadProjectionOptions): Record<string, unknown> | null {
   const strict = options?.strict ?? true;
   const raw = readProjectionFile(ctx, ctx.paths.taskProjectionsDir, taskId, strict);
   if (raw === null) return null;
   return validateProjection(raw, 'task', join(ctx.paths.taskProjectionsDir, `${taskId}.json`), strict);
 }
 
-export function getMeetingProjection(ctx: MesaRuntimeContext, meetingId: string, options?: ReadProjectionOptions): Record<string, unknown> | null {
+export function getTaskProjection(ctx: MesaRuntimeContext, taskId: string, options?: ReadProjectionOptions): Record<string, unknown> | null {
+  assertPolicy(ctx, 'projection.read', `task:${taskId}`);
+  return _getTaskProjection(ctx, taskId, options);
+}
+
+export function _getMeetingProjection(ctx: MesaRuntimeContext, meetingId: string, options?: ReadProjectionOptions): Record<string, unknown> | null {
   const strict = options?.strict ?? true;
   const raw = readProjectionFile(ctx, ctx.paths.meetingProjectionsDir, meetingId, strict);
   if (raw === null) return null;
   return validateProjection(raw, 'meeting', join(ctx.paths.meetingProjectionsDir, `${meetingId}.json`), strict);
 }
 
-export function getAgentProjection(ctx: MesaRuntimeContext, agentId: string, options?: ReadProjectionOptions): Record<string, unknown> | null {
+export function getMeetingProjection(ctx: MesaRuntimeContext, meetingId: string, options?: ReadProjectionOptions): Record<string, unknown> | null {
+  assertPolicy(ctx, 'projection.read', `meeting:${meetingId}`);
+  return _getMeetingProjection(ctx, meetingId, options);
+}
+
+export function _getAgentProjection(ctx: MesaRuntimeContext, agentId: string, options?: ReadProjectionOptions): Record<string, unknown> | null {
   const strict = options?.strict ?? true;
   const raw = readProjectionFile(ctx, ctx.paths.agentProjectionsDir, agentId, strict);
   if (raw === null) return null;
   return validateProjection(raw, 'agent', join(ctx.paths.agentProjectionsDir, `${agentId}.json`), strict);
 }
 
-export function listTaskProjections(ctx: MesaRuntimeContext, options?: ReadProjectionOptions): Record<string, unknown>[] {
+export function getAgentProjection(ctx: MesaRuntimeContext, agentId: string, options?: ReadProjectionOptions): Record<string, unknown> | null {
+  assertPolicy(ctx, 'projection.read', `agent:${agentId}`);
+  return _getAgentProjection(ctx, agentId, options);
+}
+
+export function _listTaskProjections(ctx: MesaRuntimeContext, options?: ReadProjectionOptions): Record<string, unknown>[] {
   return listProjectionFiles(ctx, ctx.paths.taskProjectionsDir, 'task', options?.strict ?? true);
 }
 
-export function listMeetingProjections(ctx: MesaRuntimeContext, options?: ReadProjectionOptions): Record<string, unknown>[] {
+export function listTaskProjections(ctx: MesaRuntimeContext, options?: ReadProjectionOptions): Record<string, unknown>[] {
+  assertPolicy(ctx, 'projection.read', 'task:*');
+  return _listTaskProjections(ctx, options);
+}
+
+export function _listMeetingProjections(ctx: MesaRuntimeContext, options?: ReadProjectionOptions): Record<string, unknown>[] {
   return listProjectionFiles(ctx, ctx.paths.meetingProjectionsDir, 'meeting', options?.strict ?? true);
 }
 
-export function listAgentProjections(ctx: MesaRuntimeContext, options?: ReadProjectionOptions): Record<string, unknown>[] {
+export function listMeetingProjections(ctx: MesaRuntimeContext, options?: ReadProjectionOptions): Record<string, unknown>[] {
+  assertPolicy(ctx, 'projection.read', 'meeting:*');
+  return _listMeetingProjections(ctx, options);
+}
+
+export function _listAgentProjections(ctx: MesaRuntimeContext, options?: ReadProjectionOptions): Record<string, unknown>[] {
   return listProjectionFiles(ctx, ctx.paths.agentProjectionsDir, 'agent', options?.strict ?? true);
+}
+
+export function listAgentProjections(ctx: MesaRuntimeContext, options?: ReadProjectionOptions): Record<string, unknown>[] {
+  assertPolicy(ctx, 'projection.read', 'agent:*');
+  return _listAgentProjections(ctx, options);
 }
 
 // Re-export types
@@ -111,7 +142,7 @@ function maxEventSequence(ctx: MesaRuntimeContext, streamId: string): number {
 }
 
 export function isTaskProjectionFresh(ctx: MesaRuntimeContext, taskId: string): boolean {
-  const proj = getTaskProjection(ctx, taskId, { strict: false });
+  const proj = _getTaskProjection(ctx, taskId, { strict: false });
   if (!proj) return false;
   const lastSeq = (proj._meta as { lastSequence?: number } | undefined)?.lastSequence;
   if (lastSeq === undefined) return false;
@@ -119,7 +150,7 @@ export function isTaskProjectionFresh(ctx: MesaRuntimeContext, taskId: string): 
 }
 
 export function isMeetingProjectionFresh(ctx: MesaRuntimeContext, meetingId: string): boolean {
-  const proj = getMeetingProjection(ctx, meetingId, { strict: false });
+  const proj = _getMeetingProjection(ctx, meetingId, { strict: false });
   if (!proj) return false;
   const lastSeq = (proj._meta as { lastSequence?: number } | undefined)?.lastSequence;
   if (lastSeq === undefined) return false;
@@ -127,7 +158,7 @@ export function isMeetingProjectionFresh(ctx: MesaRuntimeContext, meetingId: str
 }
 
 export function isAgentProjectionFresh(ctx: MesaRuntimeContext, agentId: string): boolean {
-  const proj = getAgentProjection(ctx, agentId, { strict: false });
+  const proj = _getAgentProjection(ctx, agentId, { strict: false });
   if (!proj) return false;
   const lastSeq = (proj._meta as { lastSequence?: number } | undefined)?.lastSequence;
   if (lastSeq === undefined) return false;

@@ -208,6 +208,7 @@ function cleanProjectionDir(ctx: MesaRuntimeContext, dir: string): number {
 }
 
 export function rebuildTaskProjections(ctx: MesaRuntimeContext, options?: RebuildOptions): number {
+  assertPolicy(ctx, 'projection.rebuild', 'task:*');
   if (options?.clean) {
     cleanProjectionDir(ctx, ctx.paths.taskProjectionsDir);
   }
@@ -231,6 +232,7 @@ export function rebuildTaskProjections(ctx: MesaRuntimeContext, options?: Rebuil
 }
 
 export function rebuildMeetingProjections(ctx: MesaRuntimeContext, options?: RebuildOptions): number {
+  assertPolicy(ctx, 'projection.rebuild', 'meeting:*');
   if (options?.clean) {
     cleanProjectionDir(ctx, ctx.paths.meetingProjectionsDir);
   }
@@ -254,6 +256,7 @@ export function rebuildMeetingProjections(ctx: MesaRuntimeContext, options?: Reb
 }
 
 export function rebuildAgentProjections(ctx: MesaRuntimeContext, options?: RebuildOptions): number {
+  assertPolicy(ctx, 'projection.rebuild', 'agent:*');
   if (options?.clean) {
     cleanProjectionDir(ctx, ctx.paths.agentProjectionsDir);
   }
@@ -277,7 +280,6 @@ export function rebuildAgentProjections(ctx: MesaRuntimeContext, options?: Rebui
 }
 
 export function rebuildAllProjections(ctx: MesaRuntimeContext, options?: RebuildOptions): { tasks: number; meetings: number; agents: number } {
-  assertPolicy(ctx, 'projection.rebuild', 'projection:*');
   return {
     tasks: rebuildTaskProjections(ctx, options),
     meetings: rebuildMeetingProjections(ctx, options),

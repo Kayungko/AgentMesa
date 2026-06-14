@@ -189,15 +189,16 @@ Acceptance:
 
 ## Priority 7: Policy Layer
 
-Status: `full_enforcement_with_context_aware_gates`
+Status: `policy_enforcement_expanded_with_context_gate`
 
 - `RoleBasedPolicyEngine` in core: maps 16 action keys → 13 capabilities with per-role capability sets. Owner bypass built in. Constructor accepts overrides.
 - Production roles: `owner`, `admin`, `builder`, `reviewer`, `connector`, `ci`, `system`. Legacy roles preserved.
 - Unknown actions are denied by default.
-- `canWithContext(actor, action, resource, context?)` enforces reviewer status transition gate: reviewer may only transition to `approved` or `changes_requested`. `updateTaskStatus` passes `targetStatus` via `assertPolicyWithContext()`. Owner, admin, and maintainer bypass the reviewer gate.
+- `canWithContext(actor, action, resource, context?)` enforces reviewer status transition gate: pure reviewer may only transition to `approved` or `changes_requested`. Multi-role actors (reviewer+builder, reviewer+chair, reviewer+admin, reviewer+maintainer, reviewer+owner) bypass the gate via non-reviewer `change_status` capability. `updateTaskStatus` passes `targetStatus` via `assertPolicyWithContext()`.
 - `mesa policy check` / `mesa policy inspect` default to `--mode role-based` (canonical `RoleBasedPolicyEngine`). `--mode current` uses workspace config. `--role` validated against known AgentRole values; `--roles a,b` supports multi-role. Both commands output `mode` in JSON.
-- Read path enforcement: `listEvents`/`getTaskEvents`/`getMeetingEvents` → `event.read`, projection reads → `projection.read`, `rebuildAllProjections` → `projection.rebuild`, `runTransports` → `transport.inspect`.
-- Policy enforcement tests cover: builder deny delete/archive, connector deny delete/create, ci deny delete/create, reviewer context-aware status gate (approved/changes_requested allowed, in_progress denied), system deny write tasks, owner/admin bypass, allow-all backward compat, event/projection/rebuild/transport enforcement, all 17 actions and 14 roles.
+- Read path enforcement: `listEvents`/`getTaskEvents`/`getMeetingEvents` → `event.read`; `getTaskProjection`/`getMeetingProjection`/`getAgentProjection`/`listTaskProjections`/`listMeetingProjections`/`listAgentProjections` → `projection.read`; `rebuildTaskProjections`/`rebuildMeetingProjections`/`rebuildAgentProjections` → `projection.rebuild`; `runTransports` → `transport.inspect`. Internal helpers (`_get*`/`_list*`) serve freshness checkers and read-model-service without double-enforcement.
+- Policy enforcement tests cover: builder deny delete/archive, connector deny delete/create, ci deny delete/create, reviewer context-aware status gate (pure reviewer only approved/changes_requested; reviewer+builder/chair/admin/maintainer/owner bypass), system deny write tasks, owner/admin bypass, allow-all backward compat, event/projection/rebuild/transport enforcement, all 17 actions and 14 roles.
+- CLI `resolveMode` throws on invalid `--mode` instead of continuing with default.
 - `packages/policy` definitions (`PolicyAction`, `RoleCapability`, `PermissionChecker`) aligned with core policy engine (17 actions, 14 roles including `owner`).
 - CLI uses the same `MesaRuntimeContext` as all other consumers.
 - `AllowAllMesaPolicyEngine` kept as development default; `RoleBasedPolicyEngine` available via config `policy.mode: "role-based"` or injection.

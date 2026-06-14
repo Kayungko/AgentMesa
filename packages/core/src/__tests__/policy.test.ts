@@ -430,6 +430,21 @@ describe('RoleBasedPolicyEngine', () => {
     expect(policy.canWithContext(m, 'task.updateStatus', 't1', { targetStatus: 'todo' }).allowed).toBe(true);
   });
 
+  it('allows reviewer + builder to set status to in_progress', () => {
+    const rb = actor({ roles: ['reviewer', 'builder'] });
+    expect(policy.canWithContext(rb, 'task.updateStatus', 't1', { targetStatus: 'in_progress' }).allowed).toBe(true);
+  });
+
+  it('allows reviewer + builder to set status to todo', () => {
+    const rb = actor({ roles: ['reviewer', 'builder'] });
+    expect(policy.canWithContext(rb, 'task.updateStatus', 't1', { targetStatus: 'todo' }).allowed).toBe(true);
+  });
+
+  it('allows reviewer + chair to set status to in_progress', () => {
+    const rc = actor({ roles: ['reviewer', 'chair'] });
+    expect(policy.canWithContext(rc, 'task.updateStatus', 't1', { targetStatus: 'in_progress' }).allowed).toBe(true);
+  });
+
   it('denies reviewer when no targetStatus context provided', () => {
     const r = actor({ roles: ['reviewer'] });
     const result = policy.canWithContext(r, 'task.updateStatus', 't1');
@@ -571,6 +586,30 @@ describe('Runtime context policy enforcement', () => {
   it('role-based builder can set status to in_progress', () => {
     const ctx = makeRoleBasedContext({ roles: ['builder'] });
     const task = createTaskInMeeting(ctx, 'Builder progress');
+    expect(() => updateTaskStatus(ctx, task.id, 'in_progress')).not.toThrow();
+  });
+
+  it('role-based reviewer + builder can set status to in_progress', () => {
+    const ctx = makeRoleBasedContext({ roles: ['reviewer', 'builder'] });
+    const task = createTaskInMeeting(ctx, 'Reviewer builder progress');
+    expect(() => updateTaskStatus(ctx, task.id, 'in_progress')).not.toThrow();
+  });
+
+  it('role-based reviewer + chair can set status to in_progress', () => {
+    const ctx = makeRoleBasedContext({ roles: ['reviewer', 'chair'] });
+    const task = createTaskInMeeting(ctx, 'Reviewer chair progress');
+    expect(() => updateTaskStatus(ctx, task.id, 'in_progress')).not.toThrow();
+  });
+
+  it('role-based reviewer + admin can set status to in_progress', () => {
+    const ctx = makeRoleBasedContext({ roles: ['reviewer', 'admin'] });
+    const task = createTaskInMeeting(ctx, 'Reviewer admin progress');
+    expect(() => updateTaskStatus(ctx, task.id, 'in_progress')).not.toThrow();
+  });
+
+  it('role-based reviewer + owner bypasses gate', () => {
+    const ctx = makeRoleBasedContext({ roles: ['reviewer', 'owner'] });
+    const task = createTaskInMeeting(ctx, 'Reviewer owner');
     expect(() => updateTaskStatus(ctx, task.id, 'in_progress')).not.toThrow();
   });
 });
