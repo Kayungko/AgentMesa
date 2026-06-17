@@ -14,9 +14,11 @@ import {
   validateEventLog,
   checkProjectionConsistency,
   findOrphanedLocks,
+  checkAgentRunConsistency,
   runAllDiagnostics,
 } from '../services/diagnostics.js';
 import type { DiagnosticFinding } from '../services/diagnostics.js';
+import { createAgentRun } from '../services/agent-run-service.js';
 
 let testDir: string;
 let paths: MesaWorkspacePaths;
@@ -285,6 +287,43 @@ describe('findOrphanedLocks', () => {
     expect(orphaned!.path).toBe(lockPath);
     expect(orphaned!.fixable).toBe(true);
     expect(orphaned!.recommendation).toContain('mesa doctor --fix');
+  });
+});
+
+describe('checkAgentRunConsistency', () => {
+  it('reports ok when runs are consistent', () => {
+    createAgentRun(ctx, { agentId: 'a1', input: 'Test' });
+    const findings = checkAgentRunConsistency(ctx);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.level).toBe('ok');
+    expect(findings[0]!.message).toContain('Agent runs consistent');
+    expect(findings[0]!.message).toContain('1 run(s)');
+  });
+
+  it('reports ok with empty runs', () => {
+    const findings = checkAgentRunConsistency(ctx);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.level).toBe('ok');
+  });
+
+  it('detects an orphan run file (file but no event) as warn', () => {
+    writeFileSync(join(ctx.paths.runsDir, 'run_orphan.json'), '{}', 'utf-8');
+    const findings = checkAgentRunConsistency(ctx);
+    const warns = findings.filter((f) => f.level === 'warn' && f.category === 'runs');
+    expect(warns).toHaveLength(1);
+    expect(warns[0]!.message).toContain('no agent_run_created event');
+    expect(warns[0]!.resourceId).toBe('run_orphan');
+  });
+
+  it('detects a missing run file (event but no file) as error', () => {
+    const run = createAgentRun(ctx, { agentId: 'a1', input: 'Test' });
+    rmSync(join(ctx.paths.runsDir, `${run.id}.json`), { force: true });
+
+    const findings = checkAgentRunConsistency(ctx);
+    const errors = findings.filter((f) => f.level === 'error' && f.category === 'runs');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.message).toContain('no stored file');
+    expect(errors[0]!.resourceId).toBe(run.id);
   });
 });
 

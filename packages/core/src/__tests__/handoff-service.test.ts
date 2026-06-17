@@ -242,3 +242,50 @@ describe('corrupted envelope resilience', () => {
     expect(inbound).toEqual([]);
   });
 });
+
+describe('payload validation', () => {
+  it('rejects a review_request with an empty required field', () => {
+    expect(() =>
+      writeReviewRequest(ctx, {
+        taskId: 'task_a',
+        runId: 'run_a',
+        artifactId: 'artifact_a',
+        requestedReviewer: 'r1',
+        summary: '',
+      }),
+    ).toThrow();
+
+    // Nothing should have been written to the outbox
+    expect(listOutboundHandoffs(ctx)).toEqual([]);
+  });
+
+  it('rejects a review_result with an invalid verdict', () => {
+    expect(() =>
+      writeReviewResult(ctx, {
+        taskId: 'task_a',
+        runId: 'run_a',
+        artifactId: 'artifact_a',
+        reviewer: 'r1',
+        summary: 'OK',
+        verdict: 'maybe' as unknown as 'approved',
+      }),
+    ).toThrow();
+
+    expect(listInboundHandoffs(ctx)).toEqual([]);
+  });
+
+  it('rejects a review_result with a missing required field', () => {
+    expect(() =>
+      writeReviewResult(ctx, {
+        taskId: 'task_a',
+        runId: '',
+        artifactId: 'artifact_a',
+        reviewer: 'r1',
+        summary: 'OK',
+        verdict: 'approved',
+      }),
+    ).toThrow();
+
+    expect(listInboundHandoffs(ctx)).toEqual([]);
+  });
+});
