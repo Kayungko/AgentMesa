@@ -143,8 +143,16 @@ export function listAgentRuns(
 ): MesaAgentRun[] {
   let runs = listJsonFromStorage<MesaAgentRun>(ctx, ctx.paths.runsDir)
     .map((r) => MesaAgentRunSchema.safeParse(r))
-    .filter((r) => r.success)
-    .map((r) => (r as { success: true; data: MesaAgentRun }).data);
+    .map((r, index) => {
+      if (!r.success) {
+        ctx.logger.warn(
+          `Skipping schema-invalid agent run file (#${index} in ${ctx.paths.runsDir}): ${r.error.issues.map((i) => i.message).join('; ')}`,
+        );
+        return null;
+      }
+      return r.data;
+    })
+    .filter((r): r is MesaAgentRun => r !== null);
 
   if (filter?.taskId) {
     runs = runs.filter((r) => r.taskId === filter.taskId);

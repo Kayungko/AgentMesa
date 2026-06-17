@@ -17,6 +17,8 @@ export type {
   MesaTransport,
   MesaTransportCapabilities,
   MesaAgentRun,
+  ReviewRequestPayload,
+  ReviewResultPayload,
   MesaCheckResult,
   MesaRepository,
   // enum-style unions

@@ -1,5 +1,14 @@
-import { generateEnvelopeId, currentProtocolVersion } from '@agentmesa/protocol';
-import type { TransportEnvelope } from '@agentmesa/protocol';
+import {
+  generateEnvelopeId,
+  currentProtocolVersion,
+  ReviewRequestPayloadSchema,
+  ReviewResultPayloadSchema,
+} from '@agentmesa/protocol';
+import type {
+  TransportEnvelope,
+  ReviewRequestPayload,
+  ReviewResultPayload,
+} from '@agentmesa/protocol';
 import { MesaError } from '../errors.js';
 import type { MesaRuntimeContext, MesaTransport } from '../runtime/types.js';
 import { assertPolicy } from './runtime-service-utils.js';
@@ -12,29 +21,14 @@ function findFileTransport(ctx: MesaRuntimeContext): MesaTransport {
   return transport;
 }
 
-export interface ReviewRequestPayload {
-  taskId: string;
-  runId: string;
-  artifactId: string;
-  requestedReviewer: string;
-  summary: string;
-}
-
-export interface ReviewResultPayload {
-  taskId: string;
-  runId: string;
-  artifactId: string;
-  reviewer: string;
-  summary: string;
-  verdict: 'approved' | 'changes_requested' | 'rejected';
-  detail?: string;
-}
+export type { ReviewRequestPayload, ReviewResultPayload };
 
 export function writeReviewRequest(
   ctx: MesaRuntimeContext,
   payload: ReviewRequestPayload,
 ): TransportEnvelope {
   assertPolicy(ctx, 'handoff.write', `run:${payload.runId}`);
+  const validated = ReviewRequestPayloadSchema.parse(payload);
   const transport = findFileTransport(ctx);
   if (typeof transport.writeOutbound !== 'function') {
     throw new MesaError('TRANSPORT_NOT_FOUND', 'File transport does not support writeOutbound');
@@ -46,18 +40,12 @@ export function writeReviewRequest(
     transport: transport.name,
     direction: 'outbound',
     actor: ctx.actor.id,
-    taskId: payload.taskId,
+    taskId: validated.taskId,
     type: 'review_request',
     createdAt: new Date().toISOString(),
-    payload: {
-      taskId: payload.taskId,
-      runId: payload.runId,
-      artifactId: payload.artifactId,
-      requestedReviewer: payload.requestedReviewer,
-      summary: payload.summary,
-    },
+    payload: { ...validated },
     status: 'pending',
-    correlationId: payload.runId,
+    correlationId: validated.runId,
   };
 
   transport.writeOutbound(envelope);
@@ -69,6 +57,7 @@ export function writeReviewResult(
   payload: ReviewResultPayload,
 ): TransportEnvelope {
   assertPolicy(ctx, 'handoff.write', `run:${payload.runId}`);
+  const validated = ReviewResultPayloadSchema.parse(payload);
   const transport = findFileTransport(ctx);
   if (typeof transport.writeInbound !== 'function') {
     throw new MesaError('TRANSPORT_NOT_FOUND', 'File transport does not support writeInbound');
@@ -80,20 +69,12 @@ export function writeReviewResult(
     transport: transport.name,
     direction: 'inbound',
     actor: ctx.actor.id,
-    taskId: payload.taskId,
+    taskId: validated.taskId,
     type: 'review_result',
     createdAt: new Date().toISOString(),
-    payload: {
-      taskId: payload.taskId,
-      runId: payload.runId,
-      artifactId: payload.artifactId,
-      reviewer: payload.reviewer,
-      summary: payload.summary,
-      verdict: payload.verdict,
-      detail: payload.detail,
-    },
+    payload: { ...validated },
     status: 'pending',
-    correlationId: payload.runId,
+    correlationId: validated.runId,
   };
 
   transport.writeInbound(envelope);

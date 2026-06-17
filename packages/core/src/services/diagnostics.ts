@@ -438,11 +438,70 @@ export function checkTransportEnvelopes(ctx: MesaRuntimeContext): DiagnosticFind
   return findings;
 }
 
+export function checkAgentRunConsistency(ctx: MesaRuntimeContext): DiagnosticFinding[] {
+  const findings: DiagnosticFinding[] = [];
+  const runsDir = ctx.paths.runsDir;
+
+  const createdEvents = listEvents(ctx, { type: 'agent_run_created' });
+  const eventRunIds = new Set(createdEvents.map((e) => e.streamId));
+
+  const fileRunIds = new Set<string>();
+  if (existsSync(runsDir)) {
+    for (const file of readdirSync(runsDir).filter((f) => f.endsWith('.json'))) {
+      fileRunIds.add(file.slice(0, -'.json'.length));
+    }
+  }
+
+  let orphanFiles = 0;
+  let missingFiles = 0;
+
+  for (const runId of fileRunIds) {
+    if (!eventRunIds.has(runId)) {
+      orphanFiles++;
+      findings.push({
+        level: 'warn',
+        category: 'runs',
+        message: `Run "${runId}" has a stored file but no agent_run_created event.`,
+        resourceId: runId,
+        path: join(runsDir, `${runId}.json`),
+        fixable: false,
+        recommendation: 'Investigate the orphaned run file or remove it if invalid.',
+      });
+    }
+  }
+
+  for (const runId of eventRunIds) {
+    if (!fileRunIds.has(runId)) {
+      missingFiles++;
+      findings.push({
+        level: 'error',
+        category: 'runs',
+        message: `Run "${runId}" has an agent_run_created event but no stored file.`,
+        resourceId: runId,
+        path: join(runsDir, `${runId}.json`),
+        fixable: false,
+        recommendation: 'The run file is missing — restore from backup or recreate the run.',
+      });
+    }
+  }
+
+  if (orphanFiles === 0 && missingFiles === 0) {
+    findings.push({
+      level: 'ok',
+      category: 'runs',
+      message: `Agent runs consistent: ${fileRunIds.size} run(s).`,
+    });
+  }
+
+  return findings;
+}
+
 export function runAllDiagnostics(ctx: MesaRuntimeContext): DiagnosticFinding[] {
   return [
     ...validateEventLog(ctx.paths.eventsDir),
     ...checkProjectionConsistency(ctx),
     ...checkTransportEnvelopes(ctx),
+    ...checkAgentRunConsistency(ctx),
     ...findOrphanedLocks(ctx.paths),
   ];
 }

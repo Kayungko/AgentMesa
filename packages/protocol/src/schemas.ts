@@ -395,6 +395,26 @@ export const MesaAgentRunSchema = z.object({
   duration: z.number().nonnegative().optional(),
 });
 
+// --- Handoff Payloads ---
+
+export const ReviewRequestPayloadSchema = z.object({
+  taskId: z.string().min(1),
+  runId: z.string().min(1),
+  artifactId: z.string().min(1),
+  requestedReviewer: z.string().min(1),
+  summary: z.string().min(1),
+});
+
+export const ReviewResultPayloadSchema = z.object({
+  taskId: z.string().min(1),
+  runId: z.string().min(1),
+  artifactId: z.string().min(1),
+  reviewer: z.string().min(1),
+  summary: z.string().min(1),
+  verdict: z.enum(['approved', 'changes_requested', 'rejected']),
+  detail: z.string().optional(),
+});
+
 // --- Check Result ---
 
 export const MesaCheckResultSchema = z.object({
