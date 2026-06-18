@@ -25,7 +25,8 @@
   },
   "dependencies": {
     "@agentmesa/core": "workspace:*",
-    "@agentmesa/protocol": "workspace:*"
+    "@agentmesa/protocol": "workspace:*",
+    "@agentmesa/runner": "workspace:*"
   },
   "devDependencies": {
     "tsup": "^8.3.5",

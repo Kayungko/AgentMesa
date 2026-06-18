@@ -1,20 +1,34 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import type { MesaWorkspacePaths } from '@agentmesa/core';
+import {
+  getTask,
+  updateTaskStatus,
+  createAgentRun,
+  type MesaRuntimeContext,
+  type MesaWorkspacePaths,
+} from '@agentmesa/core';
+import { canTransitionTaskStatus, type RunAction } from '@agentmesa/protocol';
+import { executeRun } from '@agentmesa/runner';
 import type {
   WorkflowDefinition,
   WorkflowState,
+  WorkflowStep,
   StepExecution,
   WorkflowContext,
 } from './types.js';
+import { getWorkflowDefinition } from './registry.js';
+
+const DEFAULT_MAX_STEPS = 50;
 
 export class WorkflowEngine {
+  private readonly ctx: MesaRuntimeContext;
   private readonly paths: MesaWorkspacePaths;
   private readonly stateCache: Map<string, WorkflowState> = new Map();
 
-  constructor(paths: MesaWorkspacePaths) {
-    this.paths = paths;
+  constructor(ctx: MesaRuntimeContext) {
+    this.ctx = ctx;
+    this.paths = ctx.paths;
   }
 
   startWorkflow(definition: WorkflowDefinition, taskId: string): WorkflowState {
@@ -58,42 +72,194 @@ export class WorkflowEngine {
       return state;
     }
 
+    const def = getWorkflowDefinition(state.workflowDefinitionId);
+    const step = def.steps.find((s) => s.id === state.currentStep);
+
+    if (!step) {
+      return this.abort(state, `Unknown step: ${state.currentStep}`);
+    }
+
     const stepExecution: StepExecution = {
-      stepId: state.currentStep,
+      stepId: step.id,
       status: 'running',
       startedAt: new Date().toISOString(),
     };
-
     state.history.push(stepExecution);
 
     try {
-      // Mark step as completed
-      stepExecution.status = 'completed';
-      stepExecution.completedAt = new Date().toISOString();
+      switch (step.type) {
+        case 'update_status':
+          this.runUpdateStatus(state, step, stepExecution);
+          break;
+        case 'run_agent':
+          await this.runAgentStep(state, step, stepExecution);
+          break;
+        case 'check':
+          this.runCheck(state, step, stepExecution);
+          break;
+        case 'human_approval':
+          stepExecution.status = 'completed';
+          stepExecution.completedAt = new Date().toISOString();
+          state.status = 'waiting_approval';
+          this.saveState(state);
+          return state;
+        case 'wait':
+          this.completeStep(stepExecution, step.onSuccess, state);
+          break;
+        default:
+          return this.failStep(state, stepExecution, `Unknown step type: ${String(step.type)}`);
+      }
 
-      // For now, we simulate successful execution
-      // In a real implementation, this would invoke the appropriate runner
-      // based on the step type and configuration
-
-      // For check steps, we evaluate the condition
-      // For human_approval steps, we set status to waiting_approval
-      // For other steps, we advance to onSuccess
-
-      // Simple state machine: advance to next step
-      // This is a placeholder - real implementation would look up the step
-      // from the workflow definition and execute accordingly
-
-      this.saveState(state);
+      // For run_agent the next step is set inside the handler (success/failure
+      // branch). For other step types the handler set the next step already.
       return state;
     } catch (error) {
-      stepExecution.status = 'failed';
-      stepExecution.error = error instanceof Error ? error.message : String(error);
-      stepExecution.completedAt = new Date().toISOString();
-
-      state.status = 'failed';
-      this.saveState(state);
-      return state;
+      const message = error instanceof Error ? error.message : String(error);
+      return this.failStep(state, stepExecution, message);
     }
+  }
+
+  private runUpdateStatus(
+    state: WorkflowState,
+    step: WorkflowStep,
+    exec: StepExecution,
+  ): void {
+    const target = step.statusUpdate;
+    if (target) {
+      const task = getTask(this.ctx, state.taskId);
+      if (task.status === target) {
+        exec.result = { skipped: 'already-in-target-status', status: target };
+      } else if (canTransitionTaskStatus(task.status, target)) {
+        updateTaskStatus(this.ctx, state.taskId, target);
+        exec.result = { status: target };
+      } else {
+        // Tolerant: an invalid transition (e.g. loop re-entry) must not fail
+        // the workflow — record and continue.
+        exec.result = { skipped: 'invalid-transition', from: task.status, to: target };
+      }
+    }
+    this.completeStep(exec, step.onSuccess, state);
+  }
+
+  private async runAgentStep(
+    state: WorkflowState,
+    step: WorkflowStep,
+    exec: StepExecution,
+  ): Promise<void> {
+    const action = (step.runnerType ?? 'implement') as RunAction;
+    const run = createAgentRun(this.ctx, {
+      agentId: step.agentId ?? 'agent',
+      input: step.description,
+      taskId: state.taskId,
+      action,
+    });
+
+    let succeeded: boolean;
+    try {
+      const { run: final } = await executeRun(this.ctx, run.id, {});
+      succeeded = final.status === 'completed';
+      exec.result = { runId: final.id, status: final.status };
+      if (!succeeded) {
+        exec.error = final.error;
+      }
+    } catch (error) {
+      succeeded = false;
+      exec.result = { runId: run.id, status: 'failed' };
+      exec.error = error instanceof Error ? error.message : String(error);
+    }
+
+    if (succeeded) {
+      this.completeStep(exec, step.onSuccess, state);
+      return;
+    }
+
+    const onFailure = step.onFailure ?? 'abort';
+    if (onFailure === 'abort') {
+      exec.status = 'failed';
+      exec.completedAt = new Date().toISOString();
+      this.abort(state, exec.error ?? `Step ${step.id} failed`);
+      return;
+    }
+    // Routed failure: the step itself completed its dispatch; advance to the
+    // failure branch.
+    this.completeStep(exec, onFailure, state);
+  }
+
+  private runCheck(state: WorkflowState, step: WorkflowStep, exec: StepExecution): void {
+    const passed = step.condition ? step.condition(state.context) : true;
+    if (passed) {
+      exec.result = { check: 'passed' };
+      this.completeStep(exec, step.onSuccess, state);
+    } else {
+      state.context.reviewCycles = (state.context.reviewCycles ?? 0) + 1;
+      exec.result = { check: 'failed', reviewCycles: state.context.reviewCycles };
+      this.completeStep(exec, step.onFailure ?? step.onSuccess, state);
+    }
+  }
+
+  private completeStep(exec: StepExecution, nextStepId: string, state: WorkflowState): void {
+    exec.status = 'completed';
+    exec.completedAt = new Date().toISOString();
+    this.advanceToStep(state, nextStepId);
+  }
+
+  private failStep(
+    state: WorkflowState,
+    exec: StepExecution,
+    message: string,
+  ): WorkflowState {
+    exec.status = 'failed';
+    exec.error = message;
+    exec.completedAt = new Date().toISOString();
+    state.status = 'failed';
+    state.completedAt = new Date().toISOString();
+    this.saveState(state);
+    return state;
+  }
+
+  async advanceWorkflow(
+    state: WorkflowState,
+    opts?: { maxSteps?: number },
+  ): Promise<WorkflowState> {
+    const maxSteps = opts?.maxSteps ?? DEFAULT_MAX_STEPS;
+    let steps = 0;
+
+    while (state.status === 'running' && state.currentStep !== '__end__') {
+      if (steps >= maxSteps) {
+        return this.abort(state, `Exceeded max steps (${maxSteps})`);
+      }
+      await this.executeStep(state);
+      steps += 1;
+    }
+
+    if (state.status === 'running' && state.currentStep === '__end__') {
+      state.status = 'completed';
+      state.completedAt = new Date().toISOString();
+      this.saveState(state);
+    }
+
+    return state;
+  }
+
+  approve(state: WorkflowState): WorkflowState {
+    if (state.status !== 'waiting_approval') {
+      throw new Error(`Cannot approve: workflow is ${state.status}`);
+    }
+
+    const def = getWorkflowDefinition(state.workflowDefinitionId);
+    const step = def.steps.find((s) => s.id === state.currentStep);
+    if (!step || step.type !== 'human_approval') {
+      throw new Error(`Cannot approve: current step is not a human_approval step`);
+    }
+
+    state.context.approved = true;
+    state.status = 'running';
+    this.advanceToStep(state, step.onSuccess);
+    return state;
+  }
+
+  reject(state: WorkflowState, reason: string): WorkflowState {
+    return this.abort(state, reason);
   }
 
   advanceToStep(state: WorkflowState, nextStepId: string): WorkflowState {

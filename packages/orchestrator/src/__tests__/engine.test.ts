@@ -2,18 +2,23 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { join } from 'node:path';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { createWorkspacePaths } from '@agentmesa/core';
+import { initWorkspace, createRuntimeContext, createTask, createWorkspacePaths } from '@agentmesa/core';
+import type { MesaRuntimeContext, MesaActor } from '@agentmesa/core';
 import { WorkflowEngine } from '../engine.js';
 import { defineReviewFixLoop } from '../workflows/review-fix-loop.js';
 
+const ORCHESTRATOR_ACTOR: MesaActor = { id: 'system:orchestrator', type: 'system', roles: ['owner'] };
+
 describe('WorkflowEngine', () => {
   let tempDir: string;
+  let ctx: MesaRuntimeContext;
   let engine: WorkflowEngine;
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), 'agentmesa-test-'));
-    const paths = createWorkspacePaths(tempDir);
-    engine = new WorkflowEngine(paths);
+    initWorkspace(tempDir);
+    ctx = createRuntimeContext({ rootDir: tempDir, actor: ORCHESTRATOR_ACTOR });
+    engine = new WorkflowEngine(ctx);
   });
 
   afterEach(() => {
@@ -47,13 +52,15 @@ describe('WorkflowEngine', () => {
   describe('executeStep', () => {
     it('should advance step and add to history', async () => {
       const definition = defineReviewFixLoop();
-      const state = engine.startWorkflow(definition, 'task-123');
+      const task = createTask(ctx, { title: 'Advance test' });
+      const state = engine.startWorkflow(definition, task.id);
 
       const result = await engine.executeStep(state);
 
       expect(result.history).toHaveLength(1);
       expect(result.history[0]!.stepId).toBe('step-1');
       expect(result.history[0]!.status).toBe('completed');
+      expect(result.currentStep).toBe('step-2');
     });
 
     it('should throw if workflow is not running', async () => {
@@ -149,8 +156,9 @@ describe('WorkflowEngine', () => {
       const state = engine.startWorkflow(definition, 'task-123');
 
       // Create a new engine to ensure it loads from file
-      const paths = createWorkspacePaths(tempDir);
-      const newEngine = new WorkflowEngine(paths);
+      const newEngine = new WorkflowEngine(
+        createRuntimeContext({ rootDir: tempDir, actor: ORCHESTRATOR_ACTOR }),
+      );
 
       const loaded = newEngine.loadState(state.workflowId);
 
@@ -181,8 +189,9 @@ describe('WorkflowEngine', () => {
       const state = engine.startWorkflow(definition, 'task-123');
 
       // Create new engine (no cache)
-      const paths = createWorkspacePaths(tempDir);
-      const newEngine = new WorkflowEngine(paths);
+      const newEngine = new WorkflowEngine(
+        createRuntimeContext({ rootDir: tempDir, actor: ORCHESTRATOR_ACTOR }),
+      );
 
       const retrieved = newEngine.getState(state.workflowId);
 

@@ -309,7 +309,7 @@ These are large modules, not single-priority tasks; items within a stage can
 partly parallelize.
 
 ### Stage A — Activate the loop (highest value, fewest dependencies)
-1. **Runner automation** — `in_progress`. `executeRun(ctx, runId, opts)` (in
+1. **Runner automation** — `done`. `executeRun(ctx, runId, opts)` (in
    `packages/runner`) drives a `pending` run `pending → running →
    completed | failed`, resolving a backend via `resolveRunnerType` (explicit
    `run.runnerType` wins, else `action` maps to a default `RunnerType`), invoking
@@ -320,10 +320,22 @@ partly parallelize.
    Orchestrator will call. `createAgentRun` now persists `runnerType`.
    **Deferred:** real Claude/Codex CLI subprocess spawn (plugin milestone); the
    Shell backend executes for real, Claude/Codex echo the prompt as output.
-2. **Orchestrator** — event-driven coordination: watch events, advance task
-   status, dispatch runs to agents, trigger handoffs. Depends on Runner (must be
-   able to execute a run). Turns the RUN-001 handoff loop into an automatic
-   closed loop.
+2. **Orchestrator** — `in_progress`. `WorkflowEngine.executeStep` is now real:
+   it consumes a `WorkflowDefinition` + `MesaRuntimeContext` and dispatches each
+   step by type — `update_status` (idempotent + tolerant of invalid task-status
+   transitions), `run_agent` (creates a run and drives it via `executeRun`),
+   `check` (evaluates the condition; increments `reviewCycles` on the fail
+   branch), and `human_approval` (parks the workflow at `waiting_approval`). An
+   `advanceWorkflow` driver auto-runs steps to a terminal/blocked state (bounded
+   by `maxSteps`), `approve`/`reject` resume from approval, and a definition
+   registry recovers closures after a reload. Surfaced as
+   `mesa workflow start|status|approve|run`. The review verdict is a
+   **deterministic loop + count guard** (`approved` flips only externally; 3
+   cycles route to human approval). **Deferred:** parsing real review verdicts
+   from runner output (plugin milestone). Note: because `update_status` is
+   tolerant, workflow steps that request an invalid task-status transition (e.g.
+   `ready_for_review → done` in `review-fix-loop`) are skipped without failing —
+   the workflow completes even though the task does not reach `done`.
 
 ### Stage B — Connect real AI clients
 3. **MCP server expansion** — access layer exposing core services over MCP so

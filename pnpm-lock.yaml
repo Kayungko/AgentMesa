@@ -26,6 +26,9 @@ importers:
       '@agentmesa/core':
         specifier: workspace:*
         version: link:../core
+      '@agentmesa/orchestrator':
+        specifier: workspace:*
+        version: link:../orchestrator
       '@agentmesa/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -174,6 +177,9 @@ importers:
       '@agentmesa/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@agentmesa/runner':
+        specifier: workspace:*
+        version: link:../runner
     devDependencies:
       tsup:
         specifier: ^8.3.5

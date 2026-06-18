@@ -13,6 +13,7 @@ import { runTransports } from './commands/transports.js';
 import { runRebuild } from './commands/rebuild.js';
 import { runPolicyCheck, runPolicyInspect } from './commands/policy.js';
 import { runRuns } from './commands/runs.js';
+import { runWorkflow } from './commands/workflow.js';
 
 const args = parseArgs(process.argv);
 
@@ -70,6 +71,10 @@ switch (args.command) {
     void runRuns(args);
     break;
 
+  case 'workflow':
+    void runWorkflow(args);
+    break;
+
   case 'policy':
     if (args.subcommand === 'check') {
       runPolicyCheck(args);
@@ -125,6 +130,11 @@ Inspection Commands:
   runs list                    List agent runs (--agent, --task, --status)
   runs show <id>               Show agent run details
   runs complete <id>           Mark agent run as completed
+  runs exec <id>               Execute a pending agent run (--dry-run)
+  workflow start <taskId>      Start a workflow for a task (--definition <id>)
+  workflow status <id>         Show workflow status and history
+  workflow approve <id>        Approve a workflow waiting on human approval
+  workflow run <id>            Advance a running workflow
   policy check <action> <res>  Check if action is allowed for an actor
                    --actor <id> --role <role>
   policy inspect              Show role capability matrix
