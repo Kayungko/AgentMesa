@@ -47,6 +47,7 @@ export function createAgentRun(
     taskId: validated.taskId,
     agentId: validated.agentId,
     action: validated.action ?? 'implement',
+    runnerType: validated.runnerType,
     status: 'pending',
     input: validated.input,
     producedArtifactIds: [],

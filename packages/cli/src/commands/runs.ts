@@ -5,11 +5,12 @@ import {
   getAgentRun,
   listAgentRuns,
 } from '@agentmesa/core';
+import { executeRun } from '@agentmesa/runner';
 import type { RunStatus, RunAction } from '@agentmesa/protocol';
 import type { ParsedArgs } from '../parse-args.js';
 import { printSuccess, printError, outputResult } from '../output.js';
 
-export function runRuns(args: ParsedArgs): void {
+export async function runRuns(args: ParsedArgs): Promise<void> {
   const rootDir = process.cwd();
   const ctx = createRuntimeContext({
     rootDir,
@@ -34,12 +35,14 @@ export function runRuns(args: ParsedArgs): void {
         const action = typeof args.flags['action'] === 'string'
           ? (args.flags['action'] as RunAction)
           : 'implement';
+        const runnerType = typeof args.flags['runner'] === 'string' ? args.flags['runner'] : undefined;
 
         const run = createAgentRun(ctx, {
           agentId,
           input,
           taskId,
           action,
+          ...(runnerType ? { runnerType } : {}),
         });
         outputResult(run, json, () => printSuccess(`Created run ${run.id} (${run.status})`));
         return;
@@ -116,14 +119,37 @@ export function runRuns(args: ParsedArgs): void {
         return;
       }
 
+      case 'exec': {
+        const runId = args.positional[0];
+        if (!runId) {
+          console.log('Usage: mesa runs exec <runId> [--dry-run]');
+          return;
+        }
+        const dryRun = !!args.flags['dry-run'];
+        const { run } = await executeRun(ctx, runId, { dryRun });
+        outputResult(run, json, () => {
+          if (run.status === 'completed') {
+            printSuccess(`Run ${run.id} completed (${run.duration}ms)`);
+            if (run.producedArtifactIds.length > 0) {
+              console.log(`  Artifacts: ${run.producedArtifactIds.join(', ')}`);
+            }
+          } else {
+            printError(`Run ${run.id} ${run.status}: ${run.error ?? 'unknown error'}`);
+          }
+        });
+        if (run.status === 'failed') process.exitCode = 1;
+        return;
+      }
+
       default:
         console.log('Usage: mesa runs <subcommand>');
         console.log('');
         console.log('Subcommands:');
-        console.log('  create <input>          Create a new agent run');
+        console.log('  create <input>          Create a new agent run (--agent, --task, --action, --runner)');
         console.log('  list                    List agent runs (--agent, --task, --status)');
         console.log('  show <id>               Show agent run details');
         console.log('  complete <id>           Mark agent run as completed');
+        console.log('  exec <id>               Execute a pending agent run (--dry-run)');
     }
   } catch (err) {
     printError(err);

@@ -67,7 +67,7 @@ switch (args.command) {
     break;
 
   case 'runs':
-    runRuns(args);
+    void runRuns(args);
     break;
 
   case 'policy':

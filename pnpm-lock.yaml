@@ -29,6 +29,9 @@ importers:
       '@agentmesa/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@agentmesa/runner':
+        specifier: workspace:*
+        version: link:../runner
     devDependencies:
       tsup:
         specifier: ^8.3.5

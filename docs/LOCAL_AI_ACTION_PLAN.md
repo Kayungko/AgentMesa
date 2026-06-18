@@ -309,9 +309,17 @@ These are large modules, not single-priority tasks; items within a stage can
 partly parallelize.
 
 ### Stage A — Activate the loop (highest value, fewest dependencies)
-1. **Runner automation** — agent execution engine that actually runs an
-   `agent_run`. Without it, runs are only status records. Builds directly on the
-   completed agent-run-service; unblocks everything that needs real execution.
+1. **Runner automation** — `in_progress`. `executeRun(ctx, runId, opts)` (in
+   `packages/runner`) drives a `pending` run `pending → running →
+   completed | failed`, resolving a backend via `resolveRunnerType` (explicit
+   `run.runnerType` wins, else `action` maps to a default `RunnerType`), invoking
+   it through the stable `createRunner` factory, persisting successful non-dry
+   output as an `agent_run_log` artifact, and reusing `updateAgentRunStatus`
+   (already gated by `manage_runs` — no new policy action). Surfaced as
+   `mesa runs exec <id> [--dry-run]` plus the programmatic `executeRun` API the
+   Orchestrator will call. `createAgentRun` now persists `runnerType`.
+   **Deferred:** real Claude/Codex CLI subprocess spawn (plugin milestone); the
+   Shell backend executes for real, Claude/Codex echo the prompt as output.
 2. **Orchestrator** — event-driven coordination: watch events, advance task
    status, dispatch runs to agents, trigger handoffs. Depends on Runner (must be
    able to execute a run). Turns the RUN-001 handoff loop into an automatic
