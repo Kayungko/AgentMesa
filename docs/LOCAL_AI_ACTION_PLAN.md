@@ -300,3 +300,40 @@ Mesa Desk implementation
 8. Implement Event-backed state.
 9. Update tests and CLI.
 10. Report changes for review.
+
+## Next Milestones (Post-Hardening Sequence)
+
+Architecture hardening (Priority 1–9) is complete. The "Do Not Start Yet" list
+is now unblocked. Recommended order below, grouped by dependency and value.
+These are large modules, not single-priority tasks; items within a stage can
+partly parallelize.
+
+### Stage A — Activate the loop (highest value, fewest dependencies)
+1. **Runner automation** — agent execution engine that actually runs an
+   `agent_run`. Without it, runs are only status records. Builds directly on the
+   completed agent-run-service; unblocks everything that needs real execution.
+2. **Orchestrator** — event-driven coordination: watch events, advance task
+   status, dispatch runs to agents, trigger handoffs. Depends on Runner (must be
+   able to execute a run). Turns the RUN-001 handoff loop into an automatic
+   closed loop.
+
+### Stage B — Connect real AI clients
+3. **MCP server expansion** — access layer exposing core services over MCP so
+   external AI clients can join. The `mcp-server` package already exists; this
+   widens its surface. Can start in parallel with Stage A.
+4. **Claude plugin** — Claude-specific run hooks / adapter (deferred in RUN-001).
+5. **Codex plugin** — Codex-specific run hooks / adapter.
+
+### Stage C — External integrations
+6. **GitHub integration** — connector for PRs/issues; handoffs can target
+   GitHub. Builds on the hardened transport layer.
+7. **CI integration** — wire `MesaCheckResult` to CI pipelines (check schema
+   already exists).
+
+### Stage D — Visualization
+8. **Mesa Desk** — UI dashboard for meetings/tasks/runs/handoffs. Usually last,
+   but a read-only view could land earlier as a debugging aid.
+
+Rationale: power the existing foundation first (Runner + Orchestrator make the
+handoff loop run on its own), then onboard real AI participants (MCP + plugins),
+then integrate outward (GitHub/CI), then build the UI.
