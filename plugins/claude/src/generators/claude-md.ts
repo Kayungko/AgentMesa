@@ -12,10 +12,10 @@ function buildBuilderRules(): string {
     '',
     'When implementing a task assigned to you via AgentMesa:',
     '',
-    '1. **Update status**: Call `mesa_task_update` with `status: "ready_for_review"` when done.',
-    '2. **Write summary**: Call `mesa_artifact_create` with `kind: "implementation_summary"` describing what you changed.',
+    '1. **Update status**: Call `mesa_update_status` with `status: "ready_for_review"` when done.',
+    '2. **Write summary**: Call `mesa_attach_artifact` with `kind: "implementation_summary"` describing what you changed.',
     '3. **Attach files**: List all changed files in the artifact metadata under `changedFiles`.',
-    '4. **Request review**: Call `mesa_message_create` with `type: "review_request"` to notify the reviewer.',
+    '4. **Request review**: Call `mesa_request_review` to notify the reviewer.',
     '5. **Do not merge**: Leave merging to the reviewer or maintainer agent.',
     '',
   ].join('\n');
@@ -27,10 +27,10 @@ function buildFixRules(): string {
     '',
     'When fixing issues from a review report:',
     '',
-    '1. **Read review**: Call `mesa_artifact_read` to get the review report.',
+    '1. **Read review**: Call `mesa_list_artifacts` and read the latest `review_report`.',
     '2. **Fix issues**: Implement the requested changes.',
-    '3. **Write fix summary**: Call `mesa_artifact_create` with `kind: "fix_summary"` describing what you fixed.',
-    '4. **Re-request review**: Call `mesa_message_create` with `type: "fix_done"` and request a new review.',
+    '3. **Write fix summary**: Call `mesa_attach_artifact` with `kind: "fix_summary"` describing what you fixed.',
+    '4. **Re-request review**: Call `mesa_post_message` with `type: "fix_done"` and request a new review.',
     '',
   ].join('\n');
 }
@@ -71,6 +71,22 @@ function buildAgentSection(agents: { id: string; name: string; roles: AgentRole[
   return lines.join('\n');
 }
 
+function buildMcpToolsSection(): string {
+  return [
+    '## AgentMesa MCP Tools',
+    '',
+    'The `agentmesa` MCP server exposes the full Mesa state. Common tools:',
+    '',
+    '- **Tasks**: `mesa_create_task`, `mesa_list_tasks`, `mesa_read_task`, `mesa_update_status`',
+    '- **Messages**: `mesa_post_message`, `mesa_request_review`, `mesa_submit_review`, `mesa_list_messages`',
+    '- **Artifacts**: `mesa_attach_artifact`, `mesa_list_artifacts`',
+    '- **Runs**: `mesa_create_run`, `mesa_exec_run`, `mesa_list_runs`, `mesa_read_run`, `mesa_update_run_status`',
+    '- **Workflows**: `mesa_list_workflows`, `mesa_read_workflow`, `mesa_run_workflow`',
+    '- **Handoffs**: `mesa_request_handoff`, `mesa_submit_handoff_result`, `mesa_list_handoffs`',
+    '',
+  ].join('\n');
+}
+
 function buildCliReference(): string {
   return [
     '## Mesa CLI Quick Reference',
@@ -80,10 +96,10 @@ function buildCliReference(): string {
     'mesa task list',
     '',
     '# View task details',
-    'mesa task get <task-id>',
+    'mesa task show <task-id>',
     '',
     '# Update task status',
-    'mesa task update <task-id> --status <status>',
+    'mesa task status <task-id> <status>',
     '',
     '# Create a meeting',
     'mesa meeting create --title "Review Task X" --task <task-id>',
@@ -94,8 +110,14 @@ function buildCliReference(): string {
     '# View messages for a task',
     'mesa message list --task <task-id>',
     '',
-    '# Read an artifact',
-    'mesa artifact get <artifact-id>',
+    '# Show an artifact',
+    'mesa artifact show <artifact-id>',
+    '',
+    '# Execute an agent run',
+    'mesa runs exec <run-id>',
+    '',
+    '# Drive a workflow to a terminal state',
+    'mesa workflow run <workflow-id> --task <task-id>',
     '```',
     '',
   ].join('\n');
@@ -113,6 +135,7 @@ export function generateClaudeMd(options: ClaudeMdOptions = {}): string {
 
   sections.push(buildBuilderRules());
   sections.push(buildFixRules());
+  sections.push(buildMcpToolsSection());
 
   if (tasks && tasks.length > 0) {
     sections.push(buildTaskStatusSection(tasks));

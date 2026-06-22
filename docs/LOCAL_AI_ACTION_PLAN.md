@@ -359,8 +359,25 @@ partly parallelize.
    default `agent:mcp` / `builder`), and a `mesa-mcp` stdio bin launcher was added.
    Remaining Stage B items (Claude/Codex plugins) now have a complete MCP backend to
    drive.
-4. **Claude plugin** — Claude-specific run hooks / adapter (deferred in RUN-001).
-5. **Codex plugin** — Codex-specific run hooks / adapter.
+4. **Claude plugin** — `done`. `@agentmesa/plugin-claude` now generates an integration
+   that actually drives the shipped MCP surface. The launcher (`generateMcpConfig`) emits
+   the `mesa-mcp` stdio bin with an env-configured actor (`AGENTMESA_MCP_ACTOR_ID` default
+   `agent:claude`, `AGENTMESA_MCP_ACTOR_ROLES` default `builder`; node-fallback via
+   `mcpServerPath` → `dist/bin.js`) — replacing the non-existent `node … serve --mcp`
+   command. All generated CLAUDE.md rules, skills, and the CLI quick-reference use real
+   tool names (`mesa_update_status`, `mesa_attach_artifact`, `mesa_request_review`,
+   `mesa_request_handoff`, …) and real CLI subcommands (`mesa task show`, `mesa task
+   status`, `mesa runs exec`, `mesa workflow run`) — the prior fictional names
+   (`mesa_task_update`, `mesa_artifact_create`, `mesa_meeting_add_agent`, …) are gone. Two
+   skills exercise the B.2 loop: `agentmesa-run` (`mesa_create_run` → `mesa_exec_run`) and
+   `agentmesa-review` (`mesa_list_tasks` → `mesa_submit_review`); `agentmesa-handoff` now
+   uses the handoff-loop tools. The Stop hook emits a benign reminder instead of an invalid
+   `task update --auto-status` command.
+5. **Codex plugin** — Codex-specific run hooks / adapter. Note: `plugins/codex` shares the
+   same stale MCP launcher (`generateCodexMcpConfig` still emits `serve --mcp`) and its
+   `codex-exec-flow.ts` references non-existent CLI strings (`mesa task read --mesa-dir
+   --format json`, `mesa artifact attach`); both need the same alignment applied to the
+   Claude plugin here. (`review-skill.ts` already uses correct tool names.)
 
 ### Stage C — External integrations
 6. **GitHub integration** — connector for PRs/issues; handoffs can target

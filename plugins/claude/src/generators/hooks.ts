@@ -14,16 +14,19 @@ export interface HookConfig {
 }
 
 export function generateHookConfig(options: HookConfigOptions = {}): HookConfig {
-  const { mesaDir } = options;
-  const dir = mesaDir ?? '.mesa';
+  void options;
 
   return {
     hooks: [
       {
-        event: 'PostStop',
+        event: 'Stop',
         matcher: '',
-        command: `mesa task update --auto-status ready_for_review --dir ${dir}`,
-        description: 'After implementation completes, auto-update the task status to ready_for_review.',
+        command:
+          'echo "AgentMesa: when the task is implemented, set ' +
+          '\\"mesa task status <id> ready_for_review\\" and request review with ' +
+          'mesa_request_review."',
+        description:
+          'After Claude stops, remind to mark the task ready_for_review and request review.',
       },
     ],
   };
