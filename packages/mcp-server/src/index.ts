@@ -1,4 +1,4 @@
-export { startServer } from './server.js';
+export { startServer, createMcpServer, resolveActor } from './server.js';
 export {
   handleCreateTask,
   handleListTasks,
@@ -14,4 +14,20 @@ export {
   handleListMeetings,
   handleRegisterAgent,
   handleListAgents,
+  handleCreateRun,
+  handleListRuns,
+  handleReadRun,
+  handleUpdateRunStatus,
+  handleExecRun,
+  handleListWorkflows,
+  handleReadWorkflow,
+  handleRunWorkflow,
+  handleRequestHandoff,
+  handleSubmitHandoffResult,
+  handleListHandoffs,
+  handleListEvents,
+  handleGetTaskEvents,
+  handleGetMeetingEvents,
+  handleGetTaskProjection,
+  handleGetMeetingProjection,
 } from './tools.js';

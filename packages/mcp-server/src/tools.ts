@@ -14,8 +14,34 @@ import {
   listMeetings,
   registerAgent,
   listAgents,
+  createAgentRun,
+  getAgentRun,
+  listAgentRuns,
+  updateAgentRunStatus,
+  writeReviewRequest,
+  writeReviewResult,
+  listOutboundHandoffs,
+  listInboundHandoffs,
+  listEvents,
+  getTaskEvents,
+  getMeetingEvents,
+  getTaskProjection,
+  getMeetingProjection,
 } from '@agentmesa/core';
-import type { TaskStatus, ArtifactKind, AgentRole } from '@agentmesa/protocol';
+import { executeRun } from '@agentmesa/runner';
+import {
+  WorkflowEngine,
+  getWorkflowDefinition,
+  listWorkflowDefinitionIds,
+} from '@agentmesa/orchestrator';
+import type {
+  TaskStatus,
+  ArtifactKind,
+  AgentRole,
+  RunAction,
+  RunStatus,
+  MesaEvent,
+} from '@agentmesa/protocol';
 
 // --- Input schemas for MCP tool registration ---
 
@@ -308,4 +334,300 @@ export function handleRegisterAgent(
 export function handleListAgents(ctx: MesaRuntimeContext): string {
   const agents = listAgents(ctx);
   return JSON.stringify(agents);
+}
+
+// --- Agent run schemas ---
+
+export const createRunInputSchema = {
+  agentId: z.string().min(1),
+  input: z.string().min(1),
+  taskId: z.string().optional(),
+  meetingId: z.string().optional(),
+  action: z.string().optional(),
+  runnerType: z.string().optional(),
+};
+
+export const listRunsInputSchema = {
+  taskId: z.string().optional(),
+  agentId: z.string().optional(),
+  status: z.string().optional(),
+};
+
+export const readRunInputSchema = {
+  runId: z.string().min(1),
+};
+
+export const updateRunStatusInputSchema = {
+  runId: z.string().min(1),
+  status: z.string().min(1),
+  output: z.string().optional(),
+  outputSummary: z.string().optional(),
+  error: z.string().optional(),
+};
+
+export const execRunInputSchema = {
+  runId: z.string().min(1),
+  dryRun: z.boolean().optional(),
+  createArtifacts: z.boolean().optional(),
+  timeout: z.number().optional(),
+};
+
+// --- Workflow schemas ---
+
+export const listWorkflowsInputSchema = {};
+
+export const readWorkflowInputSchema = {
+  workflowId: z.string().min(1),
+};
+
+export const runWorkflowInputSchema = {
+  workflowId: z.string().min(1),
+  taskId: z.string().min(1),
+  maxSteps: z.number().optional(),
+};
+
+// --- Handoff schemas ---
+
+export const requestHandoffInputSchema = {
+  taskId: z.string().min(1),
+  runId: z.string().min(1),
+  artifactId: z.string().min(1),
+  requestedReviewer: z.string().min(1),
+  summary: z.string().min(1),
+};
+
+export const submitHandoffResultInputSchema = {
+  taskId: z.string().min(1),
+  runId: z.string().min(1),
+  artifactId: z.string().min(1),
+  reviewer: z.string().min(1),
+  summary: z.string().min(1),
+  verdict: z.string().min(1),
+  detail: z.string().optional(),
+};
+
+export const listHandoffsInputSchema = {};
+
+// --- Event / projection schemas ---
+
+export const listEventsInputSchema = {
+  streamId: z.string().optional(),
+  meetingId: z.string().optional(),
+  type: z.string().optional(),
+};
+
+export const getTaskEventsInputSchema = {
+  taskId: z.string().min(1),
+};
+
+export const getMeetingEventsInputSchema = {
+  meetingId: z.string().min(1),
+};
+
+export const getTaskProjectionInputSchema = {
+  taskId: z.string().min(1),
+};
+
+export const getMeetingProjectionInputSchema = {
+  meetingId: z.string().min(1),
+};
+
+// --- Agent run handlers ---
+
+export function handleCreateRun(
+  ctx: MesaRuntimeContext,
+  args: {
+    agentId: string;
+    input: string;
+    taskId?: string;
+    meetingId?: string;
+    action?: string;
+    runnerType?: string;
+  }
+): string {
+  const run = createAgentRun(ctx, {
+    agentId: args.agentId,
+    input: args.input,
+    taskId: args.taskId,
+    meetingId: args.meetingId,
+    action: (args.action as RunAction | undefined) ?? 'implement',
+    runnerType: args.runnerType,
+  });
+  return JSON.stringify(run);
+}
+
+export function handleListRuns(
+  ctx: MesaRuntimeContext,
+  args: { taskId?: string; agentId?: string; status?: string }
+): string {
+  const runs = listAgentRuns(ctx, {
+    taskId: args.taskId,
+    agentId: args.agentId,
+    status: args.status as RunStatus | undefined,
+  });
+  return JSON.stringify(runs);
+}
+
+export function handleReadRun(ctx: MesaRuntimeContext, args: { runId: string }): string {
+  const run = getAgentRun(ctx, args.runId);
+  return JSON.stringify(run);
+}
+
+export function handleUpdateRunStatus(
+  ctx: MesaRuntimeContext,
+  args: {
+    runId: string;
+    status: string;
+    output?: string;
+    outputSummary?: string;
+    error?: string;
+  }
+): string {
+  const run = updateAgentRunStatus(ctx, args.runId, args.status as RunStatus, {
+    output: args.output,
+    outputSummary: args.outputSummary,
+    error: args.error,
+  });
+  return JSON.stringify(run);
+}
+
+export async function handleExecRun(
+  ctx: MesaRuntimeContext,
+  args: { runId: string; dryRun?: boolean; createArtifacts?: boolean; timeout?: number }
+): Promise<string> {
+  const result = await executeRun(ctx, args.runId, {
+    dryRun: args.dryRun,
+    createArtifacts: args.createArtifacts,
+    timeout: args.timeout,
+  });
+  return JSON.stringify(result);
+}
+
+// --- Workflow handlers ---
+
+export function handleListWorkflows(): string {
+  return JSON.stringify(listWorkflowDefinitionIds());
+}
+
+export function handleReadWorkflow(
+  _ctx: MesaRuntimeContext,
+  args: { workflowId: string }
+): string {
+  const def = getWorkflowDefinition(args.workflowId);
+  return JSON.stringify({
+    id: def.id,
+    name: def.name,
+    description: def.description,
+    startStep: def.startStep,
+    steps: def.steps.map((s) => ({ id: s.id, type: s.type, description: s.description })),
+  });
+}
+
+export async function handleRunWorkflow(
+  ctx: MesaRuntimeContext,
+  args: { workflowId: string; taskId: string; maxSteps?: number }
+): Promise<string> {
+  const def = getWorkflowDefinition(args.workflowId);
+  const engine = new WorkflowEngine(ctx);
+  const initial = engine.startWorkflow(def, args.taskId);
+  const final = await engine.advanceWorkflow(
+    initial,
+    args.maxSteps !== undefined ? { maxSteps: args.maxSteps } : undefined
+  );
+  return JSON.stringify(final);
+}
+
+// --- Handoff handlers ---
+
+export function handleRequestHandoff(
+  ctx: MesaRuntimeContext,
+  args: {
+    taskId: string;
+    runId: string;
+    artifactId: string;
+    requestedReviewer: string;
+    summary: string;
+  }
+): string {
+  const envelope = writeReviewRequest(ctx, {
+    taskId: args.taskId,
+    runId: args.runId,
+    artifactId: args.artifactId,
+    requestedReviewer: args.requestedReviewer,
+    summary: args.summary,
+  });
+  return JSON.stringify(envelope);
+}
+
+export function handleSubmitHandoffResult(
+  ctx: MesaRuntimeContext,
+  args: {
+    taskId: string;
+    runId: string;
+    artifactId: string;
+    reviewer: string;
+    summary: string;
+    verdict: string;
+    detail?: string;
+  }
+): string {
+  const envelope = writeReviewResult(ctx, {
+    taskId: args.taskId,
+    runId: args.runId,
+    artifactId: args.artifactId,
+    reviewer: args.reviewer,
+    summary: args.summary,
+    verdict: args.verdict as 'approved' | 'changes_requested' | 'rejected',
+    detail: args.detail,
+  });
+  return JSON.stringify(envelope);
+}
+
+export function handleListHandoffs(ctx: MesaRuntimeContext): string {
+  return JSON.stringify({
+    outbound: listOutboundHandoffs(ctx),
+    inbound: listInboundHandoffs(ctx),
+  });
+}
+
+// --- Event / projection handlers ---
+
+export function handleListEvents(
+  ctx: MesaRuntimeContext,
+  args: { streamId?: string; meetingId?: string; type?: string }
+): string {
+  const events = listEvents(ctx, {
+    streamId: args.streamId,
+    meetingId: args.meetingId,
+    type: args.type as MesaEvent['type'] | undefined,
+  });
+  return JSON.stringify(events);
+}
+
+export function handleGetTaskEvents(
+  ctx: MesaRuntimeContext,
+  args: { taskId: string }
+): string {
+  return JSON.stringify(getTaskEvents(ctx, args.taskId));
+}
+
+export function handleGetMeetingEvents(
+  ctx: MesaRuntimeContext,
+  args: { meetingId: string }
+): string {
+  return JSON.stringify(getMeetingEvents(ctx, args.meetingId));
+}
+
+export function handleGetTaskProjection(
+  ctx: MesaRuntimeContext,
+  args: { taskId: string }
+): string {
+  return JSON.stringify(getTaskProjection(ctx, args.taskId, { strict: false }));
+}
+
+export function handleGetMeetingProjection(
+  ctx: MesaRuntimeContext,
+  args: { meetingId: string }
+): string {
+  return JSON.stringify(getMeetingProjection(ctx, args.meetingId, { strict: false }));
 }

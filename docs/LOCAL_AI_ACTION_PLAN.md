@@ -346,9 +346,19 @@ partly parallelize.
    non-breaking by design (auto-detect / always-on modes were rejected for
    token-burn and test-flakiness). This gives the orchestrator a real AI backend to
    drive; output parsing of review verdicts is still deferred to the plugin work.
-3. **MCP server expansion** — access layer exposing core services over MCP so
-   external AI clients can join. The `mcp-server` package already exists; this
-   widens its surface. Can start in parallel with Stage A.
+3. **MCP server expansion** — `done`. `mcp-server` now exposes the full Stage-A
+   surface in addition to tasks/messages/artifacts/meetings/agents: agent runs
+   (`mesa_create_run` / `list` / `read` / `update_run_status`), run execution
+   (`mesa_exec_run`, which drives the real Claude/Codex CLI when the runner env vars
+   are set), workflows (`mesa_list_workflows` / `read_workflow` / `run_workflow`),
+   handoffs (`mesa_request_handoff` / `submit_handoff_result` / `list_handoffs`), and
+   the event/projection timeline (`mesa_list_events`, `mesa_get_task_events`,
+   `mesa_get_meeting_events`, `mesa_get_task_projection`, `mesa_get_meeting_projection`).
+   The hardcoded `roles:['custom']` + client-supplied actor id was replaced with an
+   operator-configured actor (`AGENTMESA_MCP_ACTOR_ID` / `AGENTMESA_MCP_ACTOR_ROLES`,
+   default `agent:mcp` / `builder`), and a `mesa-mcp` stdio bin launcher was added.
+   Remaining Stage B items (Claude/Codex plugins) now have a complete MCP backend to
+   drive.
 4. **Claude plugin** — Claude-specific run hooks / adapter (deferred in RUN-001).
 5. **Codex plugin** — Codex-specific run hooks / adapter.
 
