@@ -318,8 +318,7 @@ partly parallelize.
    (already gated by `manage_runs` — no new policy action). Surfaced as
    `mesa runs exec <id> [--dry-run]` plus the programmatic `executeRun` API the
    Orchestrator will call. `createAgentRun` now persists `runnerType`.
-   **Deferred:** real Claude/Codex CLI subprocess spawn (plugin milestone); the
-   Shell backend executes for real, Claude/Codex echo the prompt as output.
+   Real Claude/Codex CLI subprocess spawn now lands in Stage B (item 2.5 below).
 2. **Orchestrator** — `in_progress`. `WorkflowEngine.executeStep` is now real:
    it consumes a `WorkflowDefinition` + `MesaRuntimeContext` and dispatches each
    step by type — `update_status` (idempotent + tolerant of invalid task-status
@@ -338,6 +337,15 @@ partly parallelize.
    the workflow completes even though the task does not reach `done`.
 
 ### Stage B — Connect real AI clients
+2.5. **Real CLI invocation** — `done`. `ClaudeRunner`/`CodexRunner` now spawn the
+   local AI CLI when `AGENTMESA_CLAUDE_CMD` / `AGENTMESA_CODEX_CMD` are set, via a
+   shared shell-free `runCli` helper (`spawnSync`, prompt on stdin — no injection;
+   5-minute default timeout). A missing binary or non-zero exit marks the run
+   `failed`; when the env var is unset the runner falls back to the prompt-echo stub
+   so CI and existing tests stay green with no token spend. Env-gated and
+   non-breaking by design (auto-detect / always-on modes were rejected for
+   token-burn and test-flakiness). This gives the orchestrator a real AI backend to
+   drive; output parsing of review verdicts is still deferred to the plugin work.
 3. **MCP server expansion** — access layer exposing core services over MCP so
    external AI clients can join. The `mcp-server` package already exists; this
    widens its surface. Can start in parallel with Stage A.

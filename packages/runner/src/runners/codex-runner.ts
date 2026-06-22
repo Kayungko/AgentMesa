@@ -2,6 +2,7 @@ import type { MesaWorkspacePaths } from '@agentmesa/core';
 import { createRuntimeContext, getTask } from '@agentmesa/core';
 import type { RunOptions, RunResult } from '../types.js';
 import { AbstractRunner } from './base-runner.js';
+import { runCli } from './cli-runner.js';
 import { buildReviewPrompt, buildTestPrompt } from '../prompt-builder.js';
 
 export class CodexRunner extends AbstractRunner {
@@ -51,11 +52,26 @@ export class CodexRunner extends AbstractRunner {
       return this.recordResult(options, options.runnerType, logContent, artifacts, startTime, true);
     }
 
-    // TODO: Actual Codex CLI invocation would go here.
-    const output = prompt;
+    const cliCommand = process.env.AGENTMESA_CODEX_CMD?.trim();
+    let output: string;
+    let success = true;
+    if (cliCommand) {
+      const res = runCli({
+        command: cliCommand,
+        prompt,
+        cwd: this.paths.rootDir,
+        ...(options.timeout !== undefined ? { timeout: options.timeout } : {}),
+      });
+      output = res.output;
+      success = res.success;
+    } else {
+      // Stub: framework ready, no CLI configured — echo the prompt back.
+      output = prompt;
+    }
+
     const logContent = this.createRunLog(options, prompt, output);
     artifacts.push(logContent);
 
-    return this.recordResult(options, options.runnerType, logContent, artifacts, startTime, true);
+    return this.recordResult(options, options.runnerType, logContent, artifacts, startTime, success);
   }
 }

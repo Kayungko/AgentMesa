@@ -145,10 +145,26 @@ The `shell-check` backend has no `action` mapping — target it explicitly with
 `mesa runs create "<command>" --runner shell-check`, which executes an
 allowlisted shell command for real.
 
-> **Scope:** the Shell backend executes for real. The Claude/Codex backends
-> currently echo the constructed prompt as their output (the run lifecycle,
-> artifact persistence, and handoff loop are fully wired); spawning the actual
-> Claude/Codex CLI subprocess is deferred to the plugin milestone.
+### Real CLI invocation
+
+The Shell backend always executes for real. The Claude and Codex backends spawn the
+local AI CLI **when the corresponding env var is set**, and otherwise fall back to a
+stub that echoes the constructed prompt as output:
+
+| Backend       | Env var                | Example value  |
+| ------------- | ---------------------- | -------------- |
+| `ClaudeRunner`| `AGENTMESA_CLAUDE_CMD` | `claude -p`    |
+| `CodexRunner` | `AGENTMESA_CODEX_CMD`  | `codex exec`   |
+
+When set, the runner spawns the command via `runCli` (`spawnSync`, **no shell** —
+the env value is whitespace-split into program + fixed args, and the prompt is fed on
+**stdin** so a prompt containing shell metacharacters cannot inject). The default
+timeout is 5 minutes (overridable via `RunOptions.timeout`). The CLI's stdout becomes
+the run output; a **missing binary or non-zero exit** marks the run `failed` with a
+clear error message (no silent fall-back to the stub). When the env var is unset, the
+runner echoes the prompt — so CI and tests run with zero token spend and no CLI
+dependency. For invocations more complex than `program arg1 arg2`, point the env var
+at a wrapper script.
 
 ### Artifact persistence
 
@@ -236,7 +252,12 @@ Agent run objects are stored as JSON files at `.agentmesa/runs/<runId>.json`. Mu
 
 RUN-001: Agent Run lifecycle + FileTransport handoff minimal closed loop — **complete**.
 
-Stage A.1 (Runner automation): `executeRun` + `mesa runs exec` — **in progress**.
+Stage A.1 (Runner automation): `executeRun` + `mesa runs exec` — **done**.
 The executor, backend resolution, artifact persistence, and the Shell backend's
-real execution are done; spawning the real Claude/Codex CLI subprocess is
-deferred to the plugin milestone.
+real execution are wired.
+
+Stage B (real CLI invocation): `ClaudeRunner`/`CodexRunner` now spawn the local AI
+CLI when `AGENTMESA_CLAUDE_CMD` / `AGENTMESA_CODEX_CMD` are set (shell-free, prompt
+on stdin), falling back to the prompt-echo stub when unset — see *Real CLI
+invocation* above. Remaining Stage B items: MCP-server expansion and the
+Claude/Codex plugins.
