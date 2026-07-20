@@ -15,37 +15,43 @@ AgentMesa is local-first and permission-aware by default. The policy engine enfo
 
 | Layer | Status |
 |---|---|
-| Role-based policy engine | **Enforced in tests.** `RoleBasedPolicyEngine` maps 16 actions → 13 capabilities with per-role sets. Production roles: owner, admin, builder, reviewer, connector, ci, system. |
-| Default mode | `AllowAllMesaPolicyEngine` — no restrictions for local development. |
-| Production mode | Set `policy.mode: "role-based"` in `.agentmesa/config.json` to enable enforcement. |
+| Role-based policy engine | **Enforced in tests.** `RoleBasedPolicyEngine` maps 23 actions → 14 capabilities with per-role sets. Production roles: owner, admin, builder, reviewer, connector, ci, system, read_only. |
+| Default mode | **New workspaces default to `RoleBasedPolicyEngine`** — `mesa init` (or any first `createRuntimeContext` call against a directory with no `.agentmesa/config.json` yet) writes `policy.mode: "role-based"`. Pre-existing workspaces are not retroactively affected: a `config.json` already on disk without a `policy` field keeps resolving to `AllowAllMesaPolicyEngine`. |
+| Production mode | Already the default for new workspaces. Pre-existing workspaces opt in by setting `policy.mode: "role-based"` in `.agentmesa/config.json`. Set `policy.mode: "allow-all"` to opt back out. |
 | Context-aware policy | **Enforced.** `canWithContext()` evaluates reviewer status gates — pure reviewer may only transition to `approved` or `changes_requested`; multi-role actors (reviewer+builder/chair/admin/maintainer/owner) bypass via non-reviewer `change_status` capability. `updateTaskStatus` passes `targetStatus` via `assertPolicyWithContext()`. |
-| Capability gating | `canEditFiles`, `canRunShell`, etc. not yet checked by core services (deferred). |
+| Capability gating | `canEditFiles`, `canRunShell`, etc. not yet checked by core services (deferred — no concrete driving use case yet: today's agents are uniformly trusted CLI backends, not a heterogeneous multi-agent trust model). |
 
 ## Role-Based Access Matrix
 
-| Action | owner | admin | builder | reviewer | connector | ci | system |
-|---|---|---|---|---|---|---|---|
-| task.create / task.assign | Y | Y | Y | — | — | — | — |
-| task.updateStatus | Y | Y | Y | Y* | — | — | — |
-| task.archive | Y | Y | — | — | — | — | — |
-| task.delete | Y | Y | — | — | — | — | — |
-| meeting.create / updateStatus / addTask / addAgent | Y | Y | — | — | — | — | — |
-| message.append | Y | Y | Y | Y | Y | Y | — |
-| artifact.create | Y | Y | Y | Y | Y | Y | — |
-| agent.register | Y | Y | — | — | — | — | — |
-| event.read | Y | Y | Y | Y | Y | Y | Y |
-| projection.read | Y | Y | Y | Y | Y | Y | Y |
-| projection.rebuild | Y | Y | — | — | — | — | Y |
-| transport.inspect | Y | Y | — | — | — | — | — |
+| Action | owner | admin | builder | reviewer | connector | ci | system | read_only |
+|---|---|---|---|---|---|---|---|---|
+| task.create / task.assign | Y | Y | Y | — | — | — | — | — |
+| task.updateStatus | Y | Y | Y | Y* | — | — | — | — |
+| task.archive | Y | Y | — | — | — | — | — | — |
+| task.delete | Y | Y | — | — | — | — | — | — |
+| meeting.create / updateStatus / addTask / addAgent | Y | Y | Y | — | — | — | — | — |
+| message.append | Y | Y | Y | Y | Y | Y | — | — |
+| artifact.create | Y | Y | Y | Y | Y | Y | — | — |
+| agent.register | Y | Y | Y | — | — | — | — | — |
+| event.read | Y | Y | Y | Y | Y | Y | Y | Y |
+| projection.read | Y | Y | Y | Y | Y | Y | Y | Y |
+| projection.rebuild | Y | Y | — | — | — | — | Y | — |
+| transport.inspect | Y | Y | — | — | — | — | — | — |
+| run.create / run.updateStatus / run.read | Y | Y | Y | Y | — | Y | — | Y |
+| handoff.write / handoff.read | Y | Y | Y | Y | — | Y | — | Y |
+| check.create / check.read | Y | Y | Y | Y | — | Y | — | Y |
 
 `*` Pure reviewer may only transition status to `approved` or `changes_requested`. Multi-role actors with another `change_status`-capable role (builder, chair, admin, maintainer, owner) are not restricted.
+
+`run.*`/`handoff.*`/`check.*` all share one coarse-grained `manage_runs` capability (read and write are not split) — this is a known, documented limitation, not a bug. `read_only` (used by Mesa Desk) is granted `manage_runs` only so it can read handoffs; it never calls the write-side functions.
 
 ## Key Security Boundaries
 
 - **Connector** (e.g., GitHub webhook, Git hook) — can post messages and create artifacts, but cannot create/delete tasks or manage meetings. This prevents external triggers from corrupting project state.
 - **CI** (e.g., GitHub Actions) — can post messages and create `check_result` artifacts, but cannot modify tasks or meetings.
-- **Builder** — can create and modify tasks but cannot delete or archive them. Hard-delete is a privileged operation.
+- **Builder** — can create and modify tasks, register agents, and create meetings, but cannot delete or archive tasks. Hard-delete is a privileged operation. (This is also the MCP server's default actor role when `AGENTMESA_MCP_ACTOR_ROLES` is unset — `manage_agents`/`manage_meetings` were added specifically so `mesa_register_agent`/`mesa_create_meeting` work out of the box.)
 - **System** — can rebuild projections and read events but cannot write tasks, post messages, or create artifacts. Internal-only role.
+- **Read-only** (e.g., Mesa Desk's dashboard actor) — can read tasks, events, projections, runs, workflows, checks, and handoffs, but cannot write anything. Not a full security model — grouped under the same coarse-grained `manage_runs` capability as the write side, since Desk's code path never calls the write functions.
 
 ## Permission Levels
 
@@ -57,7 +63,8 @@ admin
   Same full authority as owner for management operations.
 
 builder
-  Can read/write tasks, change status, post messages, create artifacts.
+  Can read/write tasks, change status, post messages, create artifacts,
+  register agents, create meetings.
   Cannot delete or archive tasks.
 
 reviewer
@@ -76,6 +83,10 @@ ci
 system
   Can rebuild projections, read events/projections.
   Cannot write tasks, post messages, or create artifacts.
+
+read_only
+  Can read tasks, events, projections, runs, workflows, checks, handoffs.
+  Cannot write anything. Used by Mesa Desk's dashboard actor.
 ```
 
 ## Default Allowed Commands
@@ -137,7 +148,7 @@ In `.agentmesa/config.json`:
 }
 ```
 
-When `mode` is omitted or set to `"allow-all"`, all actions are permitted (local dev default). Set to `"role-based"` to enable enforcement.
+When `mode` is `"allow-all"`, all actions are permitted. When `mode` is `"role-based"`, enforcement is on. New workspaces get `"role-based"` written into their config automatically; a pre-existing `config.json` that predates this change and has no `policy` field at all keeps behaving as `"allow-all"` (its absence is treated the same as an explicit `"allow-all"`, purely for backward compatibility — it is not the default for anything created going forward).
 
 ## Limitations
 

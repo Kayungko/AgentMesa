@@ -62,9 +62,11 @@ actor 归因。
 
 ### Policy
 
-`MesaPolicyEngine.can(actor, action, resource)` 返回 `MesaPolicyDecision`。默认
-`AllowAllMesaPolicyEngine` 允许所有操作，但已迁移 service 的 mutation 均在写入前
-统一调用 policy。后续权限阶段可以替换实现而无需改变 service 签名。
+`MesaPolicyEngine.can(actor, action, resource)` 返回 `MesaPolicyDecision`。新建的
+工作区默认使用 `RoleBasedPolicyEngine`（`mesa init` 会把 `policy.mode: "role-based"`
+写进 config.json）；已存在且没有 `policy` 字段的旧工作区仍解析为
+`AllowAllMesaPolicyEngine`，不受影响。已迁移 service 的 mutation 均在写入前
+统一调用 policy，替换实现无需改变 service 签名。
 
 ### Logger
 

@@ -6,17 +6,17 @@ AgentMesa operates in a multi-agent environment where different agents with diff
 
 | Capability | Status |
 |---|---|
-| **Role-based policy engine** | **Done (expanded, not default).** `RoleBasedPolicyEngine` in core implements `MesaPolicyEngine` with action→capability mapping for all 16 actions. Roles: owner, admin, builder, reviewer, connector, ci, system, chair, planner, tester, documenter, maintainer, researcher, custom. `['owner']` bypasses all checks. Constructor accepts per-role capability overrides. The **default** engine remains `AllowAllMesaPolicyEngine` — `RoleBasedPolicyEngine` must be explicitly selected via config `policy.mode: "role-based"` or injected via `createRuntimeContext({ policy: ... })`. Test fixture `makeRoleBasedContext()` enables policy enforcement tests. |
-| **Action/capability completeness** | **Done.** All service actions (task.*, meeting.*, message.append, artifact.create, agent.register, event.read, projection.read, projection.rebuild, transport.inspect) are mapped. Unknown actions are denied by default. |
+| **Role-based policy engine** | **Done, and now the default for new workspaces.** `RoleBasedPolicyEngine` in core implements `MesaPolicyEngine` with action→capability mapping for all 23 actions. Roles: owner, admin, builder, reviewer, connector, ci, system, read_only, chair, planner, tester, documenter, maintainer, researcher, custom. `['owner']` bypasses all checks. Constructor accepts per-role capability overrides. `mesa init` (or any first `createRuntimeContext` call against a directory with no `.agentmesa/config.json` yet) now writes `policy.mode: "role-based"` into the new workspace's config; pre-existing workspaces without a `policy` field keep resolving to `AllowAllMesaPolicyEngine`, unaffected. Test fixture `makeRoleBasedContext()` enables policy enforcement tests. |
+| **Action/capability completeness** | **Done.** All service actions (task.*, meeting.*, message.append, artifact.create, agent.register, event.read, projection.read, projection.rebuild, transport.inspect, run.*, handoff.*, check.*) are mapped. Unknown actions are denied by default. |
 | **Permission checker** | **Done** (policy package). `PermissionChecker` validates `(role, action)` pairs against the role-capability matrix. |
 | **File access rules** | **Done** (policy package). `FileAccessChecker` matches glob patterns against allowed/denied roles. Secret path detection built in. |
 | **Command safety** | **Done** (policy package). `CommandPolicyChecker` classifies commands as safe/blocked/approval-required. |
 | **Secret protection** | **Done** (policy package). `SecretProtection` detects secret content patterns (API keys, tokens, PEM) and sanitizes output. |
 | **Audit log** | **Done** (policy package). `AuditLog` writes append-only audit entries to `.agentmesa/logs/audit.jsonl` with query support. |
-| **Core integration** | **Partial.** `assertPolicy` calls `ctx.policy.can()` in all state-changing services. Public projection read APIs (`getTaskProjection`, `listTaskProjections`, etc.) enforce `projection.read`; internal `_get*`/`_list*` helpers and freshness helpers (`isTaskProjectionFresh`, etc.) are excluded from `@agentmesa/core` public exports and only used by `read-model-service` and `doctor` internally. Default remains `AllowAllMesaPolicyEngine` for local dev; production mode should use `role-based`. Capability gating (canEditFiles, canRunShell, etc.) is not yet checked by core services. |
+| **Core integration** | **Done for role/capability checks.** `assertPolicy` calls `ctx.policy.can()` in all state-changing services. Public projection read APIs (`getTaskProjection`, `listTaskProjections`, etc.) enforce `projection.read`; internal `_get*`/`_list*` helpers and freshness helpers (`isTaskProjectionFresh`, etc.) are excluded from `@agentmesa/core` public exports and only used by `read-model-service` and `doctor` internally. New workspaces default to `RoleBasedPolicyEngine`; pre-existing workspaces keep `AllowAllMesaPolicyEngine` unless they opt in. Capability gating (canEditFiles, canRunShell, etc.) is not yet checked by core services — deferred, no concrete driving use case yet. |
 | **Context-aware checks** | **Implemented.** `canWithContext(actor, action, resource, context?)` is the primary evaluation method. `RoleBasedPolicyEngine` enforces reviewer status transition gating: pure reviewer may only transition task status to `approved` or `changes_requested`. Multi-role actors with any other `change_status`-capable role (builder, chair, admin, maintainer, owner) bypass the gate. `can()` delegates to `canWithContext()`. |
-| **CLI policy commands** | **Done.** `mesa policy check <action> <resource> --actor --role` (default `--mode role-based`) evaluates against the canonical `RoleBasedPolicyEngine`. Missing `action` with `--json` outputs structured error. `mesa policy inspect` (default `--mode role-based`) prints the full role-capability matrix covering all 14 VALID_ROLES (owner, admin, builder, reviewer, connector, ci, system, chair, planner, tester, documenter, maintainer, researcher, custom). `--mode current` uses the workspace's configured policy engine. `--role` validates against known AgentRole values; `--roles a,b` supports comma-separated multi-role. Both commands support `--json` output with `mode` field. |
-| **Enforcement tests** | **Done.** Policy tests cover: builder deny delete/archive, connector deny delete/create, ci deny delete/create, reviewer context-aware status gate (pure reviewer only approved/changes_requested; reviewer+builder/chair/admin/maintainer/owner bypass), system deny write tasks, owner/admin bypass, allow-all backward compat, canWithContext pass-through, unknown action deny, event.read/projection.read/rebuild/transport.inspect enforcement, individual rebuild and direct projection read enforcement, all 20 actions and 14 roles. |
+| **CLI policy commands** | **Done.** `mesa policy check <action> <resource> --actor --role` (default `--mode role-based`) evaluates against the canonical `RoleBasedPolicyEngine`. Missing `action` with `--json` outputs structured error. `mesa policy inspect` (default `--mode role-based`) prints the full role-capability matrix covering all 15 `VALID_ROLES` (owner, admin, builder, reviewer, connector, ci, system, read_only, chair, planner, tester, documenter, maintainer, researcher, custom) and all 23 known actions (including `run.*`/`handoff.*`/`check.*`). `--mode current` uses the workspace's configured policy engine. `--role` validates against known role values (`AgentRole | PermissionLevel`); `--roles a,b` supports comma-separated multi-role. Both commands support `--json` output with `mode` field. |
+| **Enforcement tests** | **Done.** Policy tests cover: builder deny delete/archive, connector deny delete/create, ci deny delete/create, reviewer context-aware status gate (pure reviewer only approved/changes_requested; reviewer+builder/chair/admin/maintainer/owner bypass), system deny write tasks, owner/admin bypass, allow-all backward compat, canWithContext pass-through, unknown action deny, event.read/projection.read/rebuild/transport.inspect enforcement, individual rebuild and direct projection read enforcement, read_only allow/deny, builder manage_agents/manage_meetings, all 23 actions and 15 roles. |
 
 The document below describes the full target design. Sections without an implementation row in the table above are design intent.
 
@@ -112,21 +112,22 @@ Roles are the coarse-grained permission layer. Every actor is assigned one or mo
 
 ### Production Roles (v0.7+)
 
-| Action | owner | admin | builder | reviewer | connector | ci | system |
-|---|---|---|---|---|---|---|---|
-| `read_task` (task.get) | Y | Y | Y | Y | Y | Y | Y |
-| `write_task` (task.create/assign) | Y | Y | Y | — | — | — | — |
-| `change_status` (task.updateStatus) | Y | Y | Y | Y* | — | — | — |
-| `post_message` (message.append) | Y | Y | Y | Y | Y | Y | — |
-| `create_artifact` (artifact.create) | Y | Y | Y | Y | Y | Y | — |
-| `archive_task` (task.archive) | Y | Y | — | — | — | — | — |
-| `delete_task` (task.delete) | Y | Y | — | — | — | — | — |
-| `manage_agents` (agent.register) | Y | Y | — | — | — | — | — |
-| `manage_meetings` (meeting.*) | Y | Y | — | — | — | — | — |
-| `read_events` (event.read) | Y | Y | Y | Y | Y | Y | Y |
-| `read_projections` (projection.read) | Y | Y | Y | Y | Y | Y | Y |
-| `rebuild_projections` (projection.rebuild) | Y | Y | — | — | — | — | Y |
-| `inspect_transports` (transport.inspect) | Y | Y | — | — | — | — | — |
+| Action | owner | admin | builder | reviewer | connector | ci | system | read_only |
+|---|---|---|---|---|---|---|---|---|
+| `read_task` (task.get) | Y | Y | Y | Y | Y | Y | Y | Y |
+| `write_task` (task.create/assign) | Y | Y | Y | — | — | — | — | — |
+| `change_status` (task.updateStatus) | Y | Y | Y | Y* | — | — | — | — |
+| `post_message` (message.append) | Y | Y | Y | Y | Y | Y | — | — |
+| `create_artifact` (artifact.create) | Y | Y | Y | Y | Y | Y | — | — |
+| `archive_task` (task.archive) | Y | Y | — | — | — | — | — | — |
+| `delete_task` (task.delete) | Y | Y | — | — | — | — | — | — |
+| `manage_agents` (agent.register) | Y | Y | Y | — | — | — | — | — |
+| `manage_meetings` (meeting.*) | Y | Y | Y | — | — | — | — | — |
+| `read_events` (event.read) | Y | Y | Y | Y | Y | Y | Y | Y |
+| `read_projections` (projection.read) | Y | Y | Y | Y | Y | Y | Y | Y |
+| `rebuild_projections` (projection.rebuild) | Y | Y | — | — | — | — | Y | — |
+| `inspect_transports` (transport.inspect) | Y | Y | — | — | — | — | — | — |
+| `manage_runs` (run.*, handoff.*, check.*) | Y | Y | Y | Y | — | Y | — | Y |
 | `manage_runs` (run.create, run.updateStatus, run.read) | Y | Y | Y | Y | — | Y | — |
 
 `*` Pure reviewer may only transition status to `approved` or `changes_requested`. Multi-role actors with another `change_status`-capable role (builder, chair, admin, maintainer, owner) are not restricted.
@@ -142,23 +143,24 @@ Roles are the coarse-grained permission layer. Every actor is assigned one or mo
 | `create_artifact` | Y | — | Y | Y | Y | Y | Y |
 | `archive_task` | Y | — | — | — | — | — | Y |
 | `delete_task` | Y | — | — | — | — | — | Y |
-| `manage_agents` | Y | — | — | — | — | — | Y |
-| `manage_meetings` | Y | Y | — | — | — | — | Y |
+| `manage_agents` | Y | — | Y | — | — | — | Y |
+| `manage_meetings` | Y | Y | Y | — | — | — | Y |
 | `read_events` | Y | Y | Y | Y | Y | Y | Y |
 | `read_projections` | Y | Y | Y | Y | Y | Y | Y |
 | `rebuild_projections` | Y | — | — | — | — | — | Y |
 | `inspect_transports` | Y | — | — | — | — | — | Y |
-| `manage_runs` | Y | Y | Y | — | Y | — | Y |
+| `manage_runs` | Y | Y | Y | Y | Y | — | Y |
 
 ### Role Definitions
 
 - **owner** — workspace owner. Full authority across all actions and resources. Bypasses all policy checks. Typically the human user.
 - **admin** — workspace administrator. Same full authority as owner for management operations.
-- **builder** — the primary implementation role. Can read, write, change status, post messages, create artifacts. Cannot delete/archive tasks or manage agents/meetings.
+- **builder** — the primary implementation role. Can read, write, change status, post messages, create artifacts, register agents, and create meetings. Cannot delete or archive tasks. This is also the MCP server's default actor role when `AGENTMESA_MCP_ACTOR_ROLES` is unset.
 - **reviewer** — inspects and evaluates work. Reads tasks, posts messages, creates review artifacts, and changes status only to `approved` or `changes_requested`. Cannot modify source code or manage infrastructure.
 - **connector** — external system connector (GitHub, Git, Shell). Posts messages, creates artifacts, reads events/projections. Cannot create/delete tasks or manage meetings.
-- **ci** — CI/CD automation actor. Posts messages, creates check_result artifacts, reads events/projections. Cannot modify tasks or meetings.
+- **ci** — CI/CD automation actor. Posts messages, creates check_result artifacts, reads events/projections, manages runs. Cannot modify tasks or meetings.
 - **system** — Core runtime internal actor. Rebuilds projections, reads events/projections. Cannot write tasks, post messages, or create artifacts.
+- **read_only** — external read-only viewers (e.g. Mesa Desk's dashboard actor). Reads tasks, events, projections, runs, workflows, checks, and handoffs. Cannot write anything.
 
 ### Legacy Role Definitions (backward compat)
 
