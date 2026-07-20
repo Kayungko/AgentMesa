@@ -23,6 +23,7 @@ export interface MesaWorkspacePaths {
   inboxDir: string;
   outboxDir: string;
   runsDir: string;
+  checksDir: string;
 }
 
 export function createWorkspacePaths(rootDir: string): MesaWorkspacePaths {
@@ -46,6 +47,7 @@ export function createWorkspacePaths(rootDir: string): MesaWorkspacePaths {
     inboxDir: join(mesaDir, 'inbox'),
     outboxDir: join(mesaDir, 'outbox'),
     runsDir: join(mesaDir, 'runs'),
+    checksDir: join(mesaDir, 'checks'),
   };
 }
 
@@ -77,6 +79,7 @@ export function initWorkspace(rootDir: string): MesaWorkspacePaths {
   ensureDir(paths.inboxDir);
   ensureDir(paths.outboxDir);
   ensureDir(paths.runsDir);
+  ensureDir(paths.checksDir);
 
   const config: MesaConfig = {
     protocolVersion: currentProtocolVersion,

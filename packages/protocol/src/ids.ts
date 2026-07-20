@@ -60,3 +60,8 @@ export function generateClientId(): string {
 export function generateEnvelopeId(): string {
   return `env_${shortId()}`;
 }
+
+/** Generate a MesaCheckResult ID. Format: `check_xxxxxxxx` */
+export function generateCheckResultId(): string {
+  return `check_${shortId()}`;
+}

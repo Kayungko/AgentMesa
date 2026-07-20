@@ -17,6 +17,7 @@ export * from './services/message-service.js';
 export * from './services/artifact-service.js';
 export * from './services/agent-registry.js';
 export * from './services/agent-run-service.js';
+export * from './services/check-result-service.js';
 export * from './services/handoff-service.js';
 export * from './services/lock-manager.js';
 export * from './services/event-service.js';

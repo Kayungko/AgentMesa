@@ -538,6 +538,21 @@ export const CreateAgentRunInputSchema = z.object({
   action: runActionSchema.default('implement'),
 });
 
+export const CreateCheckResultInputSchema = z.object({
+  taskId: z.string().min(1),
+  runId: z.string().optional(),
+  kind: checkKindSchema.optional(),
+  status: checkResultStatusSchema,
+  checkName: z.string().min(1),
+  exitCode: z.number().int().optional(),
+  stdout: z.string().optional(),
+  stderr: z.string().optional(),
+  duration: z.number().nonnegative().optional(),
+  success: z.boolean(),
+  summary: z.string().optional(),
+  detail: z.string().optional(),
+});
+
 // ---------------------------------------------------------------------------
 // Type inference (z.input for create operations, z.infer via types.ts)
 // ---------------------------------------------------------------------------
@@ -564,3 +579,4 @@ export type CreateMeetingInput = z.input<typeof CreateMeetingInputSchema>;
 export type CreateThreadInput = z.input<typeof CreateThreadInputSchema>;
 export type CreateDecisionInput = z.input<typeof CreateDecisionInputSchema>;
 export type CreateAgentRunInput = z.input<typeof CreateAgentRunInputSchema>;
+export type CreateCheckResultInput = z.input<typeof CreateCheckResultInputSchema>;

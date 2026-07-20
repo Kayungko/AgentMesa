@@ -4,6 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { createWorkspacePaths } from '@agentmesa/core';
 import { createCIResultArtifact } from '../artifacts.js';
+import { ciStatusToCheckResultInput } from '../ci.js';
 import type { CIStatus } from '../types.js';
 
 describe('CI connector', () => {
@@ -111,6 +112,63 @@ describe('CI connector', () => {
       const artifactId = await createCIResultArtifact(paths, taskId, agentId, results);
 
       expect(artifactId).toBeDefined();
+    });
+  });
+
+  describe('ciStatusToCheckResultInput', () => {
+    it('maps a successful run to a passed check', () => {
+      const status: CIStatus = {
+        name: 'Build',
+        status: 'completed',
+        conclusion: 'success',
+        url: 'https://github.com/test/repo/actions/runs/1',
+      };
+      const input = ciStatusToCheckResultInput(status, 'task-1');
+      expect(input).toEqual({
+        taskId: 'task-1',
+        kind: 'custom',
+        status: 'passed',
+        checkName: 'Build',
+        exitCode: 0,
+        success: true,
+        summary: 'Build: success',
+        detail: 'https://github.com/test/repo/actions/runs/1',
+      });
+    });
+
+    it('maps a failed run to a failed check', () => {
+      const status: CIStatus = {
+        name: 'Tests',
+        status: 'completed',
+        conclusion: 'failure',
+        url: 'https://github.com/test/repo/actions/runs/2',
+      };
+      const input = ciStatusToCheckResultInput(status, 'task-1');
+      expect(input?.status).toBe('failed');
+      expect(input?.success).toBe(false);
+      expect(input?.exitCode).toBe(1);
+    });
+
+    it('maps a cancelled run to a skipped check', () => {
+      const status: CIStatus = {
+        name: 'Deploy',
+        status: 'completed',
+        conclusion: 'cancelled',
+        url: 'https://github.com/test/repo/actions/runs/3',
+      };
+      const input = ciStatusToCheckResultInput(status, 'task-1');
+      expect(input?.status).toBe('skipped');
+      expect(input?.success).toBe(false);
+    });
+
+    it('returns null for a run still in progress', () => {
+      const status: CIStatus = {
+        name: 'Lint',
+        status: 'in_progress',
+        conclusion: null,
+        url: 'https://github.com/test/repo/actions/runs/4',
+      };
+      expect(ciStatusToCheckResultInput(status, 'task-1')).toBeNull();
     });
   });
 });

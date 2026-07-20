@@ -25,6 +25,7 @@ export {
 export {
   getCIStatus,
   importCIResults,
+  ciStatusToCheckResultInput,
 } from './ci.js';
 
 // Artifact helpers

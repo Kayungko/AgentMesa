@@ -1,6 +1,7 @@
 import { execSync } from 'child_process';
 import type { MesaWorkspacePaths } from '@agentmesa/core';
-import { createArtifact, createRuntimeContext } from '@agentmesa/core';
+import { createArtifact, createCheckResult, createRuntimeContext } from '@agentmesa/core';
+import type { CreateCheckResultInput } from '@agentmesa/protocol';
 import type { CIStatus } from './types.js';
 
 /**
@@ -37,14 +38,51 @@ export function getCIStatus(
 }
 
 /**
- * Import CI results and store as artifact
+ * Map a GitHub Actions run status into a MesaCheckResult creation input.
+ * Returns null for runs that are still in progress (no conclusion yet) —
+ * there is no finished result to record for those.
+ */
+export function ciStatusToCheckResultInput(
+  status: CIStatus,
+  taskId: string,
+): CreateCheckResultInput | null {
+  if (status.conclusion === null) {
+    return null;
+  }
+
+  const success = status.conclusion === 'success';
+  const resultStatus: CreateCheckResultInput['status'] =
+    status.conclusion === 'success'
+      ? 'passed'
+      : status.conclusion === 'failure'
+        ? 'failed'
+        : status.conclusion === 'cancelled' || status.conclusion === 'skipped'
+          ? 'skipped'
+          : 'error';
+
+  return {
+    taskId,
+    kind: 'custom',
+    status: resultStatus,
+    checkName: status.name,
+    exitCode: success ? 0 : 1,
+    success,
+    summary: `${status.name}: ${status.conclusion}`,
+    detail: status.url,
+  };
+}
+
+/**
+ * Import CI results: stores the raw status list as an artifact (for
+ * backward-compatible full-payload inspection) and records one MesaCheckResult
+ * per finished run so `mesa checks` / `mesa_list_checks` can query them.
  */
 export async function importCIResults(
   paths: MesaWorkspacePaths,
   taskId: string,
   agentId: string,
   cwd: string
-): Promise<{ artifactId: string }> {
+): Promise<{ artifactId: string; checkResultIds: string[] }> {
   const results = getCIStatus(cwd);
   const ctx = createRuntimeContext({
     rootDir: paths.rootDir,
@@ -64,5 +102,14 @@ export async function importCIResults(
     metadata: { count: String(results.length) },
   });
 
-  return { artifactId: artifact.id };
+  const checkResultIds: string[] = [];
+  for (const status of results) {
+    const input = ciStatusToCheckResultInput(status, taskId);
+    if (input) {
+      const check = createCheckResult(ctx, input);
+      checkResultIds.push(check.id);
+    }
+  }
+
+  return { artifactId: artifact.id, checkResultIds };
 }

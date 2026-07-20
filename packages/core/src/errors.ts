@@ -13,7 +13,8 @@ export type MesaErrorCode =
   | 'PROJECTION_MISSING'
   | 'PROJECTION_STALE'
   | 'TRANSPORT_NOT_FOUND'
-  | 'RUN_NOT_FOUND';
+  | 'RUN_NOT_FOUND'
+  | 'CHECK_RESULT_NOT_FOUND';
 
 export class MesaError extends Error {
   readonly code: MesaErrorCode;
@@ -92,6 +93,13 @@ export class RunNotFoundError extends MesaError {
   constructor(runId: string) {
     super('RUN_NOT_FOUND', `Agent run not found: ${runId}`);
     this.name = 'RunNotFoundError';
+  }
+}
+
+export class CheckResultNotFoundError extends MesaError {
+  constructor(checkId: string) {
+    super('CHECK_RESULT_NOT_FOUND', `Check result not found: ${checkId}`);
+    this.name = 'CheckResultNotFoundError';
   }
 }
 
