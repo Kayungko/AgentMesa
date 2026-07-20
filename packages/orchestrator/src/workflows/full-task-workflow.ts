@@ -76,8 +76,15 @@ export function defineFullTaskWorkflow(): WorkflowDefinition {
         runnerType: 'fix',
         agentId: 'builder',
         description: 'Builder fixes issues from review',
-        onSuccess: 'step-ready-for-review',
+        onSuccess: 'step-fix-status',
         onFailure: 'abort',
+      },
+      {
+        id: 'step-fix-status',
+        type: 'update_status',
+        description: 'Mark task as in_progress after fix',
+        statusUpdate: 'in_progress',
+        onSuccess: 'step-ready-for-review',
       },
       {
         id: 'step-ready-for-test',

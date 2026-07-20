@@ -349,15 +349,22 @@ partly parallelize.
    tool, so the task status never leaves `reviewing` and the loop keeps its old
    3-cycle-then-human-approval fallback behavior — this real-verdict path is
    additive, not a breaking change to the no-backend-configured case.
-   **Known, accepted limitation carried over unchanged:** because
-   `update_status` is tolerant, a second or third review cycle can still hit an
-   invalid task-status transition (e.g. `changes_requested -> ready_for_review`
-   is not allowed) and gets tolerantly skipped rather than failing the
-   workflow — the loop still falls back to the 3-cycle count guard in that
-   case. Fixing the status graph for multi-cycle loops end-to-end is a separate,
-   larger piece of work and is intentionally out of scope here; this milestone
-   only guarantees the *first* review cycle's real verdict is captured
-   correctly, which is the common case.
+   **Multi-cycle fix, `done`:** the limitation above (a second or third real
+   review cycle hitting an invalid `changes_requested -> ready_for_review`
+   transition — which, with a real backend configured, actually threw inside
+   `handleSubmitReview`'s `mesa_submit_review` call on the *next* cycle, not
+   just a silent skip) is fixed. Both `review-fix-loop` and
+   `full-task-workflow`'s loop-back edges now re-enter through an
+   `update_status -> in_progress` step before retrying `ready_for_review` /
+   `reviewing`, matching the only transitions the protocol status graph
+   (`packages/protocol/src/status.ts`) actually allows out of
+   `changes_requested` / `approved`. `review-fix-loop`'s `step-6` (check
+   fail) now loops to `step-1` instead of `step-2` — no new step needed,
+   `step-1` already does the in_progress reset. `full-task-workflow` gained
+   a new `step-fix-status` step between `step-fix` and
+   `step-ready-for-review`. The 3-cycle count guard and stub/CI fallback
+   behavior are unchanged; this only fixes what happens when a real verdict
+   actually lands on cycles 2 and 3.
 
 ### Stage B — Connect real AI clients
 2.5. **Real CLI invocation** — `done`. `ClaudeRunner`/`CodexRunner` now spawn the

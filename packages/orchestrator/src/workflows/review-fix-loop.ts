@@ -11,7 +11,10 @@ import type { WorkflowDefinition } from '../types.js';
  * 5. run_agent (reviewer reviews; submits a verdict via mesa_submit_review,
  *    which lands directly on the task status)
  * 6. check (reads the task's real status; approved -> step 7, otherwise
- *    -> back to step 2, capped at 3 cycles)
+ *    -> back to step 1, capped at 3 cycles. Loops re-enter through step 1
+ *    (not step 2) because the protocol status graph only allows
+ *    changes_requested -> in_progress, not changes_requested ->
+ *    ready_for_review directly.)
  * 7. human_approval (user approves final delivery)
  * 8. update_status -> done
  *
@@ -72,7 +75,10 @@ export function defineReviewFixLoop(): WorkflowDefinition {
           return context.approved === true || cycles >= 3;
         },
         onSuccess: 'step-7',
-        onFailure: 'step-2',
+        // Loop back through step-1 (re-marks in_progress), not step-2
+        // directly: changes_requested can't transition straight to
+        // ready_for_review, only to in_progress.
+        onFailure: 'step-1',
       },
       {
         id: 'step-7',
