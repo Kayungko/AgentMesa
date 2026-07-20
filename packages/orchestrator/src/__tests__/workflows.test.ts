@@ -12,7 +12,7 @@ describe('defineReviewFixLoop', () => {
   });
 
   it('should have correct number of steps', () => {
-    expect(workflow.steps).toHaveLength(7);
+    expect(workflow.steps).toHaveLength(8);
   });
 
   it('should have valid start step', () => {
@@ -62,8 +62,8 @@ describe('defineReviewFixLoop', () => {
     expect(checkStep?.condition!(continueContext)).toBe(false);
   });
 
-  it('should have step-7 as the final step pointing to __end__', () => {
-    const finalStep = workflow.steps.find((s) => s.id === 'step-7');
+  it('should have step-8 as the final step pointing to __end__', () => {
+    const finalStep = workflow.steps.find((s) => s.id === 'step-8');
     expect(finalStep).toBeDefined();
     expect(finalStep?.onSuccess).toBe('__end__');
     expect(finalStep?.type).toBe('update_status');

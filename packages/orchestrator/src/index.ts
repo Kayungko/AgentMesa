@@ -10,7 +10,7 @@ export type {
 
 export { defineReviewFixLoop } from './workflows/review-fix-loop.js';
 export { defineFullTaskWorkflow } from './workflows/full-task-workflow.js';
-export { WorkflowEngine } from './engine.js';
+export { WorkflowEngine, listWorkflowStates } from './engine.js';
 export {
   registerWorkflow,
   getWorkflowDefinition,

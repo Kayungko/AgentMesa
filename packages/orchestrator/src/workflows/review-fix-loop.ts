@@ -7,10 +7,13 @@ import type { WorkflowDefinition } from '../types.js';
  * 1. update_status -> in_progress
  * 2. run_agent (builder implements)
  * 3. update_status -> ready_for_review
- * 4. run_agent (reviewer reviews)
- * 5. check (if approved -> step 6, if changes_requested -> back to step 2)
- * 6. human_approval (user approves final delivery)
- * 7. update_status -> done
+ * 4. update_status -> reviewing
+ * 5. run_agent (reviewer reviews; submits a verdict via mesa_submit_review,
+ *    which lands directly on the task status)
+ * 6. check (reads the task's real status; approved -> step 7, otherwise
+ *    -> back to step 2, capped at 3 cycles)
+ * 7. human_approval (user approves final delivery)
+ * 8. update_status -> done
  *
  * Max 3 review cycles before requiring human decision.
  */
@@ -46,33 +49,40 @@ export function defineReviewFixLoop(): WorkflowDefinition {
       },
       {
         id: 'step-4',
+        type: 'update_status',
+        description: 'Mark task as reviewing',
+        statusUpdate: 'reviewing',
+        onSuccess: 'step-5',
+      },
+      {
+        id: 'step-5',
         type: 'run_agent',
         runnerType: 'review',
         agentId: 'reviewer',
         description: 'Reviewer reviews the implementation',
-        onSuccess: 'step-5',
-        onFailure: 'step-6',
+        onSuccess: 'step-6',
+        onFailure: 'step-7',
       },
       {
-        id: 'step-5',
+        id: 'step-6',
         type: 'check',
         description: 'Check review result (max 3 cycles)',
         condition: (context) => {
           const cycles = context.reviewCycles ?? 0;
           return context.approved === true || cycles >= 3;
         },
-        onSuccess: 'step-6',
+        onSuccess: 'step-7',
         onFailure: 'step-2',
       },
       {
-        id: 'step-6',
+        id: 'step-7',
         type: 'human_approval',
         description: 'User approves final delivery',
-        onSuccess: 'step-7',
+        onSuccess: 'step-8',
         onFailure: 'abort',
       },
       {
-        id: 'step-7',
+        id: 'step-8',
         type: 'update_status',
         description: 'Mark task as done',
         statusUpdate: 'done',

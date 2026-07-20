@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { initWorkspace, createRuntimeContext, createTask, createWorkspacePaths } from '@agentmesa/core';
 import type { MesaRuntimeContext, MesaActor } from '@agentmesa/core';
-import { WorkflowEngine } from '../engine.js';
+import { WorkflowEngine, listWorkflowStates } from '../engine.js';
 import { defineReviewFixLoop } from '../workflows/review-fix-loop.js';
 
 const ORCHESTRATOR_ACTOR: MesaActor = { id: 'system:orchestrator', type: 'system', roles: ['owner'] };
@@ -202,6 +202,34 @@ describe('WorkflowEngine', () => {
     it('should return null for unknown workflow', () => {
       const retrieved = engine.getState('unknown-id');
       expect(retrieved).toBeNull();
+    });
+  });
+
+  describe('listWorkflowStates', () => {
+    it('returns an empty array when no workflows have run', () => {
+      expect(listWorkflowStates(ctx)).toEqual([]);
+    });
+
+    it('lists a started workflow', () => {
+      const definition = defineReviewFixLoop();
+      const state = engine.startWorkflow(definition, 'task-123');
+
+      const states = listWorkflowStates(ctx);
+      expect(states).toHaveLength(1);
+      expect(states[0]!.workflowId).toBe(state.workflowId);
+      expect(states[0]!.taskId).toBe('task-123');
+    });
+
+    it('sorts multiple workflows newest first', async () => {
+      const definition = defineReviewFixLoop();
+      const first = engine.startWorkflow(definition, 'task-first');
+      await new Promise((r) => setTimeout(r, 5));
+      const second = engine.startWorkflow(definition, 'task-second');
+
+      const states = listWorkflowStates(ctx);
+      expect(states).toHaveLength(2);
+      expect(states[0]!.workflowId).toBe(second.workflowId);
+      expect(states[1]!.workflowId).toBe(first.workflowId);
     });
   });
 });

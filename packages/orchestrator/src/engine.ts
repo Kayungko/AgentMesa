@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
 import {
   getTask,
   updateTaskStatus,
@@ -169,6 +169,9 @@ export class WorkflowEngine {
     }
 
     if (succeeded) {
+      if (step.runnerType === 'review') {
+        this.syncReviewVerdict(state);
+      }
       this.completeStep(exec, step.onSuccess, state);
       return;
     }
@@ -183,6 +186,28 @@ export class WorkflowEngine {
     // Routed failure: the step itself completed its dispatch; advance to the
     // failure branch.
     this.completeStep(exec, onFailure, state);
+  }
+
+  /**
+   * A reviewer run_agent step drives an AI CLI session that, when MCP is
+   * configured, calls `mesa_submit_review` directly during that session —
+   * which lands the real verdict on the task's status (see
+   * `handleSubmitReview` in @agentmesa/mcp-server). Read it back into the
+   * workflow context so the next `check` step evaluates the real verdict
+   * instead of a value only a human `approve()` call could ever set.
+   */
+  private syncReviewVerdict(state: WorkflowState): void {
+    const task = getTask(this.ctx, state.taskId);
+    if (task.status === 'approved') {
+      state.context.approved = true;
+      state.context.changesRequested = false;
+    } else if (task.status === 'changes_requested') {
+      state.context.approved = false;
+      state.context.changesRequested = true;
+    }
+    // Any other status (e.g. still 'reviewing') means no MCP verdict landed
+    // during this run — leave context untouched, same as the stub/CI
+    // fallback behavior when no real runner backend is configured.
   }
 
   private runCheck(state: WorkflowState, step: WorkflowStep, exec: StepExecution): void {
@@ -346,4 +371,21 @@ export class WorkflowEngine {
     this.stateCache.set(workflowId, state);
     return state;
   }
+}
+
+/**
+ * List all persisted workflow states across every workflow, newest first.
+ * Reads the same `paths.logsDir/workflows/` directory that
+ * `WorkflowEngine.saveState`/`loadState` use, independent of any single
+ * engine instance's in-memory cache.
+ */
+export function listWorkflowStates(ctx: MesaRuntimeContext): WorkflowState[] {
+  const dir = join(ctx.paths.logsDir, 'workflows');
+  if (!existsSync(dir)) {
+    return [];
+  }
+  return readdirSync(dir)
+    .filter((f) => f.endsWith('.json'))
+    .map((f) => JSON.parse(readFileSync(join(dir, f), 'utf-8')) as WorkflowState)
+    .sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1));
 }

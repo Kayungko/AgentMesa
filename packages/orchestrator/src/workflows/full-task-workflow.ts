@@ -41,6 +41,13 @@ export function defineFullTaskWorkflow(): WorkflowDefinition {
         type: 'update_status',
         description: 'Mark task as ready_for_review',
         statusUpdate: 'ready_for_review',
+        onSuccess: 'step-reviewing',
+      },
+      {
+        id: 'step-reviewing',
+        type: 'update_status',
+        description: 'Mark task as reviewing',
+        statusUpdate: 'reviewing',
         onSuccess: 'step-review',
       },
       {
