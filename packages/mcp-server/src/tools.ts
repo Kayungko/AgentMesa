@@ -27,6 +27,9 @@ import {
   getMeetingEvents,
   getTaskProjection,
   getMeetingProjection,
+  createCheckResult,
+  getCheckResult,
+  listCheckResults,
 } from '@agentmesa/core';
 import { executeRun } from '@agentmesa/runner';
 import {
@@ -34,6 +37,7 @@ import {
   getWorkflowDefinition,
   listWorkflowDefinitionIds,
 } from '@agentmesa/orchestrator';
+import { linkPrToTask, importCIResults } from '@agentmesa/connector-github';
 import type {
   TaskStatus,
   ArtifactKind,
@@ -41,6 +45,8 @@ import type {
   RunAction,
   RunStatus,
   MesaEvent,
+  CheckKind,
+  CheckResultStatus,
 } from '@agentmesa/protocol';
 
 // --- Input schemas for MCP tool registration ---
@@ -432,6 +438,45 @@ export const getMeetingProjectionInputSchema = {
   meetingId: z.string().min(1),
 };
 
+// --- Check result schemas ---
+
+export const createCheckInputSchema = {
+  taskId: z.string().min(1),
+  runId: z.string().optional(),
+  kind: z.string().optional(),
+  status: z.string().min(1),
+  checkName: z.string().min(1),
+  exitCode: z.number().optional(),
+  stdout: z.string().optional(),
+  stderr: z.string().optional(),
+  duration: z.number().optional(),
+  success: z.boolean(),
+  summary: z.string().optional(),
+  detail: z.string().optional(),
+};
+
+export const listChecksInputSchema = {
+  taskId: z.string().optional(),
+  kind: z.string().optional(),
+  status: z.string().optional(),
+};
+
+export const getCheckInputSchema = {
+  checkId: z.string().min(1),
+};
+
+// --- GitHub connector schemas ---
+
+export const linkPrInputSchema = {
+  taskId: z.string().min(1),
+  prNumber: z.number().int(),
+};
+
+export const importCiResultsInputSchema = {
+  taskId: z.string().min(1),
+  agentId: z.string().min(1),
+};
+
 // --- Agent run handlers ---
 
 export function handleCreateRun(
@@ -630,4 +675,74 @@ export function handleGetMeetingProjection(
   args: { meetingId: string }
 ): string {
   return JSON.stringify(getMeetingProjection(ctx, args.meetingId, { strict: false }));
+}
+
+// --- Check result handlers ---
+
+export function handleCreateCheck(
+  ctx: MesaRuntimeContext,
+  args: {
+    taskId: string;
+    runId?: string;
+    kind?: string;
+    status: string;
+    checkName: string;
+    exitCode?: number;
+    stdout?: string;
+    stderr?: string;
+    duration?: number;
+    success: boolean;
+    summary?: string;
+    detail?: string;
+  }
+): string {
+  const check = createCheckResult(ctx, {
+    taskId: args.taskId,
+    runId: args.runId,
+    kind: args.kind as CheckKind | undefined,
+    status: args.status as CheckResultStatus,
+    checkName: args.checkName,
+    exitCode: args.exitCode,
+    stdout: args.stdout,
+    stderr: args.stderr,
+    duration: args.duration,
+    success: args.success,
+    summary: args.summary,
+    detail: args.detail,
+  });
+  return JSON.stringify(check);
+}
+
+export function handleListChecks(
+  ctx: MesaRuntimeContext,
+  args: { taskId?: string; kind?: string; status?: string }
+): string {
+  const checks = listCheckResults(ctx, {
+    taskId: args.taskId,
+    kind: args.kind as CheckKind | undefined,
+    status: args.status as CheckResultStatus | undefined,
+  });
+  return JSON.stringify(checks);
+}
+
+export function handleGetCheck(ctx: MesaRuntimeContext, args: { checkId: string }): string {
+  return JSON.stringify(getCheckResult(ctx, args.checkId));
+}
+
+// --- GitHub connector handlers ---
+
+export async function handleLinkPr(
+  ctx: MesaRuntimeContext,
+  args: { taskId: string; prNumber: number }
+): Promise<string> {
+  await linkPrToTask(ctx.paths, args.taskId, args.prNumber);
+  return JSON.stringify({ linked: true, taskId: args.taskId, prNumber: args.prNumber });
+}
+
+export async function handleImportCiResults(
+  ctx: MesaRuntimeContext,
+  args: { taskId: string; agentId: string }
+): Promise<string> {
+  const result = await importCIResults(ctx.paths, args.taskId, args.agentId, ctx.paths.rootDir);
+  return JSON.stringify(result);
 }

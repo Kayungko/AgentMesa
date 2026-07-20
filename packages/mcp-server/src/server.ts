@@ -34,6 +34,11 @@ import {
   getMeetingEventsInputSchema,
   getTaskProjectionInputSchema,
   getMeetingProjectionInputSchema,
+  createCheckInputSchema,
+  listChecksInputSchema,
+  getCheckInputSchema,
+  linkPrInputSchema,
+  importCiResultsInputSchema,
   handleCreateTask,
   handleListTasks,
   handleReadTask,
@@ -64,6 +69,11 @@ import {
   handleGetMeetingEvents,
   handleGetTaskProjection,
   handleGetMeetingProjection,
+  handleCreateCheck,
+  handleListChecks,
+  handleGetCheck,
+  handleLinkPr,
+  handleImportCiResults,
 } from './tools.js';
 
 /**
@@ -313,6 +323,33 @@ export function createMcpServer(rootDir: string): McpServer {
     description: 'Read the current projection (read model) for a meeting',
     inputSchema: getMeetingProjectionInputSchema,
   }, wrapRuntimeHandler(makeCtx, handleGetMeetingProjection));
+
+  // Check result tools
+  server.registerTool('mesa_create_check', {
+    description: 'Record a MesaCheckResult (test/lint/typecheck/security/custom) for a task',
+    inputSchema: createCheckInputSchema,
+  }, wrapRuntimeHandler(makeCtx, handleCreateCheck));
+
+  server.registerTool('mesa_list_checks', {
+    description: 'List check results, optionally filtered by task, kind, or status',
+    inputSchema: listChecksInputSchema,
+  }, wrapRuntimeHandler(makeCtx, handleListChecks));
+
+  server.registerTool('mesa_get_check', {
+    description: 'Read a specific check result by ID',
+    inputSchema: getCheckInputSchema,
+  }, wrapRuntimeHandler(makeCtx, handleGetCheck));
+
+  // GitHub connector tools (shell out to the real `gh` CLI)
+  server.registerTool('mesa_link_pr', {
+    description: 'Link a GitHub pull request to a task (stores a pr_summary artifact)',
+    inputSchema: linkPrInputSchema,
+  }, wrapAsyncRuntimeHandler(makeCtx, handleLinkPr));
+
+  server.registerTool('mesa_import_ci_results', {
+    description: 'Import GitHub Actions CI status for the current repo via `gh run list`, recording a MesaCheckResult per finished run',
+    inputSchema: importCiResultsInputSchema,
+  }, wrapAsyncRuntimeHandler(makeCtx, handleImportCiResults));
 
   return server;
 }

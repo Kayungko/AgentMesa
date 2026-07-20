@@ -28,6 +28,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@agentmesa/connector-github": "workspace:*",
     "@agentmesa/core": "workspace:*",
     "@agentmesa/orchestrator": "workspace:*",
     "@agentmesa/protocol": "workspace:*",

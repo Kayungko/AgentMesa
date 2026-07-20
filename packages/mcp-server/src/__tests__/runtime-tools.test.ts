@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createRuntimeContext, initWorkspace, createTask } from '@agentmesa/core';
 import type { MesaRuntimeContext } from '@agentmesa/core';
-import type { MesaAgentRun, TransportEnvelope, MesaEvent } from '@agentmesa/protocol';
+import type { MesaAgentRun, TransportEnvelope, MesaEvent, MesaCheckResult } from '@agentmesa/protocol';
 import {
   handleCreateRun,
   handleListRuns,
@@ -20,6 +20,9 @@ import {
   handleListEvents,
   handleGetTaskEvents,
   handleGetTaskProjection,
+  handleCreateCheck,
+  handleListChecks,
+  handleGetCheck,
 } from '../tools.js';
 import { resolveActor } from '../server.js';
 
@@ -172,5 +175,28 @@ describe('event / projection tools', () => {
   it('returns null projection lookups without throwing', () => {
     const proj = parse<unknown>(handleGetTaskProjection(ctx, { taskId }));
     expect(proj === null || typeof proj === 'object').toBe(true);
+  });
+});
+
+describe('check result tools', () => {
+  it('creates, reads, and lists check results', () => {
+    const created = parse<MesaCheckResult>(
+      handleCreateCheck(ctx, {
+        taskId,
+        status: 'passed',
+        checkName: 'Unit Tests',
+        success: true,
+      })
+    );
+    expect(created.id).toMatch(/^check_/);
+    expect(created.status).toBe('passed');
+
+    const read = parse<MesaCheckResult>(handleGetCheck(ctx, { checkId: created.id }));
+    expect(read.id).toBe(created.id);
+
+    const byTask = parse<MesaCheckResult[]>(handleListChecks(ctx, { taskId }));
+    expect(byTask).toHaveLength(1);
+    const byStatus = parse<MesaCheckResult[]>(handleListChecks(ctx, { status: 'failed' }));
+    expect(byStatus).toHaveLength(0);
   });
 });
