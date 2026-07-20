@@ -3,19 +3,21 @@ import {
   RoleBasedPolicyEngine,
   PolicyDeniedError,
 } from '@agentmesa/core';
-import type { AgentRole } from '@agentmesa/protocol';
+import type { AgentRole, PermissionLevel } from '@agentmesa/protocol';
 import type { MesaActor } from '@agentmesa/core';
 import type { ParsedArgs } from '../parse-args.js';
 import { printError, outputResult, outputError } from '../output.js';
 
-const VALID_ROLES: readonly AgentRole[] = [
-  'owner', 'admin', 'builder', 'reviewer', 'connector', 'ci', 'system',
+type PolicyRole = AgentRole | PermissionLevel;
+
+const VALID_ROLES: readonly PolicyRole[] = [
+  'owner', 'admin', 'builder', 'reviewer', 'connector', 'ci', 'system', 'read_only',
   'chair', 'planner', 'tester', 'documenter', 'maintainer', 'researcher', 'custom',
 ] as const;
 
-function validateRole(input: string): AgentRole {
+function validateRole(input: string): PolicyRole {
   if ((VALID_ROLES as readonly string[]).includes(input)) {
-    return input as AgentRole;
+    return input as PolicyRole;
   }
   throw new PolicyDeniedError(
     'policy.check',
@@ -24,7 +26,7 @@ function validateRole(input: string): AgentRole {
   );
 }
 
-function parseRoles(raw: string): AgentRole[] {
+function parseRoles(raw: string): PolicyRole[] {
   return raw.split(',').map((r) => validateRole(r.trim()));
 }
 
@@ -39,9 +41,9 @@ function resolveMode(args: ParsedArgs, defaultMode: PolicyMode): PolicyMode {
   return defaultMode;
 }
 
-function buildActor(args: ParsedArgs, defaultRole: AgentRole): MesaActor {
+function buildActor(args: ParsedArgs, defaultRole: PolicyRole): MesaActor {
   const rolesRaw = args.flags['roles'];
-  let roles: AgentRole[];
+  let roles: PolicyRole[];
   if (typeof rolesRaw === 'string') {
     roles = parseRoles(rolesRaw);
   } else {
@@ -146,6 +148,9 @@ export function runPolicyInspect(args: ParsedArgs): void {
     'meeting.create', 'meeting.updateStatus', 'meeting.addTask', 'meeting.addAgent',
     'message.append', 'artifact.create', 'agent.register',
     'event.read', 'projection.read', 'projection.rebuild', 'transport.inspect',
+    'run.create', 'run.updateStatus', 'run.read',
+    'handoff.write', 'handoff.read',
+    'check.create', 'check.read',
   ];
 
   const roles = VALID_ROLES;

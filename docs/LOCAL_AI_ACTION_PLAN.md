@@ -244,17 +244,16 @@ ABAC checks remain deferred.
     the flip — nearly every test builds a brand-new temp workspace via
     `mkdtempSync` + `initWorkspace`, so this was a real end-to-end check of the
     new default, not just the capability-table unit tests.
-  - **Known follow-up, not done:** `mesa policy inspect`'s `VALID_ROLES` list
-    (`packages/cli/src/commands/policy.ts`) predates this change and is typed
-    as `AgentRole[]`, which doesn't include `read_only` (a `PermissionLevel`).
-    Its `knownActions` list also predates Stage A/C and is already missing the
-    `run.*`/`handoff.*`/`check.*` actions entirely. Both are pre-existing CLI
-    inspection-tool staleness, not something this change introduced, but
-    `read_only` (and the run/handoff/check actions) won't show up in
-    `mesa policy inspect`'s matrix until that command's static lists are
-    updated separately.
+  - **Known follow-up, `done`:** `mesa policy inspect`'s `VALID_ROLES` list and
+    `knownActions` list (`packages/cli/src/commands/policy.ts`) predated this
+    change and Stage A/C respectively — `VALID_ROLES` was typed `AgentRole[]`
+    (excluding `read_only`, a `PermissionLevel`) and `knownActions` was missing
+    the `run.*`/`handoff.*`/`check.*` actions entirely. Widened `VALID_ROLES`/
+    `validateRole`/`parseRoles`/`buildActor` to `AgentRole | PermissionLevel`
+    and added the 7 missing actions, so `mesa policy inspect`'s matrix now
+    reflects the real `ROLE_CAPABILITIES`/`ACTION_CAPABILITY` tables in full.
 - `canWithContext(actor, action, resource, context?)` enforces reviewer status transition gate: pure reviewer may only transition to `approved` or `changes_requested`. Multi-role actors (reviewer+builder, reviewer+chair, reviewer+admin, reviewer+maintainer, reviewer+owner) bypass the gate via non-reviewer `change_status` capability. `updateTaskStatus` passes `targetStatus` via `assertPolicyWithContext()`.
-- `mesa policy check` / `mesa policy inspect` default to `--mode role-based` (canonical `RoleBasedPolicyEngine`). `--mode current` uses workspace config. `--role` validated against known AgentRole values; `--roles a,b` supports multi-role. Both commands output `mode` in JSON. `policy inspect` covers all 14 VALID_ROLES (owner, admin, builder, reviewer, connector, ci, system, chair, planner, tester, documenter, maintainer, researcher, custom) — not yet `read_only`, see follow-up above. Missing `action` in `policy check` with `--json` outputs structured error via `outputError`.
+- `mesa policy check` / `mesa policy inspect` default to `--mode role-based` (canonical `RoleBasedPolicyEngine`). `--mode current` uses workspace config. `--role` validated against known role values (`AgentRole | PermissionLevel`); `--roles a,b` supports multi-role. Both commands output `mode` in JSON. `policy inspect` covers all 15 `VALID_ROLES` (owner, admin, builder, reviewer, connector, ci, system, read_only, chair, planner, tester, documenter, maintainer, researcher, custom) and 23 `knownActions` (including `run.*`/`handoff.*`/`check.*`). Missing `action` in `policy check` with `--json` outputs structured error via `outputError`.
 - Read path enforcement: `listEvents`/`getTaskEvents`/`getMeetingEvents` → `event.read`; `getTaskProjection`/`getMeetingProjection`/`getAgentProjection`/`listTaskProjections`/`listMeetingProjections`/`listAgentProjections` → `projection.read`; `rebuildTaskProjections`/`rebuildMeetingProjections`/`rebuildAgentProjections` → `projection.rebuild`; `runTransports` → `transport.inspect`. Internal helpers (`_get*`/`_list*`) and freshness helpers (`isTaskProjectionFresh`, etc.) are excluded from the `@agentmesa/core` public index — freshness checks are computed internally by `read-model-service` and `doctor`. Callers cannot bypass `projection.read` enforcement through public API.
 - Policy enforcement tests cover: builder deny delete/archive, connector deny delete/create, ci deny delete/create, reviewer context-aware status gate (pure reviewer only approved/changes_requested; reviewer+builder/chair/admin/maintainer/owner bypass), system deny write tasks, owner/admin bypass, allow-all backward compat, event/projection/rebuild/transport enforcement, read_only allow/deny, builder manage_agents/manage_meetings, all 21 actions and 15 roles.
 - CLI `resolveMode` throws on invalid `--mode`; error is caught and formatted via `outputError(err, json)` — structured JSON when `--json` is set, human-readable to stderr otherwise. Always sets `exitCode = 1`.
@@ -264,7 +263,6 @@ ABAC checks remain deferred.
 
 Deferred:
 - Capability gating (canEditFiles, canRunShell, etc.) is not checked by core services.
-- `mesa policy inspect`'s static role/action lists need a follow-up update (see above) to reflect `read_only` and the run/handoff/check actions.
 
 Direction:
 

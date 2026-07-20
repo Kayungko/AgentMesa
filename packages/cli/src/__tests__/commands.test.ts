@@ -343,6 +343,36 @@ describe('CLI policy commands', () => {
       }
     });
   });
+
+  describe('policy inspect role-based matrix', () => {
+    it('includes read_only role and run/handoff/check actions', () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      try {
+        const args = makeArgs({ subcommand: 'inspect', flags: { json: true } });
+        runPolicyInspect(args);
+
+        const line = logSpy.mock.calls.map((c) => c.join(' ')).find((l) => l.includes('"roles"'));
+        expect(line).toBeDefined();
+        const parsed = JSON.parse(line as string) as {
+          roles: string[];
+          actions: Array<Record<string, unknown>>;
+        };
+        expect(parsed.roles).toContain('read_only');
+
+        const handoffRead = parsed.actions.find((a) => a.action === 'handoff.read');
+        expect(handoffRead).toBeDefined();
+        expect(handoffRead?.['read_only']).toBe(true);
+        expect(handoffRead?.['custom']).toBe(false);
+
+        const runCreate = parsed.actions.find((a) => a.action === 'run.create');
+        expect(runCreate).toBeDefined();
+        expect(runCreate?.['builder']).toBe(true);
+      } finally {
+        logSpy.mockRestore();
+      }
+    });
+  });
 });
 
 describe('CLI transports subcommands', () => {
