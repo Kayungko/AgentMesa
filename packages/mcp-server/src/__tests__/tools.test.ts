@@ -30,7 +30,7 @@ beforeEach(() => {
   initWorkspace(testDir);
   ctx = createRuntimeContext({
     rootDir: testDir,
-    actor: { id: 'user', type: 'agent', roles: ['custom'], client: 'mcp' },
+    actor: { id: 'user', type: 'agent', roles: ['builder'], client: 'mcp' },
   });
 });
 

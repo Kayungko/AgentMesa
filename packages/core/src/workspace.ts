@@ -83,6 +83,7 @@ export function initWorkspace(rootDir: string): MesaWorkspacePaths {
 
   const config: MesaConfig = {
     protocolVersion: currentProtocolVersion,
+    policy: { mode: 'role-based' },
     readModel: { mode: 'hybrid' },
   };
 

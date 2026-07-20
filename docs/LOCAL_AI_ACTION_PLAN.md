@@ -208,13 +208,25 @@ ABAC checks remain deferred.
 - `RoleBasedPolicyEngine` in core: maps 23 action keys → 14 capabilities with per-role capability sets. Owner bypass built in. Constructor accepts overrides.
 - Production roles: `owner`, `admin`, `builder`, `reviewer`, `connector`, `ci`, `system`, `read_only`. Legacy roles preserved.
 - Unknown actions are denied by default.
-- **Default flip, `done`:** `createRuntimeContext`'s `loadOrCreateConfig` now
+- **Default flip, `done`:** `createRuntimeContext`'s `loadOrCreateConfig`
   writes `policy: { mode: 'role-based' }` into the config it creates for a
-  brand-new workspace (`packages/core/src/runtime/create-runtime-context.ts`).
-  Pre-existing workspaces are untouched — a `.agentmesa/config.json` already on
+  brand-new workspace (`packages/core/src/runtime/create-runtime-context.ts`),
+  but that path only fires when `createRuntimeContext` is called against a
+  directory with literally no `.agentmesa/config.json` on disk yet — and in
+  practice `mesa init` (and every test's `mkdtempSync` + `initWorkspace`
+  setup) calls `initWorkspace()` *first*, which has its own, independent
+  config-writing code in `packages/core/src/workspace.ts` and never went
+  through `loadOrCreateConfig` at all. The first pass of this change missed
+  that and only patched `create-runtime-context.ts` — manually running
+  `mesa init` and inspecting the resulting `config.json` (no `policy` field)
+  caught it. Fixed by adding the same `policy: { mode: 'role-based' }` default
+  to `initWorkspace`'s config object, which is the real entry point. Pre-existing
+  workspaces are untouched either way — a `.agentmesa/config.json` already on
   disk without a `policy` field keeps resolving to `AllowAllMesaPolicyEngine`,
-  exactly as before; only workspaces created after this change opt in. Flipping
-  the default surfaced three real gaps that had to be fixed first, all in
+  exactly as before; only workspaces created after this change opt in.
+  Re-running the full test suite *after* the `initWorkspace` fix (not before —
+  see below) surfaced the real blast radius. Flipping the default surfaced
+  four real gaps that had to be fixed first, all in
   `packages/core/src/runtime/policy.ts`'s `ROLE_CAPABILITIES` table or the
   actor roles that reach it:
   - Mesa Desk's actor used `roles: ['read_only']` (`packages/desk/src/server.ts`),
@@ -240,10 +252,18 @@ ABAC checks remain deferred.
     been denied out of the box. Added both capabilities to `builder` (not the
     more sensitive `archive_task`/`delete_task`/`rebuild_projections`/
     `inspect_transports`) so an unconfigured MCP client keeps working.
-  - Full workspace test suite (838 tests) passed with zero regressions after
-    the flip — nearly every test builds a brand-new temp workspace via
-    `mkdtempSync` + `initWorkspace`, so this was a real end-to-end check of the
-    new default, not just the capability-table unit tests.
+  - `packages/mcp-server/src/__tests__/tools.test.ts` built its test context
+    with `roles: ['custom']` — an artifact of copy-pasting a test fixture, not
+    a real production actor — and every write-path test (`handleCreateTask`,
+    `handleAttachArtifact`, `handleCreateMeeting`, `handleRegisterAgent`, etc.)
+    failed once `initWorkspace` actually defaulted to role-based. Switched the
+    test actor to `roles: ['builder']` to match the real MCP default.
+  - Full workspace test suite (973 tests, after both the `initWorkspace` fix
+    and the `tools.test.ts` fix) passed with zero regressions — this is the
+    real end-to-end check of the new default; a prior claim in this doc that
+    the (then-broken) flip had already passed 838 tests with zero regressions
+    was wrong, because `initWorkspace` was silently keeping every test on
+    `AllowAllMesaPolicyEngine` the whole time.
   - **Known follow-up, `done`:** `mesa policy inspect`'s `VALID_ROLES` list and
     `knownActions` list (`packages/cli/src/commands/policy.ts`) predated this
     change and Stage A/C respectively — `VALID_ROLES` was typed `AgentRole[]`

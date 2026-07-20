@@ -69,6 +69,15 @@ describe('loadConfig', () => {
     expect(config.readModel).toEqual({ mode: 'hybrid' });
   });
 
+  it('defaults policy.mode to role-based after init', () => {
+    // This is the real entry point mesa init and every test's
+    // initWorkspace() call go through — createRuntimeContext's own
+    // fresh-config default only fires if initWorkspace was never called.
+    initWorkspace(testDir);
+    const config = loadConfig(testDir);
+    expect(config.policy).toEqual({ mode: 'role-based' });
+  });
+
   it('throws if not initialized', () => {
     expect(() => loadConfig(testDir)).toThrow(WorkspaceNotFoundError);
   });

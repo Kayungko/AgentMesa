@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { currentProtocolVersion, generateEventId } from '@agentmesa/protocol';
 import { createRuntimeContext } from '../runtime/create-runtime-context.js';
+import { initWorkspace } from '../workspace.js';
 import { FileStorageAdapter } from '../runtime/file-storage-adapter.js';
 import { FileEventStore } from '../runtime/file-event-store.js';
 import { InMemoryMesaEventStore } from '../runtime/event-store.js';
@@ -234,6 +235,23 @@ describe('default runtime dependencies', () => {
 
     // 'custom' only has read_task — this proves the default really did flip
     // from allow-all to role-based, not just that the config field exists.
+    expect(ctx.policy.can(ctx.actor, 'task.create', 't1').allowed).toBe(false);
+  });
+
+  it('defaults to RoleBasedPolicyEngine through the real mesa init -> createRuntimeContext path', () => {
+    // The vast majority of real usage (mesa init, and every test's
+    // mkdtempSync + initWorkspace setup) calls initWorkspace() BEFORE
+    // createRuntimeContext(), which means createRuntimeContext always sees
+    // an existing config.json and never hits its own fresh-config branch.
+    // initWorkspace() has its own independent default that must also be
+    // role-based, or this flip is a no-op for nearly every real caller.
+    initWorkspace(testDir);
+    const ctx = createRuntimeContext({
+      rootDir: testDir,
+      actor: { id: 'agent:custom', type: 'agent', roles: ['custom'] },
+    });
+
+    expect(ctx.policy).toBeInstanceOf(RoleBasedPolicyEngine);
     expect(ctx.policy.can(ctx.actor, 'task.create', 't1').allowed).toBe(false);
   });
 
