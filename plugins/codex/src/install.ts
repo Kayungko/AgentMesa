@@ -18,6 +18,10 @@ export interface InstallCodexPluginOptions {
   builderAgent?: string;
   /** Path to the MCP server entry point. */
   mcpServerPath?: string;
+  /** Actor id recorded on every mutation/event (AGENTMESA_MCP_ACTOR_ID). */
+  actorId?: string;
+  /** Comma-separated roles for policy checks (AGENTMESA_MCP_ACTOR_ROLES). */
+  actorRoles?: string;
   /** Path to the AgentMesa workspace directory. */
   mesaDir?: string;
 }
@@ -61,6 +65,8 @@ export function installCodexPlugin(
 
   const mcpConfigOptions: CodexMcpConfigOptions = {
     mcpServerPath: options.mcpServerPath,
+    actorId: options.actorId,
+    actorRoles: options.actorRoles,
   };
 
   const reviewSkillOptions: ReviewSkillOptions = {

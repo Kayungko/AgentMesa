@@ -4,18 +4,22 @@
 export interface CodexExecScriptOptions {
   /** The task ID to review. */
   taskId: string;
-  /** Path to the AgentMesa workspace directory. */
+  /** Path to the AgentMesa workspace root (the directory containing `.agentmesa/`). */
   mesaDir?: string;
 }
 
 /**
  * Generates a shell script for non-interactive Codex review execution.
  *
- * This script reads the task from AgentMesa, runs Codex with the
- * review skill, and captures the output as a review artifact.
+ * This script only verifies the task precondition and launches Codex with
+ * the review skill. Submitting the verdict and attaching the review report
+ * happen inside that Codex run via the `mesa_submit_review` and
+ * `mesa_attach_artifact` MCP tools (see `agentmesa-review` skill instructions)
+ * — there is no CLI equivalent for writing those, so the script does not
+ * attempt to re-do that work from shell.
  */
 export function generateCodexExecScript(options: CodexExecScriptOptions): string {
-  const { taskId, mesaDir = '.mesa' } = options;
+  const { taskId, mesaDir = '.' } = options;
 
   const lines: string[] = [];
 
@@ -27,10 +31,12 @@ export function generateCodexExecScript(options: CodexExecScriptOptions): string
   lines.push(`TASK_ID="${taskId}"`);
   lines.push(`MESA_DIR="${mesaDir}"`);
   lines.push('');
+  lines.push('cd "${MESA_DIR}"');
+  lines.push('');
 
   lines.push('# Step 1: Verify the task exists and is ready for review');
   lines.push('echo "Checking task ${TASK_ID} status..."');
-  lines.push('TASK_STATUS=$(mesa task read "${TASK_ID}" --mesa-dir "${MESA_DIR}" --format json | jq -r .status)');
+  lines.push('TASK_STATUS=$(mesa task show "${TASK_ID}" --json | jq -r .status)');
   lines.push('');
   lines.push('if [ "${TASK_STATUS}" != "ready_for_review" ]; then');
   lines.push('  echo "Error: Task ${TASK_ID} is in status ${TASK_STATUS}, expected ready_for_review"');
@@ -38,7 +44,9 @@ export function generateCodexExecScript(options: CodexExecScriptOptions): string
   lines.push('fi');
   lines.push('');
 
-  lines.push('# Step 2: Run Codex with the review skill');
+  lines.push('# Step 2: Run Codex with the review skill. The skill instructions call');
+  lines.push('# mesa_submit_review and mesa_attach_artifact over MCP directly, so the');
+  lines.push('# verdict and review report are written before this command returns.');
   lines.push('echo "Running Codex review for task ${TASK_ID}..."');
   lines.push('REVIEW_OUTPUT=$(codex --skill agentmesa-review \\');
   lines.push('  --quiet \\');
@@ -46,22 +54,8 @@ export function generateCodexExecScript(options: CodexExecScriptOptions): string
   lines.push(`  "Review task ${taskId} in workspace ${mesaDir}")`);
   lines.push('');
 
-  lines.push('# Step 3: Capture the review output');
-  lines.push('echo "Capturing review output..."');
-  lines.push('REVIEW_FILE=$(mktemp /tmp/mesa-review-XXXXXX.md)');
-  lines.push('echo "${REVIEW_OUTPUT}" > "${REVIEW_FILE}"');
-  lines.push('');
-
-  lines.push('# Step 4: Attach the review report as an artifact');
-  lines.push('echo "Attaching review artifact..."');
-  lines.push('mesa artifact attach "${TASK_ID}" \\');
-  lines.push('  --kind review_report \\');
-  lines.push('  --content-file "${REVIEW_FILE}" \\');
-  lines.push('  --mesa-dir "${MESA_DIR}"');
-  lines.push('');
-
-  lines.push('# Step 5: Clean up');
-  lines.push('rm -f "${REVIEW_FILE}"');
+  lines.push('# Step 3: Echo the transcript for local debugging.');
+  lines.push('echo "${REVIEW_OUTPUT}"');
   lines.push('');
   lines.push('echo "Review complete for task ${TASK_ID}"');
   lines.push('');

@@ -55,6 +55,12 @@ describe('generateAgentsMd', () => {
     expect(result).toContain('ready_for_review');
   });
 
+  it('uses the real mesa_update_status tool to transition tasks', () => {
+    const result = generateAgentsMd();
+    expect(result).toContain('mesa_update_status');
+    expect(result).not.toContain('mesa_transition_task');
+  });
+
   it('includes builder constraint: do not mark done before approval', () => {
     const result = generateAgentsMd();
     expect(result).toContain('Do NOT mark a task as done before it is approved');

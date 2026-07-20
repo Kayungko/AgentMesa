@@ -71,7 +71,7 @@ export function generateAgentsMd(options: AgentsMdOptions = {}): string {
   lines.push('3. Write a clear implementation summary describing what you did and why.');
   lines.push('4. Record all changed files in the task context.');
   lines.push('5. Use `mesa_attach_artifact` to attach your implementation summary.');
-  lines.push('6. Use `mesa_transition_task` to move the task to `ready_for_review`.');
+  lines.push('6. Use `mesa_update_status` to move the task to `ready_for_review`.');
   lines.push('');
   lines.push('### Constraints');
   lines.push('');
