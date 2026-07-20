@@ -319,22 +319,45 @@ partly parallelize.
    `mesa runs exec <id> [--dry-run]` plus the programmatic `executeRun` API the
    Orchestrator will call. `createAgentRun` now persists `runnerType`.
    Real Claude/Codex CLI subprocess spawn now lands in Stage B (item 2.5 below).
-2. **Orchestrator** — `in_progress`. `WorkflowEngine.executeStep` is now real:
-   it consumes a `WorkflowDefinition` + `MesaRuntimeContext` and dispatches each
-   step by type — `update_status` (idempotent + tolerant of invalid task-status
+2. **Orchestrator** — `done`. `WorkflowEngine.executeStep` is real: it consumes
+   a `WorkflowDefinition` + `MesaRuntimeContext` and dispatches each step by
+   type — `update_status` (idempotent + tolerant of invalid task-status
    transitions), `run_agent` (creates a run and drives it via `executeRun`),
    `check` (evaluates the condition; increments `reviewCycles` on the fail
    branch), and `human_approval` (parks the workflow at `waiting_approval`). An
    `advanceWorkflow` driver auto-runs steps to a terminal/blocked state (bounded
    by `maxSteps`), `approve`/`reject` resume from approval, and a definition
    registry recovers closures after a reload. Surfaced as
-   `mesa workflow start|status|approve|run`. The review verdict is a
-   **deterministic loop + count guard** (`approved` flips only externally; 3
-   cycles route to human approval). **Deferred:** parsing real review verdicts
-   from runner output (plugin milestone). Note: because `update_status` is
-   tolerant, workflow steps that request an invalid task-status transition (e.g.
-   `ready_for_review → done` in `review-fix-loop`) are skipped without failing —
-   the workflow completes even though the task does not reach `done`.
+   `mesa workflow start|status|approve|run`.
+   The review verdict is now the **real one**, not a fake loop: the review
+   skills shipped with both plugins have the AI call the `mesa_submit_review`
+   MCP tool directly during the reviewer's non-interactive CLI session, and
+   `handleSubmitReview` (in `@agentmesa/mcp-server`) lands that verdict
+   synchronously on the task's status (`approved` / `changes_requested`)
+   before the CLI subprocess returns. `WorkflowEngine.runAgentStep` reads that
+   status back right after a `runnerType: 'review'` step succeeds
+   (`syncReviewVerdict`) and writes it into `WorkflowContext.approved` /
+   `changesRequested`, so the `check` step reacts to what the reviewer
+   actually decided instead of only reacting to a human `approve()` call. Both
+   `review-fix-loop` and `full-task-workflow` gained an explicit
+   `update_status -> reviewing` step between `ready_for_review` and the
+   reviewer's `run_agent` step — without it, a first-pass `approved` verdict
+   would throw inside the MCP tool call, because `ready_for_review -> approved`
+   is not a valid transition in the protocol status graph (only
+   `reviewing -> approved` is). The stub/CI fallback (no
+   `AGENTMESA_CLAUDE_CMD`/`AGENTMESA_CODEX_CMD` configured) never calls the MCP
+   tool, so the task status never leaves `reviewing` and the loop keeps its old
+   3-cycle-then-human-approval fallback behavior — this real-verdict path is
+   additive, not a breaking change to the no-backend-configured case.
+   **Known, accepted limitation carried over unchanged:** because
+   `update_status` is tolerant, a second or third review cycle can still hit an
+   invalid task-status transition (e.g. `changes_requested -> ready_for_review`
+   is not allowed) and gets tolerantly skipped rather than failing the
+   workflow — the loop still falls back to the 3-cycle count guard in that
+   case. Fixing the status graph for multi-cycle loops end-to-end is a separate,
+   larger piece of work and is intentionally out of scope here; this milestone
+   only guarantees the *first* review cycle's real verdict is captured
+   correctly, which is the common case.
 
 ### Stage B — Connect real AI clients
 2.5. **Real CLI invocation** — `done`. `ClaudeRunner`/`CodexRunner` now spawn the
@@ -373,22 +396,83 @@ partly parallelize.
    `agentmesa-review` (`mesa_list_tasks` → `mesa_submit_review`); `agentmesa-handoff` now
    uses the handoff-loop tools. The Stop hook emits a benign reminder instead of an invalid
    `task update --auto-status` command.
-5. **Codex plugin** — Codex-specific run hooks / adapter. Note: `plugins/codex` shares the
-   same stale MCP launcher (`generateCodexMcpConfig` still emits `serve --mcp`) and its
-   `codex-exec-flow.ts` references non-existent CLI strings (`mesa task read --mesa-dir
-   --format json`, `mesa artifact attach`); both need the same alignment applied to the
-   Claude plugin here. (`review-skill.ts` already uses correct tool names.)
+5. **Codex plugin** — `done`. `plugins/codex` is now aligned to the same real MCP/CLI surface
+   as the Claude plugin. `generateCodexMcpConfig` emits a `.codex/config.toml` snippet that
+   launches the real `mesa-mcp` bin (or `node <mcpServerPath>` pointing at `dist/bin.js` when
+   an explicit path is given) with an `[mcp_servers.agentmesa.env]` table carrying
+   `AGENTMESA_MCP_ACTOR_ID` (default `agent:codex`) and `AGENTMESA_MCP_ACTOR_ROLES` (default
+   `builder`) — the fictional `serve --mcp` args and the stale `dist/index.js` default are
+   gone. `codex-exec-flow.ts` now checks task status via the real `mesa task show
+   "${TASK_ID}" --json` (no `--mesa-dir` flag; the script `cd`s into the workspace root
+   instead) and no longer tries to write the review report through a nonexistent `mesa
+   artifact attach` command — submitting the verdict and attaching the report happen inside
+   the Codex run itself via `mesa_submit_review` / `mesa_attach_artifact` MCP calls, per the
+   `agentmesa-review` skill instructions (`review-skill.ts` already used correct tool names
+   and needed no changes). `agents-md.ts` now tells the builder to use `mesa_update_status`
+   instead of the fictional `mesa_transition_task`. Stage B is complete.
 
 ### Stage C — External integrations
-6. **GitHub integration** — connector for PRs/issues; handoffs can target
-   GitHub. Builds on the hardened transport layer.
-7. **CI integration** — wire `MesaCheckResult` to CI pipelines (check schema
-   already exists).
+6. **GitHub integration** — `done`. `@agentmesa/connector-github` was already real
+   (`pr.ts`/`ci.ts` shell out to the actual `gh` CLI via `execSync`, exactly like the
+   git connector shells out to `git`) but nothing could reach it — no CLI command, MCP
+   tool, or orchestrator step ever called `listPullRequests`/`linkPrToTask`/
+   `importCIResults`. That's now fixed: `mesa github link-pr <taskId> <prNumber>` /
+   `mesa github import-ci <taskId>` (CLI) and `mesa_link_pr` / `mesa_import_ci_results`
+   (MCP, in `packages/mcp-server`, which now depends on `@agentmesa/connector-github`)
+   both call the real connector functions. **Not done, and intentionally deferred:**
+   inbound GitHub webhook sync and a `GitHubTransport` registered in the transport
+   registry — `docs/TRANSPORTS.md`'s "GitHub Transport (future)" section needs an actual
+   HTTP/webhook receiving end before a transport implementation is anything but a sender
+   with nowhere to send; building it now would be speculative infrastructure with no
+   consumer.
+7. **CI integration** — `done`. `MesaCheckResult` had a complete schema but was never
+   created or read anywhere in the codebase. Added `@agentmesa/core`'s
+   `check-result-service.ts` (`createCheckResult` / `getCheckResult` / `listCheckResults`,
+   mirroring `agent-run-service.ts`: own `checksDir`, `check_completed` event — already in
+   the event vocabulary, no new event type needed — `check.create`/`check.read` actions
+   mapped to the existing `manage_runs` capability). `connector-github`'s `importCIResults`
+   now maps every finished `gh run list` entry through the pure, unit-tested
+   `ciStatusToCheckResultInput` and records a real `MesaCheckResult` per run (in addition
+   to the pre-existing `test_result` artifact, kept for backward compatibility) —
+   `mesa checks list|show` (CLI) and `mesa_create_check` / `mesa_list_checks` /
+   `mesa_get_check` (MCP, source-agnostic — any caller can record a check, not just
+   GitHub) read them back. Runs still in progress (`conclusion: null`) are skipped, not
+   recorded as errors. **Not done:** a `CITransport` / webhook receiver — same reasoning
+   as item 6, no HTTP endpoint exists yet to justify it.
 
 ### Stage D — Visualization
-8. **Mesa Desk** — UI dashboard for meetings/tasks/runs/handoffs. Usually last,
-   but a read-only view could land earlier as a debugging aid.
+8. **Mesa Desk** — `done`. `packages/desk` was already real (`DeskServer` is a
+   zero-dependency `node:http` server; `generateDashboardHtml()` is real embedded
+   HTML/CSS/JS; all 14 pre-existing tests are genuine HTTP integration tests) but
+   had two gaps, the same "code is real but nothing reaches it" pattern fixed for
+   the Codex plugin in Stage B: no `mesa desk` CLI command, and no visibility into
+   Stage A–C's new entities (agent runs, workflow status, handoffs, check results —
+   only Task/Meeting/Agent/Artifact existed on the dashboard). Both are now fixed.
+   `packages/orchestrator` gained `listWorkflowStates(ctx)` (mirrors
+   `saveState`/`loadState`'s raw-fs read of `.agentmesa/logs/workflows/`, sorted
+   newest-first — there was no "list all" before). `packages/desk` (now depending
+   on `@agentmesa/orchestrator`) added four read-only routes — `GET /api/runs`
+   (`listAgentRuns`), `/api/workflows` (`listWorkflowStates`), `/api/handoffs`
+   (`{ outbound: listOutboundHandoffs, inbound: listInboundHandoffs }`, same shape
+   as the MCP `handleListHandoffs` tool), `/api/checks` (`listCheckResults`) — and
+   `/api/status` now also returns `runs`/`checks`/`handoffs` counts. The dashboard
+   itself keeps its existing dark GitHub-style visual language (confirmed with the
+   product owner rather than redesigned): four new cards (Agent Runs / Workflows /
+   Handoffs / Check Results) with the same `.item`/`.item-title`/`.item-meta`/
+   `.badge` structure as the pre-existing cards, new status-color badge classes
+   reusing the existing semantic palette (green=passed/completed, red=error,
+   blue=running, gray=pending/skipped), and the existing 30s `Promise.all` refresh
+   loop now also fetches and renders the four new endpoints. `mesa desk [--port <n>]`
+   (new `packages/cli/src/commands/desk.ts`) starts the server and prints the URL —
+   the CLI's first long-running command (all others are one-shot), so it
+   intentionally has no `--json`/automated test, matching the `gh`-CLI-dependent
+   commands' testing tradeoff; verified instead by seeding a temp workspace with
+   real task/run/workflow/check/handoff data and curling all four new endpoints
+   plus `/` end-to-end. Tests: `listWorkflowStates` (3 new, orchestrator now 36),
+   desk server routes (5 new, desk now 23 total across dashboard+server), dashboard
+   card presence (4 new, desk dashboard.test.ts now 9).
 
 Rationale: power the existing foundation first (Runner + Orchestrator make the
 handoff loop run on its own), then onboard real AI participants (MCP + plugins),
-then integrate outward (GitHub/CI), then build the UI.
+then integrate outward (GitHub/CI), then build the UI. All four Post-Hardening
+Sequence stages are now complete.
