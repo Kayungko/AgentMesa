@@ -15,6 +15,8 @@ import {
   listAgents,
   rebuildAllProjections,
   RoleBasedPolicyEngine,
+  createCheckResult,
+  listArtifacts,
 } from '@agentmesa/core';
 import type { MesaWorkspacePaths } from '@agentmesa/core';
 import type { MesaRuntimeContext } from '@agentmesa/core';
@@ -22,6 +24,8 @@ import { runTimeline } from '../commands/events.js';
 import { runPolicyCheck, runPolicyInspect } from '../commands/policy.js';
 import { runTransports } from '../commands/transports.js';
 import { runDoctor } from '../commands/doctor.js';
+import { runChecks } from '../commands/checks.js';
+import { runGithub } from '../commands/github.js';
 import type { ParsedArgs } from '../parse-args.js';
 
 let testDir: string;
@@ -853,6 +857,123 @@ describe('CLI transports subcommands', () => {
         expect(generalFindings.length).toBeGreaterThan(0);
         const transportOk = parsed.findings.filter((f) => f.category === 'transport' && f.level === 'ok');
         expect(transportOk.length).toBeGreaterThanOrEqual(1);
+      } finally {
+        logSpy.mockRestore();
+      }
+    });
+  });
+});
+
+describe('CLI checks commands', () => {
+  describe('checks list', () => {
+    it('lists check results filtered by task/kind/status as JSON', () => {
+      const task = createTask(ctx, { title: 'Checked feature' });
+      createCheckResult(ctx, { taskId: task.id, kind: 'test', status: 'passed', checkName: 'Unit', success: true });
+      createCheckResult(ctx, { taskId: task.id, kind: 'lint', status: 'failed', checkName: 'ESLint', success: false });
+
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        runChecks({ command: 'checks', subcommand: 'list', positional: [], flags: { json: true, task: task.id } }, ctx);
+        const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        const parsed = JSON.parse(stdout) as Array<{ checkName: string }>;
+        expect(parsed).toHaveLength(2);
+      } finally {
+        logSpy.mockRestore();
+      }
+    });
+
+    it('filters by status', () => {
+      const task = createTask(ctx, { title: 'Checked feature' });
+      createCheckResult(ctx, { taskId: task.id, status: 'passed', checkName: 'Unit', success: true });
+      createCheckResult(ctx, { taskId: task.id, status: 'failed', checkName: 'ESLint', success: false });
+
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        runChecks({ command: 'checks', subcommand: 'list', positional: [], flags: { json: true, status: 'failed' } }, ctx);
+        const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        const parsed = JSON.parse(stdout) as Array<{ checkName: string; status: string }>;
+        expect(parsed).toHaveLength(1);
+        expect(parsed[0]!.checkName).toBe('ESLint');
+      } finally {
+        logSpy.mockRestore();
+      }
+    });
+  });
+
+  describe('checks show', () => {
+    it('shows a check result by id as JSON', () => {
+      const task = createTask(ctx, { title: 'Checked feature' });
+      const check = createCheckResult(ctx, { taskId: task.id, status: 'passed', checkName: 'Unit', success: true });
+
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        runChecks({ command: 'checks', subcommand: 'show', positional: [check.id], flags: { json: true } }, ctx);
+        const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        const parsed = JSON.parse(stdout) as { id: string };
+        expect(parsed.id).toBe(check.id);
+      } finally {
+        logSpy.mockRestore();
+      }
+    });
+
+    it('prints usage when checkId is missing', () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        runChecks({ command: 'checks', subcommand: 'show', positional: [], flags: {} }, ctx);
+        const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        expect(stdout).toContain('Usage: mesa checks show');
+      } finally {
+        logSpy.mockRestore();
+      }
+    });
+  });
+});
+
+describe('CLI github commands', () => {
+  describe('github link-pr', () => {
+    it('links a PR to a task by creating a pr_summary artifact', async () => {
+      const task = createTask(ctx, { title: 'PR-linked feature' });
+      await runGithub(
+        { command: 'github', subcommand: 'link-pr', positional: [task.id, '42'], flags: { json: true } },
+        paths,
+      );
+      const artifacts = listArtifacts(ctx, task.id, 'pr_summary');
+      expect(artifacts).toHaveLength(1);
+    });
+
+    it('prints usage when arguments are missing', async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        await runGithub({ command: 'github', subcommand: 'link-pr', positional: [], flags: {} }, paths);
+        const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        expect(stdout).toContain('Usage: mesa github link-pr');
+      } finally {
+        logSpy.mockRestore();
+      }
+    });
+  });
+
+  describe('github import-ci', () => {
+    it('prints usage when taskId is missing (does not shell out to gh)', async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        await runGithub({ command: 'github', subcommand: 'import-ci', positional: [], flags: {} }, paths);
+        const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        expect(stdout).toContain('Usage: mesa github import-ci');
+      } finally {
+        logSpy.mockRestore();
+      }
+    });
+  });
+
+  describe('github unknown subcommand', () => {
+    it('prints usage listing link-pr and import-ci', async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        await runGithub({ command: 'github', subcommand: '', positional: [], flags: {} }, paths);
+        const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+        expect(stdout).toContain('link-pr');
+        expect(stdout).toContain('import-ci');
       } finally {
         logSpy.mockRestore();
       }

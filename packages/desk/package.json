@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@agentmesa/core": "workspace:*",
+    "@agentmesa/orchestrator": "workspace:*",
     "@agentmesa/protocol": "workspace:*"
   },
   "devDependencies": {

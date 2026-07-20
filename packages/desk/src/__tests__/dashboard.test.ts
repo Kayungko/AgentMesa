@@ -23,6 +23,26 @@ describe('generateDashboardHtml', () => {
     expect(html).toContain('agent-status');
   });
 
+  it('contains agent runs section', () => {
+    expect(html).toContain('Agent Runs');
+    expect(html).toContain('agent-runs');
+  });
+
+  it('contains workflows section', () => {
+    expect(html).toContain('Workflows');
+    expect(html).toContain('id="workflows"');
+  });
+
+  it('contains handoffs section', () => {
+    expect(html).toContain('Handoffs');
+    expect(html).toContain('id="handoffs"');
+  });
+
+  it('contains check results section', () => {
+    expect(html).toContain('Check Results');
+    expect(html).toContain('check-results');
+  });
+
   it('is a complete HTML document', () => {
     expect(html).toContain('<!DOCTYPE html>');
     expect(html).toContain('<html');

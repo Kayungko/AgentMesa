@@ -2,15 +2,28 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { initWorkspace } from '@agentmesa/core';
+import {
+  initWorkspace,
+  createRuntimeContext,
+  createTask,
+  createAgentRun,
+  createCheckResult,
+  writeReviewRequest,
+} from '@agentmesa/core';
+import type { MesaRuntimeContext } from '@agentmesa/core';
 import { DeskServer } from '../server.js';
 
 let testDir: string;
+let ctx: MesaRuntimeContext;
 let server: DeskServer;
 
 beforeEach(() => {
   testDir = mkdtempSync(join(tmpdir(), 'agentmesa-desk-test-'));
   initWorkspace(testDir);
+  ctx = createRuntimeContext({
+    rootDir: testDir,
+    actor: { id: 'user:test', type: 'user', roles: ['owner'] },
+  });
 });
 
 afterEach(async () => {
@@ -118,5 +131,75 @@ describe('DeskServer', () => {
     const res = await fetch(`http://localhost:${port}/api/unknown`);
 
     expect(res.status).toBe(404);
+  });
+
+  it('GET /api/runs returns agent runs', async () => {
+    const task = createTask(ctx, { title: 'Build feature' });
+    createAgentRun(ctx, { agentId: 'builder-1', input: 'Implement X', taskId: task.id });
+
+    server = new DeskServer(testDir, 0);
+    await server.start();
+    const res = await fetch(`http://localhost:${server.getPort()}/api/runs`);
+    const body = (await res.json()) as Array<{ agentId: string }>;
+
+    expect(res.status).toBe(200);
+    expect(body).toHaveLength(1);
+    expect(body[0]!.agentId).toBe('builder-1');
+  });
+
+  it('GET /api/workflows returns an empty array when no workflow ran', async () => {
+    server = new DeskServer(testDir, 0);
+    await server.start();
+    const res = await fetch(`http://localhost:${server.getPort()}/api/workflows`);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toEqual([]);
+  });
+
+  it('GET /api/handoffs returns outbound and inbound envelopes', async () => {
+    const task = createTask(ctx, { title: 'Build feature' });
+    writeReviewRequest(ctx, {
+      taskId: task.id,
+      runId: 'run_abc',
+      artifactId: 'artifact_1',
+      requestedReviewer: 'codex',
+      summary: 'Please review',
+    });
+
+    server = new DeskServer(testDir, 0);
+    await server.start();
+    const res = await fetch(`http://localhost:${server.getPort()}/api/handoffs`);
+    const body = (await res.json()) as { outbound: unknown[]; inbound: unknown[] };
+
+    expect(res.status).toBe(200);
+    expect(body.outbound).toHaveLength(1);
+    expect(body.inbound).toEqual([]);
+  });
+
+  it('GET /api/checks returns check results', async () => {
+    const task = createTask(ctx, { title: 'Build feature' });
+    createCheckResult(ctx, { taskId: task.id, status: 'passed', checkName: 'Unit Tests', success: true });
+
+    server = new DeskServer(testDir, 0);
+    await server.start();
+    const res = await fetch(`http://localhost:${server.getPort()}/api/checks`);
+    const body = (await res.json()) as Array<{ checkName: string }>;
+
+    expect(res.status).toBe(200);
+    expect(body).toHaveLength(1);
+    expect(body[0]!.checkName).toBe('Unit Tests');
+  });
+
+  it('GET /api/status includes runs, checks, and handoffs counts', async () => {
+    server = new DeskServer(testDir, 0);
+    await server.start();
+    const res = await fetch(`http://localhost:${server.getPort()}/api/status`);
+    const body = (await res.json()) as { runs: number; checks: number; handoffs: number };
+
+    expect(res.status).toBe(200);
+    expect(typeof body.runs).toBe('number');
+    expect(typeof body.checks).toBe('number');
+    expect(typeof body.handoffs).toBe('number');
   });
 });

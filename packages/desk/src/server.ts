@@ -9,9 +9,14 @@ import {
   listArtifacts,
   getArtifact,
   listAgents,
+  listAgentRuns,
+  listCheckResults,
+  listOutboundHandoffs,
+  listInboundHandoffs,
 } from '@agentmesa/core';
 import type { MesaRuntimeContext } from '@agentmesa/core';
 import { MesaError } from '@agentmesa/core';
+import { listWorkflowStates } from '@agentmesa/orchestrator';
 import { generateDashboardHtml } from './dashboard.js';
 
 export class DeskServer {
@@ -168,17 +173,49 @@ export class DeskServer {
       return;
     }
 
+    if (pathname === '/api/runs') {
+      const runs = listAgentRuns(ctx);
+      this.sendJson(res, runs);
+      return;
+    }
+
+    if (pathname === '/api/workflows') {
+      const workflows = listWorkflowStates(ctx);
+      this.sendJson(res, workflows);
+      return;
+    }
+
+    if (pathname === '/api/handoffs') {
+      this.sendJson(res, {
+        outbound: listOutboundHandoffs(ctx),
+        inbound: listInboundHandoffs(ctx),
+      });
+      return;
+    }
+
+    if (pathname === '/api/checks') {
+      const checks = listCheckResults(ctx);
+      this.sendJson(res, checks);
+      return;
+    }
+
     if (pathname === '/api/status') {
       const tasks = listTasks(ctx);
       const meetings = listMeetings(ctx);
       const agents = listAgents(ctx);
       const artifacts = listArtifacts(ctx);
+      const runs = listAgentRuns(ctx);
+      const checks = listCheckResults(ctx);
+      const handoffs = listOutboundHandoffs(ctx).length + listInboundHandoffs(ctx).length;
 
       this.sendJson(res, {
         tasks: tasks.length,
         meetings: meetings.length,
         agents: agents.length,
         artifacts: artifacts.length,
+        runs: runs.length,
+        checks: checks.length,
+        handoffs,
       });
       return;
     }

@@ -109,6 +109,16 @@ export function generateDashboardHtml(): string {
     .badge-closed { background: #6e7681; color: #fff; }
     .badge-archived { background: #30363d; color: #fff; }
 
+    .badge-pending { background: #6e7681; color: #fff; }
+    .badge-running { background: #1f6feb; color: #fff; }
+    .badge-completed { background: #238636; color: #fff; }
+    .badge-passed { background: #238636; color: #fff; }
+    .badge-error { background: #f85149; color: #fff; }
+    .badge-skipped { background: #6e7681; color: #fff; }
+    .badge-waiting_approval { background: #d29922; color: #fff; }
+    .badge-paused { background: #6e7681; color: #fff; }
+    .badge-processed { background: #238636; color: #fff; }
+
     .badge-role {
       background: #30363d;
       color: #c9d1d9;
@@ -203,6 +213,34 @@ export function generateDashboardHtml(): string {
       <h2>Artifacts</h2>
       <div id="artifacts">
         <div class="empty">Loading artifacts...</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Agent Runs</h2>
+      <div id="agent-runs">
+        <div class="empty">Loading runs...</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Workflows</h2>
+      <div id="workflows">
+        <div class="empty">Loading workflows...</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Handoffs</h2>
+      <div id="handoffs">
+        <div class="empty">Loading handoffs...</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Check Results</h2>
+      <div id="check-results">
+        <div class="empty">Loading check results...</div>
       </div>
     </div>
   </div>
@@ -307,6 +345,83 @@ export function generateDashboardHtml(): string {
       \`).join('');
     }
 
+    function renderRuns(runs) {
+      const el = document.getElementById('agent-runs');
+      if (!runs || runs.length === 0) {
+        el.innerHTML = '<div class="empty">No agent runs found</div>';
+        return;
+      }
+
+      el.innerHTML = runs.map(run => \`
+        <div class="item">
+          <div class="item-title">\${run.action} — \${run.agentId}</div>
+          <div class="item-meta">
+            <span class="badge badge-\${run.status}">\${run.status}</span>
+            <span>ID: \${run.id}</span>
+            \${run.taskId ? ' | Task: ' + run.taskId : ''}
+          </div>
+        </div>
+      \`).join('');
+    }
+
+    function renderWorkflows(workflows) {
+      const el = document.getElementById('workflows');
+      if (!workflows || workflows.length === 0) {
+        el.innerHTML = '<div class="empty">No workflows found</div>';
+        return;
+      }
+
+      el.innerHTML = workflows.map(wf => \`
+        <div class="item">
+          <div class="item-title">\${wf.workflowDefinitionId}</div>
+          <div class="item-meta">
+            <span class="badge badge-\${wf.status}">\${wf.status}</span>
+            <span>Step: \${wf.currentStep}</span>
+            <span> | Task: \${wf.taskId}</span>
+          </div>
+        </div>
+      \`).join('');
+    }
+
+    function renderHandoffs(handoffs) {
+      const el = document.getElementById('handoffs');
+      const all = handoffs ? [...handoffs.outbound, ...handoffs.inbound] : [];
+      if (all.length === 0) {
+        el.innerHTML = '<div class="empty">No handoffs found</div>';
+        return;
+      }
+
+      el.innerHTML = all.map(h => \`
+        <div class="item">
+          <div class="item-title">\${h.type}</div>
+          <div class="item-meta">
+            <span class="badge badge-\${h.status}">\${h.status}</span>
+            <span>Task: \${h.taskId}</span>
+            <span> | \${h.direction}</span>
+          </div>
+        </div>
+      \`).join('');
+    }
+
+    function renderChecks(checks) {
+      const el = document.getElementById('check-results');
+      if (!checks || checks.length === 0) {
+        el.innerHTML = '<div class="empty">No check results found</div>';
+        return;
+      }
+
+      el.innerHTML = checks.map(check => \`
+        <div class="item">
+          <div class="item-title">\${check.checkName}</div>
+          <div class="item-meta">
+            <span class="badge badge-\${check.status}">\${check.status}</span>
+            <span class="badge badge-role">\${check.kind}</span>
+            <span> | Task: \${check.taskId}</span>
+          </div>
+        </div>
+      \`).join('');
+    }
+
     function renderStatus(status) {
       const el = document.getElementById('status-summary');
       if (!status) {
@@ -332,16 +447,32 @@ export function generateDashboardHtml(): string {
             <div class="stat-value">\${status.artifacts}</div>
             <div class="stat-label">Artifacts</div>
           </div>
+          <div class="stat">
+            <div class="stat-value">\${status.runs}</div>
+            <div class="stat-label">Runs</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value">\${status.checks}</div>
+            <div class="stat-label">Checks</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value">\${status.handoffs}</div>
+            <div class="stat-label">Handoffs</div>
+          </div>
         </div>
       \`;
     }
 
     async function refresh() {
-      const [tasks, meetings, agents, artifacts, status] = await Promise.all([
+      const [tasks, meetings, agents, artifacts, runs, workflows, handoffs, checks, status] = await Promise.all([
         fetchJson('/api/tasks'),
         fetchJson('/api/meetings'),
         fetchJson('/api/agents'),
         fetchJson('/api/artifacts'),
+        fetchJson('/api/runs'),
+        fetchJson('/api/workflows'),
+        fetchJson('/api/handoffs'),
+        fetchJson('/api/checks'),
         fetchJson('/api/status'),
       ]);
 
@@ -349,6 +480,10 @@ export function generateDashboardHtml(): string {
       renderMeetings(meetings);
       renderAgents(agents);
       renderArtifacts(artifacts);
+      renderRuns(runs);
+      renderWorkflows(workflows);
+      renderHandoffs(handoffs);
+      renderChecks(checks);
       renderStatus(status);
 
       const now = new Date().toLocaleTimeString();

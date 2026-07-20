@@ -14,6 +14,9 @@ import { runRebuild } from './commands/rebuild.js';
 import { runPolicyCheck, runPolicyInspect } from './commands/policy.js';
 import { runRuns } from './commands/runs.js';
 import { runWorkflow } from './commands/workflow.js';
+import { runChecks } from './commands/checks.js';
+import { runGithub } from './commands/github.js';
+import { runDesk } from './commands/desk.js';
 
 const args = parseArgs(process.argv);
 
@@ -73,6 +76,18 @@ switch (args.command) {
 
   case 'workflow':
     void runWorkflow(args);
+    break;
+
+  case 'checks':
+    runChecks(args);
+    break;
+
+  case 'github':
+    void runGithub(args);
+    break;
+
+  case 'desk':
+    void runDesk(args);
     break;
 
   case 'policy':
@@ -135,6 +150,11 @@ Inspection Commands:
   workflow status <id>         Show workflow status and history
   workflow approve <id>        Approve a workflow waiting on human approval
   workflow run <id>            Advance a running workflow
+  checks list                  List check results (--task, --kind, --status)
+  checks show <id>             Show check result details
+  github link-pr <task> <pr>   Link a GitHub pull request to a task (requires gh CLI)
+  github import-ci <task>      Import gh run status as check results (--agent)
+  desk [--port <n>]            Start the Mesa Desk web dashboard (default port 3456)
   policy check <action> <res>  Check if action is allowed for an actor
                    --actor <id> --role <role>
   policy inspect              Show role capability matrix
