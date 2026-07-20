@@ -79,6 +79,7 @@ function loadOrCreateConfig(
   if (content === null) {
     const config: MesaConfig = {
       protocolVersion: currentProtocolVersion,
+      policy: { mode: 'role-based' },
       readModel: { mode: 'hybrid' },
     };
     storage.writeText(configPath, `${JSON.stringify(config, null, 2)}\n`);

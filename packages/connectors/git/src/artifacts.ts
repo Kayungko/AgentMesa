@@ -15,7 +15,7 @@ export function createGitDiffArtifact(
     actor: {
       id: agentId,
       type: 'agent',
-      roles: ['custom'],
+      roles: ['connector'],
       client: 'git',
     },
   });

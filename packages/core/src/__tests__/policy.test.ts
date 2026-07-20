@@ -131,9 +131,12 @@ describe('RoleBasedPolicyEngine', () => {
     expect(result.allowed).toBe(false);
   });
 
-  it('denies builder from managing agents', () => {
-    const result = policy.can(actor({ roles: ['builder'] }), 'agent.register', 'a1');
-    expect(result.allowed).toBe(false);
+  it('allows builder to manage agents and meetings', () => {
+    // builder gained manage_agents/manage_meetings so the default MCP actor
+    // role (no AGENTMESA_MCP_ACTOR_ROLES configured) can call
+    // mesa_register_agent / mesa_create_meeting out of the box.
+    expect(policy.can(actor({ roles: ['builder'] }), 'agent.register', 'a1').allowed).toBe(true);
+    expect(policy.can(actor({ roles: ['builder'] }), 'meeting.create', 'm1').allowed).toBe(true);
   });
 
   it('allows maintainer to do everything', () => {
@@ -271,6 +274,20 @@ describe('RoleBasedPolicyEngine', () => {
     const c = actor({ id: 'ci:github', type: 'ci', roles: ['ci'] });
     expect(policy.can(c, 'event.read', 'e1').allowed).toBe(true);
     expect(policy.can(c, 'projection.read', 'p1').allowed).toBe(true);
+  });
+
+  it('allows read_only to read tasks, events, projections, and handoffs', () => {
+    const r = actor({ id: 'system:desk', type: 'system', roles: ['read_only'] });
+    expect(policy.can(r, 'event.read', 'e1').allowed).toBe(true);
+    expect(policy.can(r, 'projection.read', 'p1').allowed).toBe(true);
+    expect(policy.can(r, 'handoff.read', 'transport:outbox').allowed).toBe(true);
+  });
+
+  it('denies read_only from writing tasks, meetings, or agents', () => {
+    const r = actor({ id: 'system:desk', type: 'system', roles: ['read_only'] });
+    expect(policy.can(r, 'task.create', 't1').allowed).toBe(false);
+    expect(policy.can(r, 'meeting.create', 'm1').allowed).toBe(false);
+    expect(policy.can(r, 'agent.register', 'a1').allowed).toBe(false);
   });
 
   it('denies reviewer task.updateStatus without targetStatus context', () => {

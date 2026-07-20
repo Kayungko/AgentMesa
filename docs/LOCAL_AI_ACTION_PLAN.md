@@ -198,23 +198,73 @@ Acceptance:
 
 ## Priority 7: Policy Layer
 
-Status: `baseline_complete` — policy enforcement foundation is in place. This is not a full security model; it enforces coarse-grained role boundaries. `RoleBasedPolicyEngine` is available but NOT the default (local dev uses `AllowAllMesaPolicyEngine`). Capability gating (canEditFiles, canRunShell) and finer-grained ABAC checks remain deferred.
+Status: `role_based_default_for_new_workspaces` — `RoleBasedPolicyEngine` is now
+the default for any newly initialized workspace (`mesa init`, or the first
+`createRuntimeContext` call against a directory with no `.agentmesa/config.json`
+yet). This is not a full security model; it enforces coarse-grained role
+boundaries. Capability gating (canEditFiles, canRunShell) and finer-grained
+ABAC checks remain deferred.
 
 - `RoleBasedPolicyEngine` in core: maps 21 action keys → 14 capabilities with per-role capability sets. Owner bypass built in. Constructor accepts overrides.
-- Production roles: `owner`, `admin`, `builder`, `reviewer`, `connector`, `ci`, `system`. Legacy roles preserved.
+- Production roles: `owner`, `admin`, `builder`, `reviewer`, `connector`, `ci`, `system`, `read_only`. Legacy roles preserved.
 - Unknown actions are denied by default.
+- **Default flip, `done`:** `createRuntimeContext`'s `loadOrCreateConfig` now
+  writes `policy: { mode: 'role-based' }` into the config it creates for a
+  brand-new workspace (`packages/core/src/runtime/create-runtime-context.ts`).
+  Pre-existing workspaces are untouched — a `.agentmesa/config.json` already on
+  disk without a `policy` field keeps resolving to `AllowAllMesaPolicyEngine`,
+  exactly as before; only workspaces created after this change opt in. Flipping
+  the default surfaced three real gaps that had to be fixed first, all in
+  `packages/core/src/runtime/policy.ts`'s `ROLE_CAPABILITIES` table or the
+  actor roles that reach it:
+  - Mesa Desk's actor used `roles: ['read_only']` (`packages/desk/src/server.ts`),
+    but `'read_only'` (a valid `PermissionLevel` in `@agentmesa/protocol`, just
+    never added to the capability table) had zero mapped capabilities — every
+    policy-checked call would have been denied. Added a real `read_only` role:
+    `read_task`, `read_events`, `read_projections`, `manage_runs` (the last one
+    is needed because `handoff.read` — Desk's only actually-guarded call,
+    `/api/handoffs` — shares the same coarse-grained `manage_runs` capability as
+    the write-side `run.create`/`handoff.write`/`check.create`; Desk's code never
+    calls those, so the extra grant is unused in practice, not a live risk).
+  - Every connector (`packages/connectors/{git,shell,github}/src/*.ts`) used
+    `roles: ['custom']`, which only has `read_task` — not enough for
+    `createArtifact` (`create_artifact`) or, for the GitHub CI connector,
+    `createCheckResult` (`manage_runs`). Switched to the existing `connector`
+    role (git/shell/github artifact + PR-link writers) or `ci` role
+    (`connectors/github/src/ci.ts`, which needs both `create_artifact` and
+    `manage_runs`) — no capability table changes needed, just picking the
+    already-correct production role instead of the placeholder `custom`.
+  - MCP Server's default actor role is `'builder'` (`AGENTMESA_MCP_ACTOR_ROLES`
+    unset) and covers nearly every tool, but `mesa_create_meeting`
+    (`manage_meetings`) and `mesa_register_agent` (`manage_agents`) would have
+    been denied out of the box. Added both capabilities to `builder` (not the
+    more sensitive `archive_task`/`delete_task`/`rebuild_projections`/
+    `inspect_transports`) so an unconfigured MCP client keeps working.
+  - Full workspace test suite (838 tests) passed with zero regressions after
+    the flip — nearly every test builds a brand-new temp workspace via
+    `mkdtempSync` + `initWorkspace`, so this was a real end-to-end check of the
+    new default, not just the capability-table unit tests.
+  - **Known follow-up, not done:** `mesa policy inspect`'s `VALID_ROLES` list
+    (`packages/cli/src/commands/policy.ts`) predates this change and is typed
+    as `AgentRole[]`, which doesn't include `read_only` (a `PermissionLevel`).
+    Its `knownActions` list also predates Stage A/C and is already missing the
+    `run.*`/`handoff.*`/`check.*` actions entirely. Both are pre-existing CLI
+    inspection-tool staleness, not something this change introduced, but
+    `read_only` (and the run/handoff/check actions) won't show up in
+    `mesa policy inspect`'s matrix until that command's static lists are
+    updated separately.
 - `canWithContext(actor, action, resource, context?)` enforces reviewer status transition gate: pure reviewer may only transition to `approved` or `changes_requested`. Multi-role actors (reviewer+builder, reviewer+chair, reviewer+admin, reviewer+maintainer, reviewer+owner) bypass the gate via non-reviewer `change_status` capability. `updateTaskStatus` passes `targetStatus` via `assertPolicyWithContext()`.
-- `mesa policy check` / `mesa policy inspect` default to `--mode role-based` (canonical `RoleBasedPolicyEngine`). `--mode current` uses workspace config. `--role` validated against known AgentRole values; `--roles a,b` supports multi-role. Both commands output `mode` in JSON. `policy inspect` covers all 14 VALID_ROLES (owner, admin, builder, reviewer, connector, ci, system, chair, planner, tester, documenter, maintainer, researcher, custom). Missing `action` in `policy check` with `--json` outputs structured error via `outputError`.
+- `mesa policy check` / `mesa policy inspect` default to `--mode role-based` (canonical `RoleBasedPolicyEngine`). `--mode current` uses workspace config. `--role` validated against known AgentRole values; `--roles a,b` supports multi-role. Both commands output `mode` in JSON. `policy inspect` covers all 14 VALID_ROLES (owner, admin, builder, reviewer, connector, ci, system, chair, planner, tester, documenter, maintainer, researcher, custom) — not yet `read_only`, see follow-up above. Missing `action` in `policy check` with `--json` outputs structured error via `outputError`.
 - Read path enforcement: `listEvents`/`getTaskEvents`/`getMeetingEvents` → `event.read`; `getTaskProjection`/`getMeetingProjection`/`getAgentProjection`/`listTaskProjections`/`listMeetingProjections`/`listAgentProjections` → `projection.read`; `rebuildTaskProjections`/`rebuildMeetingProjections`/`rebuildAgentProjections` → `projection.rebuild`; `runTransports` → `transport.inspect`. Internal helpers (`_get*`/`_list*`) and freshness helpers (`isTaskProjectionFresh`, etc.) are excluded from the `@agentmesa/core` public index — freshness checks are computed internally by `read-model-service` and `doctor`. Callers cannot bypass `projection.read` enforcement through public API.
-- Policy enforcement tests cover: builder deny delete/archive, connector deny delete/create, ci deny delete/create, reviewer context-aware status gate (pure reviewer only approved/changes_requested; reviewer+builder/chair/admin/maintainer/owner bypass), system deny write tasks, owner/admin bypass, allow-all backward compat, event/projection/rebuild/transport enforcement, all 21 actions and 14 roles.
+- Policy enforcement tests cover: builder deny delete/archive, connector deny delete/create, ci deny delete/create, reviewer context-aware status gate (pure reviewer only approved/changes_requested; reviewer+builder/chair/admin/maintainer/owner bypass), system deny write tasks, owner/admin bypass, allow-all backward compat, event/projection/rebuild/transport enforcement, read_only allow/deny, builder manage_agents/manage_meetings, all 21 actions and 15 roles.
 - CLI `resolveMode` throws on invalid `--mode`; error is caught and formatted via `outputError(err, json)` — structured JSON when `--json` is set, human-readable to stderr otherwise. Always sets `exitCode = 1`.
 - `packages/policy` definitions (`PolicyAction`, `RoleCapability`, `PermissionChecker`) aligned with core policy engine (18 actions, 14 roles including `owner`).
 - CLI uses the same `MesaRuntimeContext` as all other consumers.
-- `AllowAllMesaPolicyEngine` kept as development default; `RoleBasedPolicyEngine` available via config `policy.mode: "role-based"` or injection.
+- New workspaces default to `RoleBasedPolicyEngine`; `AllowAllMesaPolicyEngine` remains available via config `policy.mode: "allow-all"` or injection, and is what pre-existing workspaces keep resolving to.
 
 Deferred:
 - Capability gating (canEditFiles, canRunShell, etc.) is not checked by core services.
-- `RoleBasedPolicyEngine` is not the default — `AllowAllMesaPolicyEngine` is.
+- `mesa policy inspect`'s static role/action lists need a follow-up update (see above) to reflect `read_only` and the run/handoff/check actions.
 
 Direction:
 

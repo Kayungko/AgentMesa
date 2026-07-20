@@ -153,7 +153,7 @@ export async function linkPrToTask(
     actor: {
       id: 'github-connector',
       type: 'agent',
-      roles: ['custom'],
+      roles: ['connector'],
       client: 'github',
     },
   });

@@ -89,7 +89,7 @@ export async function importCIResults(
     actor: {
       id: agentId,
       type: 'agent',
-      roles: ['custom'],
+      roles: ['ci'],
       client: 'github',
     },
   });

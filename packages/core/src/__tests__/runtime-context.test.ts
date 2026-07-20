@@ -205,14 +205,58 @@ describe('default runtime dependencies', () => {
     expect(error).toHaveBeenCalledOnce();
   });
 
-  it('defaults to AllowAllMesaPolicyEngine when no policy mode is configured', () => {
+  it('defaults to RoleBasedPolicyEngine for a brand-new workspace', () => {
     const ctx = createRuntimeContext({
       rootDir: testDir,
       actor: { id: 'user:test', type: 'user', roles: ['owner'] },
     });
 
-    expect(ctx.policy).toBeInstanceOf(AllowAllMesaPolicyEngine);
+    expect(ctx.policy).toBeInstanceOf(RoleBasedPolicyEngine);
     expect(ctx.policy.can(ctx.actor, 'task.create', 't1')).toEqual({ allowed: true });
+  });
+
+  it('writes policy.mode role-based into a freshly created config.json', () => {
+    const ctx = createRuntimeContext({
+      rootDir: testDir,
+      actor: { id: 'user:test', type: 'user', roles: ['owner'] },
+    });
+
+    expect(ctx.config.policy).toEqual({ mode: 'role-based' });
+    const raw = ctx.storage.readText(join(ctx.paths.mesaDir, 'config.json'));
+    expect(JSON.parse(raw as string).policy).toEqual({ mode: 'role-based' });
+  });
+
+  it('denies an under-privileged actor by default in a new workspace', () => {
+    const ctx = createRuntimeContext({
+      rootDir: testDir,
+      actor: { id: 'agent:custom', type: 'agent', roles: ['custom'] },
+    });
+
+    // 'custom' only has read_task — this proves the default really did flip
+    // from allow-all to role-based, not just that the config field exists.
+    expect(ctx.policy.can(ctx.actor, 'task.create', 't1').allowed).toBe(false);
+  });
+
+  it('keeps AllowAllMesaPolicyEngine for a pre-existing config.json without a policy field', () => {
+    const storage = new FileStorageAdapter();
+    const configPath = join(testDir, '.agentmesa', 'config.json');
+    storage.writeText(
+      configPath,
+      JSON.stringify({
+        protocolVersion: currentProtocolVersion,
+      }),
+    );
+
+    const ctx = createRuntimeContext({
+      rootDir: testDir,
+      actor: { id: 'agent:custom', type: 'agent', roles: ['custom'] },
+      storage,
+    });
+
+    // Pre-existing workspaces are not retroactively affected by the new
+    // default — only brand-new configs opt into role-based enforcement.
+    expect(ctx.policy).toBeInstanceOf(AllowAllMesaPolicyEngine);
+    expect(ctx.policy.can(ctx.actor, 'task.create', 't1').allowed).toBe(true);
   });
 
   it('selects RoleBasedPolicyEngine when policy.mode is role-based', () => {

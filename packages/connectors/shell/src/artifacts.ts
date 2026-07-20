@@ -25,7 +25,7 @@ export function createCheckResultArtifact(
     actor: {
       id: agentId,
       type: 'agent',
-      roles: ['custom'],
+      roles: ['connector'],
       client: 'shell',
     },
   });

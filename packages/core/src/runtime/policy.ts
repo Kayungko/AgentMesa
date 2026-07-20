@@ -111,6 +111,8 @@ const ROLE_CAPABILITIES: Record<string, Capability[]> = {
     'read_events',
     'read_projections',
     'manage_runs',
+    'manage_meetings',
+    'manage_agents',
   ],
   reviewer: [
     'read_task',
@@ -141,6 +143,16 @@ const ROLE_CAPABILITIES: Record<string, Capability[]> = {
     'read_events',
     'read_projections',
     'rebuild_projections',
+  ],
+  // Read-only external viewers (e.g. Mesa Desk). Includes manage_runs
+  // because run/handoff/check reads share that capability with their write
+  // counterparts (coarse-grained by design — see docs/LOCAL_AI_ACTION_PLAN.md
+  // Priority 7); read_only actors never call the write-side functions.
+  read_only: [
+    'read_task',
+    'read_events',
+    'read_projections',
+    'manage_runs',
   ],
   // --- legacy roles (kept for backward compat) ---
   chair: [

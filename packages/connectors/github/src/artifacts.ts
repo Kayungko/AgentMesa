@@ -84,7 +84,7 @@ function createGithubContext(paths: MesaWorkspacePaths, agentId: string) {
     actor: {
       id: agentId,
       type: 'agent',
-      roles: ['custom'],
+      roles: ['connector'],
       client: 'github',
     },
   });
