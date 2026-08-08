@@ -110,8 +110,14 @@ function EmptyState({ title, detail }: { title: string; detail: string }) {
   return (
     <div className="empty-state">
       <svg className="empty-state__mark" viewBox="0 0 64 64" aria-hidden="true">
-        <path d="M15 47 L24 32 L40 32 L49 47 Z" fill="currentColor" />
-        <circle cx="32" cy="21" r="4.5" fill="currentColor" />
+        <path
+          d="M18 45 V28 H26 L32 37 L38 28 H46 V45"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
       </svg>
       <strong>{title}</strong>
       <p>{detail}</p>

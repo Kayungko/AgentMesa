@@ -1,15 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- AgentMesa app icon
-       Brand: purple (#8B7CFF family, carried over from the original tray pixel art)
-       Motif: a flat-topped mesa silhouette with an agent dot standing on it.
-       Kept deliberately simple so it stays legible at 16px tray size. -->
+  <!-- AgentMesa app icon — Apple-style treatment:
+       * superellipse-ish rounded container (rx 16 ≈ 25% of width)
+       * single-hue vertical gradient (light top -> deep bottom)
+       * reduced geometric monogram: an "M" whose two peaks are flattened
+         into mesas, drawn as one continuous round-capped stroke so it
+         stays legible at 16px tray size. -->
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#9D8FFF"/>
-      <stop offset="1" stop-color="#7A6BEF"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#A89BFF"/>
+      <stop offset="1" stop-color="#6E5CE7"/>
     </linearGradient>
   </defs>
-  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#bg)"/>
-  <path d="M15 47 L24 32 L40 32 L49 47 Z" fill="#FFFFFF"/>
-  <circle cx="32" cy="21" r="4.5" fill="#FFFFFF"/>
+  <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#bg)"/>
+  <path d="M18 45 V28 H26 L32 37 L38 28 H46 V45"
+        fill="none" stroke="#FFFFFF" stroke-width="5"
+        stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

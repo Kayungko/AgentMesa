@@ -5,7 +5,7 @@ export function generateDashboardHtml(): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AgentMesa 工作台</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='2' y='2' width='60' height='60' rx='14' fill='%238B7CFF'/%3E%3Cpath d='M15 47 L24 32 L40 32 L49 47 Z' fill='white'/%3E%3Ccircle cx='32' cy='21' r='4.5' fill='white'/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='2' y='2' width='60' height='60' rx='16' fill='%237C6CF0'/%3E%3Cpath d='M18 45 V28 H26 L32 37 L38 28 H46 V45' fill='none' stroke='white' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
   <style>
     * {
       margin: 0;
