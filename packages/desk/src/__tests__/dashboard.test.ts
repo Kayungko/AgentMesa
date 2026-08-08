@@ -47,6 +47,28 @@ describe('generateDashboardHtml', () => {
     expect(html).toContain('lang="zh-CN"');
   });
 
+  it('places the workspace summary above the card grid', () => {
+    const summaryIdx = html.indexOf('工作区概览');
+    const gridIdx = html.indexOf('class="grid"');
+    expect(summaryIdx).toBeGreaterThan(-1);
+    expect(gridIdx).toBeGreaterThan(-1);
+    expect(summaryIdx).toBeLessThan(gridIdx);
+  });
+
+  it('provides a manual refresh button and brand favicon', () => {
+    expect(html).toContain('refresh-btn');
+    expect(html).toContain('rel="icon"');
+  });
+
+  it('distinguishes load failure from empty lists', () => {
+    expect(html).toContain('加载失败，请检查服务连接');
+    expect(html).toContain('暂无任务');
+  });
+
+  it('caps card list height so long lists scroll', () => {
+    expect(html).toContain('max-height: 420px');
+  });
+
   it('is a complete HTML document', () => {
     expect(html).toContain('<!DOCTYPE html>');
     expect(html).toContain('<html');

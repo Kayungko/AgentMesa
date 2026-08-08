@@ -14,6 +14,7 @@ export function useMesaRuntime(config: RuntimeConfig) {
   const [events, setEvents] = useState<EventEnvelope[]>([]);
   const [connection, setConnection] = useState<ConnectionState>('connecting');
   const [error, setError] = useState<string>();
+  const [loaded, setLoaded] = useState(false);
   const cursorRef = useRef<string | undefined>(localStorage.getItem(cursorKey) ?? undefined);
   const seenRef = useRef(new Set<string>());
 
@@ -25,6 +26,7 @@ export function useMesaRuntime(config: RuntimeConfig) {
     setRuns(nextRuns);
     setWorkflows(nextWorkflows);
     setError(undefined);
+    setLoaded(true);
   }, [config]);
 
   useEffect(() => {
@@ -33,6 +35,7 @@ export function useMesaRuntime(config: RuntimeConfig) {
       if (!active) return;
       setError(reason instanceof Error ? reason.message : String(reason));
       setConnection('offline');
+      setLoaded(true);
     });
 
     const stream = createEventStream(
@@ -103,6 +106,7 @@ export function useMesaRuntime(config: RuntimeConfig) {
     failedRuns,
     connection,
     error,
+    loaded,
     refresh,
     decide,
   };

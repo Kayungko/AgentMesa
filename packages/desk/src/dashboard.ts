@@ -5,6 +5,7 @@ export function generateDashboardHtml(): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AgentMesa 工作台</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='2' y='2' width='60' height='60' rx='14' fill='%238B7CFF'/%3E%3Cpath d='M15 47 L24 32 L40 32 L49 47 Z' fill='white'/%3E%3Ccircle cx='32' cy='21' r='4.5' fill='white'/%3E%3C/svg%3E">
   <style>
     * {
       margin: 0;
@@ -36,6 +37,32 @@ export function generateDashboardHtml(): string {
     .header .subtitle {
       color: #8b949e;
       font-size: 0.9rem;
+    }
+
+    .refresh-btn {
+      margin-top: 0.9rem;
+      padding: 0.35rem 1.1rem;
+      background: #21262d;
+      color: #c9d1d9;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+
+    .refresh-btn:hover {
+      background: #30363d;
+      border-color: #58a6ff;
+    }
+
+    .summary-card {
+      margin-bottom: 1.5rem;
+    }
+
+    #task-board, #meeting-timeline, #agent-status, #artifacts,
+    #agent-runs, #workflows, #handoffs, #check-results {
+      max-height: 420px;
+      overflow-y: auto;
     }
 
     .grid {
@@ -185,6 +212,14 @@ export function generateDashboardHtml(): string {
   <div class="header">
     <h1>AgentMesa 工作台</h1>
     <div class="subtitle">本地工作区监控 · 每 30 秒自动刷新</div>
+    <button id="refresh-btn" class="refresh-btn" type="button">刷新</button>
+  </div>
+
+  <div class="card summary-card">
+    <h2>工作区概览</h2>
+    <div id="status-summary">
+      <div class="empty">正在加载概览...</div>
+    </div>
   </div>
 
   <div class="grid">
@@ -245,13 +280,6 @@ export function generateDashboardHtml(): string {
     </div>
   </div>
 
-  <div class="card">
-    <h2>工作区概览</h2>
-    <div id="status-summary">
-      <div class="empty">正在加载概览...</div>
-    </div>
-  </div>
-
   <div class="refresh-indicator" id="refresh-indicator">
     上次刷新：从未
   </div>
@@ -270,7 +298,11 @@ export function generateDashboardHtml(): string {
 
     function renderTasks(tasks) {
       const el = document.getElementById('task-board');
-      if (!tasks || tasks.length === 0) {
+      if (!tasks) {
+        el.innerHTML = '<div class="empty">加载失败，请检查服务连接</div>';
+        return;
+      }
+      if (tasks.length === 0) {
         el.innerHTML = '<div class="empty">暂无任务</div>';
         return;
       }
@@ -289,7 +321,11 @@ export function generateDashboardHtml(): string {
 
     function renderMeetings(meetings) {
       const el = document.getElementById('meeting-timeline');
-      if (!meetings || meetings.length === 0) {
+      if (!meetings) {
+        el.innerHTML = '<div class="empty">加载失败，请检查服务连接</div>';
+        return;
+      }
+      if (meetings.length === 0) {
         el.innerHTML = '<div class="empty">暂无会议</div>';
         return;
       }
@@ -309,7 +345,11 @@ export function generateDashboardHtml(): string {
 
     function renderAgents(agents) {
       const el = document.getElementById('agent-status');
-      if (!agents || agents.length === 0) {
+      if (!agents) {
+        el.innerHTML = '<div class="empty">加载失败，请检查服务连接</div>';
+        return;
+      }
+      if (agents.length === 0) {
         el.innerHTML = '<div class="empty">暂无已注册 Agent</div>';
         return;
       }
@@ -328,7 +368,11 @@ export function generateDashboardHtml(): string {
 
     function renderArtifacts(artifacts) {
       const el = document.getElementById('artifacts');
-      if (!artifacts || artifacts.length === 0) {
+      if (!artifacts) {
+        el.innerHTML = '<div class="empty">加载失败，请检查服务连接</div>';
+        return;
+      }
+      if (artifacts.length === 0) {
         el.innerHTML = '<div class="empty">暂无产出物</div>';
         return;
       }
@@ -347,7 +391,11 @@ export function generateDashboardHtml(): string {
 
     function renderRuns(runs) {
       const el = document.getElementById('agent-runs');
-      if (!runs || runs.length === 0) {
+      if (!runs) {
+        el.innerHTML = '<div class="empty">加载失败，请检查服务连接</div>';
+        return;
+      }
+      if (runs.length === 0) {
         el.innerHTML = '<div class="empty">暂无 Agent 运行记录</div>';
         return;
       }
@@ -366,7 +414,11 @@ export function generateDashboardHtml(): string {
 
     function renderWorkflows(workflows) {
       const el = document.getElementById('workflows');
-      if (!workflows || workflows.length === 0) {
+      if (!workflows) {
+        el.innerHTML = '<div class="empty">加载失败，请检查服务连接</div>';
+        return;
+      }
+      if (workflows.length === 0) {
         el.innerHTML = '<div class="empty">暂无工作流</div>';
         return;
       }
@@ -385,7 +437,11 @@ export function generateDashboardHtml(): string {
 
     function renderHandoffs(handoffs) {
       const el = document.getElementById('handoffs');
-      const all = handoffs ? [...handoffs.outbound, ...handoffs.inbound] : [];
+      if (!handoffs) {
+        el.innerHTML = '<div class="empty">加载失败，请检查服务连接</div>';
+        return;
+      }
+      const all = [...handoffs.outbound, ...handoffs.inbound];
       if (all.length === 0) {
         el.innerHTML = '<div class="empty">暂无交接记录</div>';
         return;
@@ -405,7 +461,11 @@ export function generateDashboardHtml(): string {
 
     function renderChecks(checks) {
       const el = document.getElementById('check-results');
-      if (!checks || checks.length === 0) {
+      if (!checks) {
+        el.innerHTML = '<div class="empty">加载失败，请检查服务连接</div>';
+        return;
+      }
+      if (checks.length === 0) {
         el.innerHTML = '<div class="empty">暂无检查结果</div>';
         return;
       }
@@ -464,6 +524,7 @@ export function generateDashboardHtml(): string {
     }
 
     async function refresh() {
+      document.getElementById('refresh-indicator').textContent = '刷新中…';
       const [tasks, meetings, agents, artifacts, runs, workflows, handoffs, checks, status] = await Promise.all([
         fetchJson('/api/tasks'),
         fetchJson('/api/meetings'),
@@ -489,6 +550,10 @@ export function generateDashboardHtml(): string {
       const now = new Date().toLocaleTimeString();
       document.getElementById('refresh-indicator').textContent = '上次刷新：' + now;
     }
+
+    document.getElementById('refresh-btn').addEventListener('click', () => {
+      void refresh();
+    });
 
     refresh();
     setInterval(refresh, 30000);

@@ -109,10 +109,52 @@ function ApprovalCard({
 function EmptyState({ title, detail }: { title: string; detail: string }) {
   return (
     <div className="empty-state">
-      <span className="empty-state__mark" />
+      <svg className="empty-state__mark" viewBox="0 0 64 64" aria-hidden="true">
+        <path d="M15 47 L24 32 L40 32 L49 47 Z" fill="currentColor" />
+        <circle cx="32" cy="21" r="4.5" fill="currentColor" />
+      </svg>
       <strong>{title}</strong>
       <p>{detail}</p>
     </div>
+  );
+}
+
+function SkeletonStack({ count, compact = false }: { count: number; compact?: boolean }) {
+  return (
+    <div className="stack">
+      {Array.from({ length: count }, (_, i) => (
+        <div key={i} className={`skeleton ${compact ? 'skeleton--compact' : ''}`} />
+      ))}
+    </div>
+  );
+}
+
+function RailIcon({ kind }: { kind: 'overview' | 'runs' | 'workflows' }) {
+  const common = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round' } as const;
+  if (kind === 'overview') {
+    return (
+      <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+        <rect x="2" y="2" width="6" height="6" rx="1.5" {...common} />
+        <rect x="10" y="2" width="6" height="6" rx="1.5" {...common} />
+        <rect x="2" y="10" width="6" height="6" rx="1.5" {...common} />
+        <rect x="10" y="10" width="6" height="6" rx="1.5" {...common} />
+      </svg>
+    );
+  }
+  if (kind === 'runs') {
+    return (
+      <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+        <path d="M10 2 L4 10 H9 L8 16 L14 8 H9 Z" {...common} />
+      </svg>
+    );
+  }
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <circle cx="5" cy="4" r="2" {...common} />
+      <circle cx="5" cy="14" r="2" {...common} />
+      <circle cx="13" cy="9" r="2" {...common} />
+      <path d="M5 6 V12 M6.5 5.2 L11 8 M6.5 12.8 L11 10" {...common} />
+    </svg>
   );
 }
 
@@ -181,7 +223,9 @@ function WidgetView({ config }: { config: RuntimeConfig }) {
           <span>正在运行</span>
           <small>{runtime.activeRuns.length}</small>
         </div>
-        {runtime.activeRuns.length > 0 ? (
+        {!runtime.loaded ? (
+          <SkeletonStack count={2} compact />
+        ) : runtime.activeRuns.length > 0 ? (
           <div className="stack">
             {runtime.activeRuns.slice(0, 4).map((run) => <RunCard key={run.id} run={run} compact />)}
           </div>
@@ -245,9 +289,9 @@ function MainView({ config }: { config: RuntimeConfig }) {
       <aside className="rail no-drag">
         <button className="rail__logo" onClick={() => setSection('overview')}>M</button>
         <nav>
-          <button className={section === 'overview' ? 'active' : ''} onClick={() => setSection('overview')} title="概览">O</button>
-          <button className={section === 'runs' ? 'active' : ''} onClick={() => setSection('runs')} title="运行">R</button>
-          <button className={section === 'workflows' ? 'active' : ''} onClick={() => setSection('workflows')} title="工作流">W</button>
+          <button className={section === 'overview' ? 'active' : ''} onClick={() => setSection('overview')} title="概览" aria-label="概览"><RailIcon kind="overview" /></button>
+          <button className={section === 'runs' ? 'active' : ''} onClick={() => setSection('runs')} title="运行" aria-label="运行"><RailIcon kind="runs" /></button>
+          <button className={section === 'workflows' ? 'active' : ''} onClick={() => setSection('workflows')} title="工作流" aria-label="工作流"><RailIcon kind="workflows" /></button>
         </nav>
         <span className="rail__avatar">AM</span>
       </aside>
@@ -287,7 +331,9 @@ function MainView({ config }: { config: RuntimeConfig }) {
         {section !== 'workflows' ? (
           <section className="content-block">
             <div className="section-heading"><span>最近的运行</span><small>{runtime.runs.length}</small></div>
-            {recentRuns.length > 0 ? (
+            {!runtime.loaded ? (
+              <SkeletonStack count={2} />
+            ) : recentRuns.length > 0 ? (
               <div className="run-grid">{recentRuns.map((run) => <RunCard key={run.id} run={run} />)}</div>
             ) : (
               <EmptyState title="暂无运行" detail="工作流启动后，Agent 运行会立即显示。" />
@@ -296,21 +342,27 @@ function MainView({ config }: { config: RuntimeConfig }) {
         ) : (
           <section className="content-block">
             <div className="section-heading"><span>工作流状态</span><small>{runtime.workflows.length}</small></div>
-            <div className="workflow-list">
-              {runtime.workflows.map((workflow) => (
-                <button key={workflow.workflowId} onClick={() => window.agentmesa?.openMain(`/workflows/${workflow.workflowId}`)}>
-                  <span><strong>{workflow.taskId}</strong><small>{workflow.currentStep}</small></span>
-                  <span className={`status status--${workflow.status}`}>{workflow.status}</span>
-                </button>
-              ))}
-            </div>
+            {!runtime.loaded ? (
+              <SkeletonStack count={2} />
+            ) : (
+              <div className="workflow-list">
+                {runtime.workflows.map((workflow) => (
+                  <button key={workflow.workflowId} onClick={() => window.agentmesa?.openMain(`/workflows/${workflow.workflowId}`)}>
+                    <span><strong>{workflow.taskId}</strong><small>{workflow.currentStep}</small></span>
+                    <span className={`status status--${workflow.status}`}>{workflow.status}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </section>
         )}
       </section>
 
       <aside className="activity-panel">
         <div className="section-heading"><span>实时活动</span><small>{runtime.events.length}</small></div>
-        {runtime.events.length > 0 ? (
+        {!runtime.loaded ? (
+          <SkeletonStack count={3} compact />
+        ) : runtime.events.length > 0 ? (
           <ol className="event-list">{[...runtime.events].reverse().map((event) => <EventRow key={event.cursor} envelope={event} />)}</ol>
         ) : (
           <EmptyState title="等待事件" detail="时间线无需轮询，自动更新。" />
