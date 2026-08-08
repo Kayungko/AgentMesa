@@ -1,0 +1,26 @@
+{
+  "name": "@agentmesa/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "pnpm --filter @agentmesa/client build && tsup src/main.ts src/preload.ts --format cjs --out-dir dist --external electron",
+    "dev": "pnpm build && electron .",
+    "lint": "tsc --noEmit",
+    "test": "playwright test src/__tests__/desktop.smoke.test.ts --reporter=line",
+    "typecheck": "tsc --noEmit",
+    "start": "electron ."
+  },
+  "dependencies": {
+    "@agentmesa/desk": "workspace:*"
+  },
+  "devDependencies": {
+    "@agentmesa/client": "workspace:*",
+    "@playwright/test": "^1.55.1",
+    "electron": "^36.9.3",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

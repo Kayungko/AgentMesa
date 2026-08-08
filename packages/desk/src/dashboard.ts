@@ -1,10 +1,10 @@
 export function generateDashboardHtml(): string {
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AgentMesa Desk</title>
+  <title>AgentMesa 工作台</title>
   <style>
     * {
       margin: 0;
@@ -183,77 +183,77 @@ export function generateDashboardHtml(): string {
 </head>
 <body>
   <div class="header">
-    <h1>AgentMesa Desk</h1>
-    <div class="subtitle">Local workspace monitor - auto-refreshes every 30 seconds</div>
+    <h1>AgentMesa 工作台</h1>
+    <div class="subtitle">本地工作区监控 · 每 30 秒自动刷新</div>
   </div>
 
   <div class="grid">
     <div class="card">
-      <h2>Task Board</h2>
+      <h2>任务看板</h2>
       <div id="task-board">
-        <div class="empty">Loading tasks...</div>
+        <div class="empty">正在加载任务...</div>
       </div>
     </div>
 
     <div class="card">
-      <h2>Meeting Timeline</h2>
+      <h2>会议时间线</h2>
       <div id="meeting-timeline">
-        <div class="empty">Loading meetings...</div>
+        <div class="empty">正在加载会议...</div>
       </div>
     </div>
 
     <div class="card">
-      <h2>Agent Status</h2>
+      <h2>Agent 状态</h2>
       <div id="agent-status">
-        <div class="empty">Loading agents...</div>
+        <div class="empty">正在加载 Agent...</div>
       </div>
     </div>
 
     <div class="card">
-      <h2>Artifacts</h2>
+      <h2>产出物</h2>
       <div id="artifacts">
-        <div class="empty">Loading artifacts...</div>
+        <div class="empty">正在加载产出物...</div>
       </div>
     </div>
 
     <div class="card">
-      <h2>Agent Runs</h2>
+      <h2>Agent 运行</h2>
       <div id="agent-runs">
-        <div class="empty">Loading runs...</div>
+        <div class="empty">正在加载运行记录...</div>
       </div>
     </div>
 
     <div class="card">
-      <h2>Workflows</h2>
+      <h2>工作流</h2>
       <div id="workflows">
-        <div class="empty">Loading workflows...</div>
+        <div class="empty">正在加载工作流...</div>
       </div>
     </div>
 
     <div class="card">
-      <h2>Handoffs</h2>
+      <h2>交接</h2>
       <div id="handoffs">
-        <div class="empty">Loading handoffs...</div>
+        <div class="empty">正在加载交接记录...</div>
       </div>
     </div>
 
     <div class="card">
-      <h2>Check Results</h2>
+      <h2>检查结果</h2>
       <div id="check-results">
-        <div class="empty">Loading check results...</div>
+        <div class="empty">正在加载检查结果...</div>
       </div>
     </div>
   </div>
 
   <div class="card">
-    <h2>Workspace Summary</h2>
+    <h2>工作区概览</h2>
     <div id="status-summary">
-      <div class="empty">Loading status...</div>
+      <div class="empty">正在加载概览...</div>
     </div>
   </div>
 
   <div class="refresh-indicator" id="refresh-indicator">
-    Last refresh: never
+    上次刷新：从未
   </div>
 
   <script>
@@ -271,7 +271,7 @@ export function generateDashboardHtml(): string {
     function renderTasks(tasks) {
       const el = document.getElementById('task-board');
       if (!tasks || tasks.length === 0) {
-        el.innerHTML = '<div class="empty">No tasks found</div>';
+        el.innerHTML = '<div class="empty">暂无任务</div>';
         return;
       }
 
@@ -280,8 +280,8 @@ export function generateDashboardHtml(): string {
           <div class="item-title">\${task.title}</div>
           <div class="item-meta">
             <span class="badge badge-\${task.status.replace(/ /g, '_')}">\${task.status}</span>
-            <span>ID: \${task.id}</span>
-            \${task.assignedTo ? ' | Assigned: ' + task.assignedTo : ''}
+            <span>ID：\${task.id}</span>
+            \${task.assignedTo ? ' | 负责人：' + task.assignedTo : ''}
           </div>
         </div>
       \`).join('');
@@ -290,7 +290,7 @@ export function generateDashboardHtml(): string {
     function renderMeetings(meetings) {
       const el = document.getElementById('meeting-timeline');
       if (!meetings || meetings.length === 0) {
-        el.innerHTML = '<div class="empty">No meetings found</div>';
+        el.innerHTML = '<div class="empty">暂无会议</div>';
         return;
       }
 
@@ -299,9 +299,9 @@ export function generateDashboardHtml(): string {
           <div class="item-title">\${meeting.title}</div>
           <div class="item-meta">
             <span class="badge badge-\${meeting.status}">\${meeting.status}</span>
-            <span>ID: \${meeting.id}</span>
-            <span> | Tasks: \${meeting.tasks.length}</span>
-            <span> | Agents: \${meeting.agents.length}</span>
+            <span>ID：\${meeting.id}</span>
+            <span> | 任务数：\${meeting.tasks.length}</span>
+            <span> | Agent 数：\${meeting.agents.length}</span>
           </div>
         </div>
       \`).join('');
@@ -310,7 +310,7 @@ export function generateDashboardHtml(): string {
     function renderAgents(agents) {
       const el = document.getElementById('agent-status');
       if (!agents || agents.length === 0) {
-        el.innerHTML = '<div class="empty">No agents registered</div>';
+        el.innerHTML = '<div class="empty">暂无已注册 Agent</div>';
         return;
       }
 
@@ -318,8 +318,8 @@ export function generateDashboardHtml(): string {
         <div class="item">
           <div class="item-title">\${agent.name}</div>
           <div class="item-meta">
-            <span>Client: \${agent.client}</span>
-            <span> | Roles: </span>
+            <span>客户端：\${agent.client}</span>
+            <span> | 角色：</span>
             \${agent.roles.map(r => '<span class="badge badge-role">' + r + '</span>').join('')}
           </div>
         </div>
@@ -329,17 +329,17 @@ export function generateDashboardHtml(): string {
     function renderArtifacts(artifacts) {
       const el = document.getElementById('artifacts');
       if (!artifacts || artifacts.length === 0) {
-        el.innerHTML = '<div class="empty">No artifacts found</div>';
+        el.innerHTML = '<div class="empty">暂无产出物</div>';
         return;
       }
 
       el.innerHTML = artifacts.map(artifact => \`
         <div class="item">
-          <div class="item-title">Artifact \${artifact.id}</div>
+          <div class="item-title">产出物 \${artifact.id}</div>
           <div class="item-meta">
             <span class="badge badge-role">\${artifact.kind}</span>
             \${artifact.format ? '<span class="badge badge-role">' + artifact.format + '</span>' : ''}
-            <span> | Created by: \${artifact.createdBy}</span>
+            <span> | 创建者：\${artifact.createdBy}</span>
           </div>
         </div>
       \`).join('');
@@ -348,7 +348,7 @@ export function generateDashboardHtml(): string {
     function renderRuns(runs) {
       const el = document.getElementById('agent-runs');
       if (!runs || runs.length === 0) {
-        el.innerHTML = '<div class="empty">No agent runs found</div>';
+        el.innerHTML = '<div class="empty">暂无 Agent 运行记录</div>';
         return;
       }
 
@@ -357,8 +357,8 @@ export function generateDashboardHtml(): string {
           <div class="item-title">\${run.action} — \${run.agentId}</div>
           <div class="item-meta">
             <span class="badge badge-\${run.status}">\${run.status}</span>
-            <span>ID: \${run.id}</span>
-            \${run.taskId ? ' | Task: ' + run.taskId : ''}
+            <span>ID：\${run.id}</span>
+            \${run.taskId ? ' | 任务：' + run.taskId : ''}
           </div>
         </div>
       \`).join('');
@@ -367,7 +367,7 @@ export function generateDashboardHtml(): string {
     function renderWorkflows(workflows) {
       const el = document.getElementById('workflows');
       if (!workflows || workflows.length === 0) {
-        el.innerHTML = '<div class="empty">No workflows found</div>';
+        el.innerHTML = '<div class="empty">暂无工作流</div>';
         return;
       }
 
@@ -376,8 +376,8 @@ export function generateDashboardHtml(): string {
           <div class="item-title">\${wf.workflowDefinitionId}</div>
           <div class="item-meta">
             <span class="badge badge-\${wf.status}">\${wf.status}</span>
-            <span>Step: \${wf.currentStep}</span>
-            <span> | Task: \${wf.taskId}</span>
+            <span>步骤：\${wf.currentStep}</span>
+            <span> | 任务：\${wf.taskId}</span>
           </div>
         </div>
       \`).join('');
@@ -387,7 +387,7 @@ export function generateDashboardHtml(): string {
       const el = document.getElementById('handoffs');
       const all = handoffs ? [...handoffs.outbound, ...handoffs.inbound] : [];
       if (all.length === 0) {
-        el.innerHTML = '<div class="empty">No handoffs found</div>';
+        el.innerHTML = '<div class="empty">暂无交接记录</div>';
         return;
       }
 
@@ -396,7 +396,7 @@ export function generateDashboardHtml(): string {
           <div class="item-title">\${h.type}</div>
           <div class="item-meta">
             <span class="badge badge-\${h.status}">\${h.status}</span>
-            <span>Task: \${h.taskId}</span>
+            <span>任务：\${h.taskId}</span>
             <span> | \${h.direction}</span>
           </div>
         </div>
@@ -406,7 +406,7 @@ export function generateDashboardHtml(): string {
     function renderChecks(checks) {
       const el = document.getElementById('check-results');
       if (!checks || checks.length === 0) {
-        el.innerHTML = '<div class="empty">No check results found</div>';
+        el.innerHTML = '<div class="empty">暂无检查结果</div>';
         return;
       }
 
@@ -416,7 +416,7 @@ export function generateDashboardHtml(): string {
           <div class="item-meta">
             <span class="badge badge-\${check.status}">\${check.status}</span>
             <span class="badge badge-role">\${check.kind}</span>
-            <span> | Task: \${check.taskId}</span>
+            <span> | 任务：\${check.taskId}</span>
           </div>
         </div>
       \`).join('');
@@ -425,7 +425,7 @@ export function generateDashboardHtml(): string {
     function renderStatus(status) {
       const el = document.getElementById('status-summary');
       if (!status) {
-        el.innerHTML = '<div class="empty">Unable to load status</div>';
+        el.innerHTML = '<div class="empty">无法加载概览</div>';
         return;
       }
 
@@ -433,31 +433,31 @@ export function generateDashboardHtml(): string {
         <div class="status-summary">
           <div class="stat">
             <div class="stat-value">\${status.tasks}</div>
-            <div class="stat-label">Tasks</div>
+            <div class="stat-label">任务</div>
           </div>
           <div class="stat">
             <div class="stat-value">\${status.meetings}</div>
-            <div class="stat-label">Meetings</div>
+            <div class="stat-label">会议</div>
           </div>
           <div class="stat">
             <div class="stat-value">\${status.agents}</div>
-            <div class="stat-label">Agents</div>
+            <div class="stat-label">Agent</div>
           </div>
           <div class="stat">
             <div class="stat-value">\${status.artifacts}</div>
-            <div class="stat-label">Artifacts</div>
+            <div class="stat-label">产出物</div>
           </div>
           <div class="stat">
             <div class="stat-value">\${status.runs}</div>
-            <div class="stat-label">Runs</div>
+            <div class="stat-label">运行</div>
           </div>
           <div class="stat">
             <div class="stat-value">\${status.checks}</div>
-            <div class="stat-label">Checks</div>
+            <div class="stat-label">检查</div>
           </div>
           <div class="stat">
             <div class="stat-value">\${status.handoffs}</div>
-            <div class="stat-label">Handoffs</div>
+            <div class="stat-label">交接</div>
           </div>
         </div>
       \`;
@@ -487,7 +487,7 @@ export function generateDashboardHtml(): string {
       renderStatus(status);
 
       const now = new Date().toLocaleTimeString();
-      document.getElementById('refresh-indicator').textContent = 'Last refresh: ' + now;
+      document.getElementById('refresh-indicator').textContent = '上次刷新：' + now;
     }
 
     refresh();

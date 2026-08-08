@@ -10,3 +10,6 @@ build/
 .agentmesa/locks/
 *.tsbuildinfo
 .codegraph/
+test-results/
+playwright-report/
+.tmpfiles/
