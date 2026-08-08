@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { join } from 'node:path';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { initWorkspace, createRuntimeContext, createTask, createWorkspacePaths } from '@agentmesa/core';
+import { initWorkspace, createRuntimeContext, createTask, createWorkspacePaths, listEvents } from '@agentmesa/core';
 import type { MesaRuntimeContext, MesaActor } from '@agentmesa/core';
-import { WorkflowEngine, listWorkflowStates } from '../engine.js';
+import { WorkflowEngine, decideWorkflow, listWorkflowStates } from '../engine.js';
 import { defineReviewFixLoop } from '../workflows/review-fix-loop.js';
 
 const ORCHESTRATOR_ACTOR: MesaActor = { id: 'system:orchestrator', type: 'system', roles: ['owner'] };
@@ -82,6 +82,84 @@ describe('WorkflowEngine', () => {
 
       expect(result.status).toBe('completed');
       expect(result.completedAt).toBeTruthy();
+    });
+  });
+
+  describe('human approval', () => {
+    async function createWaitingWorkflow() {
+      const definition = {
+        id: 'full-task-workflow',
+        name: 'Approval test',
+        description: 'Approval test',
+        startStep: 'step-approve',
+        steps: [
+          {
+            id: 'step-approve',
+            type: 'human_approval' as const,
+            description: 'Approve delivery',
+            onSuccess: 'step-done',
+          },
+          {
+            id: 'step-done',
+            type: 'wait' as const,
+            description: 'Finish',
+            onSuccess: '__end__',
+          },
+        ],
+      };
+      const state = engine.startWorkflow(definition, 'task-approval');
+      await engine.executeStep(state);
+      return state;
+    }
+
+    it('persists waiting and approved events', async () => {
+      const state = await createWaitingWorkflow();
+      expect(state.status).toBe('waiting_approval');
+      expect(state.history.at(-1)?.status).toBe('running');
+
+      const approved = decideWorkflow(ctx, state.workflowId, {
+        decision: 'approve',
+        message: 'Ship after updating the changelog',
+      });
+
+      expect(approved.status).toBe('running');
+      expect(approved.currentStep).toBe('step-done');
+      expect(approved.history.at(-1)?.status).toBe('completed');
+      expect(approved.context.metadata?.['approvalContext']).toEqual({
+        approvalStepId: 'step-approve',
+        targetStepId: 'step-done',
+        message: 'Ship after updating the changelog',
+      });
+      const reloaded = new WorkflowEngine(ctx).loadState(state.workflowId);
+      expect(reloaded?.currentStep).toBe('step-done');
+      expect(listEvents(ctx, { streamId: state.workflowId }).map((event) => event.type)).toEqual([
+        'workflow_waiting_approval',
+        'workflow_approved',
+      ]);
+    });
+
+    it('persists rejection and emits a rejected event', async () => {
+      const state = await createWaitingWorkflow();
+      const rejected = decideWorkflow(ctx, state.workflowId, {
+        decision: 'reject',
+        reason: 'Needs another review',
+      });
+
+      expect(rejected.status).toBe('failed');
+      expect(rejected.history).toHaveLength(1);
+      expect(rejected.history.at(-1)?.status).toBe('failed');
+      expect(rejected.history.at(-1)?.error).toBe('Needs another review');
+      expect(listEvents(ctx, { streamId: state.workflowId }).at(-1)?.type).toBe('workflow_rejected');
+    });
+
+    it('denies workflow decisions for read-only actors', async () => {
+      const state = await createWaitingWorkflow();
+      const readOnly = createRuntimeContext({
+        rootDir: tempDir,
+        actor: { id: 'viewer', type: 'user', roles: ['read_only'] },
+      });
+
+      expect(() => decideWorkflow(readOnly, state.workflowId, { decision: 'approve' })).toThrow('Policy denied');
     });
   });
 

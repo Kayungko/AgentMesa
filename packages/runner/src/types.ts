@@ -1,4 +1,4 @@
-import type { MesaTask, TaskContext } from '@agentmesa/protocol';
+import type { MesaTask, RunProgress, TaskContext } from '@agentmesa/protocol';
 
 export type RunnerType =
   | 'claude-implement'
@@ -8,6 +8,8 @@ export type RunnerType =
   | 'shell-check'
   | 'document';
 
+export type RunProgressSink = (progress: RunProgress) => void | Promise<void>;
+
 export interface RunOptions {
   taskId: string;
   runnerType: RunnerType;
@@ -15,6 +17,7 @@ export interface RunOptions {
   dryRun?: boolean;
   timeout?: number;
   extraPrompt?: string;
+  onProgress?: RunProgressSink;
 }
 
 export interface RunResult {

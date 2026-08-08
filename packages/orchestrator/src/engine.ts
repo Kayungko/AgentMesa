@@ -2,13 +2,15 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
 import {
+  appendRuntimeEvent,
+  assertPolicy,
   getTask,
   updateTaskStatus,
   createAgentRun,
   type MesaRuntimeContext,
   type MesaWorkspacePaths,
 } from '@agentmesa/core';
-import { canTransitionTaskStatus, type RunAction } from '@agentmesa/protocol';
+import { canTransitionTaskStatus, type RunAction, type WorkflowDecisionCommand } from '@agentmesa/protocol';
 import { executeRun } from '@agentmesa/runner';
 import type {
   WorkflowDefinition,
@@ -98,10 +100,12 @@ export class WorkflowEngine {
           this.runCheck(state, step, stepExecution);
           break;
         case 'human_approval':
-          stepExecution.status = 'completed';
-          stepExecution.completedAt = new Date().toISOString();
           state.status = 'waiting_approval';
           this.saveState(state);
+          this.appendWorkflowEvent(state, 'workflow_waiting_approval', {
+            stepId: step.id,
+            description: step.description,
+          });
           return state;
         case 'wait':
           this.completeStep(stepExecution, step.onSuccess, state);
@@ -149,7 +153,7 @@ export class WorkflowEngine {
     const action = (step.runnerType ?? 'implement') as RunAction;
     const run = createAgentRun(this.ctx, {
       agentId: step.agentId ?? 'agent',
-      input: step.description,
+      input: this.buildAgentInput(state, step.description),
       taskId: state.taskId,
       action,
     });
@@ -266,7 +270,7 @@ export class WorkflowEngine {
     return state;
   }
 
-  approve(state: WorkflowState): WorkflowState {
+  approve(state: WorkflowState, message?: string, commandId?: string): WorkflowState {
     if (state.status !== 'waiting_approval') {
       throw new Error(`Cannot approve: workflow is ${state.status}`);
     }
@@ -277,14 +281,40 @@ export class WorkflowEngine {
       throw new Error(`Cannot approve: current step is not a human_approval step`);
     }
 
+    const execution = state.history.at(-1);
+    if (!execution || execution.stepId !== step.id || execution.status !== 'running') {
+      throw new Error(`Cannot approve: approval execution is not active`);
+    }
+    execution.status = 'completed';
+    execution.completedAt = new Date().toISOString();
     state.context.approved = true;
+    this.setApprovalMessage(state, step.id, step.onSuccess, message);
     state.status = 'running';
     this.advanceToStep(state, step.onSuccess);
+    this.appendWorkflowEvent(state, 'workflow_approved', { message, commandId });
     return state;
   }
 
-  reject(state: WorkflowState, reason: string): WorkflowState {
-    return this.abort(state, reason);
+  reject(state: WorkflowState, reason: string, message?: string, commandId?: string): WorkflowState {
+    if (state.status !== 'waiting_approval') {
+      throw new Error(`Cannot reject: workflow is ${state.status}`);
+    }
+    const execution = state.history.at(-1);
+    if (!execution || execution.stepId !== state.currentStep || execution.status !== 'running') {
+      throw new Error(`Cannot reject: approval execution is not active`);
+    }
+    execution.status = 'failed';
+    execution.error = reason;
+    execution.completedAt = new Date().toISOString();
+    state.status = 'failed';
+    state.completedAt = execution.completedAt;
+    state.context.metadata = {
+      ...state.context.metadata,
+      ...(message === undefined ? {} : { rejectionMessage: message }),
+    };
+    this.saveState(state);
+    this.appendWorkflowEvent(state, 'workflow_rejected', { reason, message, commandId });
+    return state;
   }
 
   advanceToStep(state: WorkflowState, nextStepId: string): WorkflowState {
@@ -340,6 +370,58 @@ export class WorkflowEngine {
     return state;
   }
 
+  private buildAgentInput(state: WorkflowState, description: string): string {
+    const approval = state.context.metadata?.['approvalContext'];
+    if (
+      typeof approval !== 'object' ||
+      approval === null ||
+      !('targetStepId' in approval) ||
+      approval.targetStepId !== state.currentStep ||
+      !('message' in approval) ||
+      typeof approval.message !== 'string'
+    ) {
+      delete state.context.metadata?.['approvalContext'];
+      return description;
+    }
+    delete state.context.metadata!['approvalContext'];
+    return `${description}\n\nUser approval context:\n${approval.message}`;
+  }
+
+  private setApprovalMessage(
+    state: WorkflowState,
+    approvalStepId: string,
+    targetStepId: string,
+    message?: string,
+  ): void {
+    if (message === undefined) {
+      delete state.context.metadata?.['approvalContext'];
+      return;
+    }
+    state.context.metadata = {
+      ...state.context.metadata,
+      approvalContext: { approvalStepId, targetStepId, message },
+    };
+  }
+
+  private appendWorkflowEvent(
+    state: WorkflowState,
+    type: 'workflow_waiting_approval' | 'workflow_approved' | 'workflow_rejected',
+    data: Record<string, unknown>,
+  ): void {
+    appendRuntimeEvent(this.ctx, {
+      meetingId: state.taskId,
+      type,
+      streamId: state.workflowId,
+      streamType: 'workflow',
+      data: {
+        workflowId: state.workflowId,
+        taskId: state.taskId,
+        status: state.status,
+        ...data,
+      },
+    });
+  }
+
   getState(workflowId: string): WorkflowState | null {
     return this.stateCache.get(workflowId) ?? this.loadState(workflowId);
   }
@@ -379,6 +461,58 @@ export class WorkflowEngine {
  * `WorkflowEngine.saveState`/`loadState` use, independent of any single
  * engine instance's in-memory cache.
  */
+export type WorkflowDecisionInput = Omit<WorkflowDecisionCommand, 'commandId'> & {
+  commandId?: string;
+};
+
+export function decideWorkflow(
+  ctx: MesaRuntimeContext,
+  workflowId: string,
+  input: WorkflowDecisionInput,
+): WorkflowState {
+  assertPolicy(ctx, 'workflow.decide', `workflow:${workflowId}`);
+  const engine = new WorkflowEngine(ctx);
+  const state = engine.getState(workflowId);
+  if (!state) {
+    throw new Error(`Workflow not found: ${workflowId}`);
+  }
+  if (input.commandId) {
+    const existing = ctx.eventStore.list({ streamId: workflowId }).find((event) =>
+      (event.type === 'workflow_approved' || event.type === 'workflow_rejected') &&
+      event.data['commandId'] === input.commandId,
+    );
+    if (existing) {
+      return state;
+    }
+    if (state.status !== 'waiting_approval') {
+      const type = input.decision === 'approve' ? 'workflow_approved' : 'workflow_rejected';
+      appendRuntimeEvent(ctx, {
+        meetingId: state.taskId,
+        type,
+        streamId: state.workflowId,
+        streamType: 'workflow',
+        data: {
+          workflowId: state.workflowId,
+          taskId: state.taskId,
+          status: state.status,
+          commandId: input.commandId,
+          recovered: true,
+        },
+      });
+      return state;
+    }
+  }
+  if (input.decision === 'approve') {
+    return engine.approve(state, input.message, input.commandId);
+  }
+  return engine.reject(
+    state,
+    input.reason ?? 'Rejected by user',
+    input.message,
+    input.commandId,
+  );
+}
+
 export function listWorkflowStates(ctx: MesaRuntimeContext): WorkflowState[] {
   const dir = join(ctx.paths.logsDir, 'workflows');
   if (!existsSync(dir)) {

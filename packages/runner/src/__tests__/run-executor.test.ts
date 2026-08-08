@@ -56,12 +56,20 @@ describe('executeRun', () => {
     const task = createTask(ctx, { title: 'Implement login' });
     const run = createAgentRun(ctx, { agentId: 'a1', input: 'Build it', taskId: task.id, action: 'implement' });
 
-    const { run: final } = await executeRun(ctx, run.id, { dryRun: true });
+    const progress: string[] = [];
+    const { run: final } = await executeRun(ctx, run.id, {
+      dryRun: true,
+      onProgress: (event) => {
+        progress.push(event.stage);
+      },
+    });
 
     expect(final.status).toBe('completed');
+    expect(progress).toEqual(['started', 'runner_invoked', 'completed']);
 
     const events = listEvents(ctx, { streamId: run.id }).map((e) => e.type);
     expect(events).toContain('agent_run_status_changed');
+    expect(events).toContain('agent_run_progress');
     expect(events).toContain('agent_run_completed');
 
     expect(listArtifacts(ctx, undefined, 'agent_run_log')).toHaveLength(0);
@@ -98,13 +106,33 @@ describe('executeRun', () => {
   });
 
   it('marks the run failed and rethrows when the backend throws', async () => {
-    // implement run whose taskId does not exist → ClaudeRunner.getTask throws
     const run = createAgentRun(ctx, { agentId: 'a1', input: 'x', taskId: 'task_missing', action: 'implement' });
+    const progress: string[] = [];
 
-    await expect(executeRun(ctx, run.id)).rejects.toThrow();
+    await expect(executeRun(ctx, run.id, {
+      onProgress: (event) => {
+        progress.push(event.stage);
+      },
+    })).rejects.toThrow();
 
     const after = getAgentRun(ctx, run.id);
     expect(after.status).toBe('failed');
     expect(after.error).toBeTruthy();
+    expect(progress).toEqual(['started', 'runner_invoked', 'failed']);
+  });
+
+  it('continues after a progress sink failure because progress is already persisted', async () => {
+    const task = createTask(ctx, { title: 'Progress sink failure' });
+    const run = createAgentRun(ctx, { agentId: 'a1', input: 'Build it', taskId: task.id });
+
+    const { run: final } = await executeRun(ctx, run.id, {
+      dryRun: true,
+      onProgress: () => {
+        throw new Error('disconnected');
+      },
+    });
+
+    expect(final.status).toBe('completed');
+    expect(listEvents(ctx, { streamId: run.id }).filter((event) => event.type === 'agent_run_progress')).toHaveLength(3);
   });
 });

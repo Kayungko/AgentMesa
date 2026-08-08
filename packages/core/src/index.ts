@@ -21,6 +21,7 @@ export * from './services/check-result-service.js';
 export * from './services/handoff-service.js';
 export * from './services/lock-manager.js';
 export * from './services/event-service.js';
+export { appendRuntimeEvent, assertPolicy } from './services/runtime-service-utils.js';
 export * from './services/projection-schemas.js';
 export * from './services/projection-service.js';
 export {

@@ -1,12 +1,13 @@
 import {
   MesaError,
+  appendAgentRunProgress,
   getAgentRun,
   updateAgentRunStatus,
   createArtifact,
 } from '@agentmesa/core';
 import type { MesaRuntimeContext } from '@agentmesa/core';
-import type { MesaAgentRun } from '@agentmesa/protocol';
-import type { RunResult, RunnerType } from './types.js';
+import type { MesaAgentRun, RunProgress } from '@agentmesa/protocol';
+import type { RunProgressSink, RunResult, RunnerType } from './types.js';
 import { createRunner } from './runner-factory.js';
 import { parseRunOutput } from './output-parser.js';
 
@@ -53,6 +54,7 @@ export interface RunExecutorOptions {
   /** Persist run output as an artifact. Default true; always skipped on dry run. */
   createArtifacts?: boolean;
   timeout?: number;
+  onProgress?: RunProgressSink;
 }
 
 export interface RunExecutionResult {
@@ -86,10 +88,25 @@ export async function executeRun(
   const runnerType = resolveRunnerType(run);
   updateAgentRunStatus(ctx, runId, 'running');
 
+  const reportProgress = async (progress: RunProgress): Promise<void> => {
+    appendAgentRunProgress(ctx, runId, progress);
+    try {
+      await options?.onProgress?.(progress);
+    } catch (error) {
+      ctx.logger.warn('Run progress sink failed', {
+        runId,
+        stage: progress.stage,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
+  await reportProgress({ stage: 'started', message: 'Run started', percent: 0 });
   const runner = createRunner(runnerType, ctx.paths, dryRun);
 
   let result: RunResult;
   try {
+    await reportProgress({ stage: 'runner_invoked', message: `Invoking ${runnerType}`, percent: 10 });
     result = await runner.run({
       taskId: run.taskId ?? '',
       runnerType,
@@ -97,15 +114,18 @@ export async function executeRun(
       dryRun,
       ...(options?.timeout !== undefined ? { timeout: options.timeout } : {}),
       extraPrompt: run.input,
+      onProgress: reportProgress,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    await reportProgress({ stage: 'failed', message, percent: 100 });
     updateAgentRunStatus(ctx, runId, 'failed', { error: message });
     throw err;
   }
 
   if (!result.success) {
     const parsed = parseRunOutput(result.output);
+    await reportProgress({ stage: 'failed', message: parsed.summary, percent: 100 });
     const failed = updateAgentRunStatus(ctx, runId, 'failed', {
       error: result.output,
       outputSummary: parsed.summary,
@@ -115,6 +135,7 @@ export async function executeRun(
 
   const producedArtifactIds: string[] = [];
   if (createArtifacts && !dryRun) {
+    await reportProgress({ stage: 'persisting_artifact', message: 'Persisting run artifact', percent: 90 });
     const artifact = createArtifact(ctx, {
       kind: 'agent_run_log',
       taskId: run.taskId,
@@ -126,6 +147,7 @@ export async function executeRun(
   }
 
   const parsed = parseRunOutput(result.output);
+  await reportProgress({ stage: 'completed', message: parsed.summary, percent: 100 });
   const completed = updateAgentRunStatus(ctx, runId, 'completed', {
     output: result.output,
     outputSummary: parsed.summary,

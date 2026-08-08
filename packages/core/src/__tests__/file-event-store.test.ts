@@ -92,6 +92,56 @@ describe('FileEventStore.list filter', () => {
   });
 });
 
+describe('FileEventStore realtime cursors', () => {
+  it('lists events after a cursor with a limit', () => {
+    store.append(makeEvent({ id: 'e1', sequence: 0 }));
+    store.append(makeEvent({ id: 'e2', sequence: 1 }));
+    store.append(makeEvent({ id: 'e3', sequence: 2 }));
+
+    expect(store.listAfter('e1', 1)).toEqual([
+      { cursor: 'e2', event: expect.objectContaining({ id: 'e2' }) },
+    ]);
+    expect(store.listAfter('e2')).toEqual([
+      { cursor: 'e3', event: expect.objectContaining({ id: 'e3' }) },
+    ]);
+  });
+
+  it('publishes only after the event is readable and supports unsubscribe', () => {
+    const received: string[] = [];
+    const unsubscribe = store.subscribe((envelope) => {
+      expect(store.list().map((event) => event.id)).toContain(envelope.event.id);
+      received.push(envelope.cursor);
+    });
+
+    store.append(makeEvent({ id: 'e1' }));
+    unsubscribe();
+    store.append(makeEvent({ id: 'e2', sequence: 1 }));
+
+    expect(received).toEqual(['e1']);
+  });
+
+  it('observes events appended outside the store instance', async () => {
+    let unsubscribe: () => void = () => undefined;
+    const received = new Promise<string>((resolve) => {
+      unsubscribe = store.subscribe((envelope) => resolve(envelope.cursor));
+    });
+    appendFileSync(
+      join(testDir, 'events.jsonl'),
+      `${JSON.stringify(makeEvent({ id: 'external-event' }))}\n`,
+      'utf-8',
+    );
+
+    await expect(received).resolves.toBe('external-event');
+    unsubscribe();
+  });
+
+  it('rejects an unknown cursor and invalid limit', () => {
+    store.append(makeEvent({ id: 'e1' }));
+    expect(() => store.listAfter('missing')).toThrow('Unknown event cursor');
+    expect(() => store.listAfter(undefined, 0)).toThrow('positive integer');
+  });
+});
+
 describe('FileEventStore.list edge cases', () => {
   it('returns empty array when events file does not exist', () => {
     expect(store.list()).toEqual([]);

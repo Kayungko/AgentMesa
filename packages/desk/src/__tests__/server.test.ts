@@ -9,8 +9,10 @@ import {
   createAgentRun,
   createCheckResult,
   writeReviewRequest,
+  appendMessage,
 } from '@agentmesa/core';
 import type { MesaRuntimeContext } from '@agentmesa/core';
+import { WorkflowEngine } from '@agentmesa/orchestrator';
 import { DeskServer } from '../server.js';
 
 let testDir: string;
@@ -201,5 +203,175 @@ describe('DeskServer', () => {
     expect(typeof body.runs).toBe('number');
     expect(typeof body.checks).toBe('number');
     expect(typeof body.handoffs).toBe('number');
+  });
+
+  it('protects API routes when a session token is configured', async () => {
+    server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
+    await server.start();
+    const base = `http://localhost:${server.getPort()}`;
+
+    expect((await fetch(`${base}/api/status`)).status).toBe(401);
+    expect((await fetch(`${base}/api/status`, {
+      headers: { Authorization: 'Bearer secret' },
+    })).status).toBe(200);
+  });
+
+  it('lists events incrementally after a cursor', async () => {
+    const task = createTask(ctx, { title: 'Cursor task' });
+    appendMessage(ctx, { taskId: task.id, type: 'general', summary: 'hello' });
+    const events = ctx.eventStore.list();
+    server = new DeskServer(testDir, 0);
+    await server.start();
+
+    const res = await fetch(`http://localhost:${server.getPort()}/api/events?cursor=${events[0]!.id}&limit=10`);
+    const body = (await res.json()) as Array<{ cursor: string; event: { id: string } }>;
+
+    expect(res.status).toBe(200);
+    expect(body.map((item) => item.event.id)).toEqual(events.slice(1).map((event) => event.id));
+    expect(body.at(-1)?.cursor).toBe(events.at(-1)?.id);
+  });
+
+  it('streams persisted and live events from another runtime context', async () => {
+    server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
+    await server.start();
+    const controller = new AbortController();
+    const response = await fetch(`http://localhost:${server.getPort()}/api/events/stream?access_token=secret`, {
+      signal: controller.signal,
+    });
+    const reader = response.body!.getReader();
+
+    createTask(ctx, { title: 'Live event task' });
+    const deadline = Date.now() + 3000;
+    let text = '';
+    while (!text.includes('task_created') && Date.now() < deadline) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      text += new TextDecoder().decode(chunk.value);
+    }
+    controller.abort();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/event-stream');
+    expect(text).toContain('event: mesa-event');
+    expect(text).toContain('task_created');
+  });
+
+  it('posts messages with correlation fields', async () => {
+    server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
+    await server.start();
+    const res = await fetch(`http://localhost:${server.getPort()}/api/messages`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        type: 'answer',
+        summary: 'Approved',
+        body: 'Proceed now',
+        correlationId: 'corr_1',
+        replyTo: 'request_1',
+      }),
+    });
+    const body = (await res.json()) as { body: string; correlationId: string; replyTo: string };
+
+    expect(res.status).toBe(201);
+    expect(body).toMatchObject({
+      body: 'Proceed now',
+      correlationId: 'corr_1',
+      replyTo: 'request_1',
+    });
+  });
+
+  it('handles workflow decisions idempotently', async () => {
+    const engine = new WorkflowEngine(ctx);
+    const state = engine.startWorkflow({
+      id: 'full-task-workflow',
+      name: 'Approval',
+      description: 'Approval',
+      startStep: 'step-approve',
+      steps: [
+        {
+          id: 'step-approve',
+          type: 'human_approval',
+          description: 'Approve',
+          onSuccess: '__end__',
+        },
+      ],
+    }, 'task-approval');
+    await engine.executeStep(state);
+
+    server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
+    await server.start();
+    const request = () => fetch(`http://localhost:${server.getPort()}/api/workflows/${state.workflowId}/decision`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ commandId: 'approve_1', decision: 'approve' }),
+    });
+
+    const [first, second] = await Promise.all([request(), request()]);
+    const firstBody = (await first.json()) as { duplicate: boolean };
+    const secondBody = (await second.json()) as { duplicate: boolean };
+
+    expect(first.status).toBe(202);
+    expect(second.status).toBe(202);
+    expect([firstBody.duplicate, secondBody.duplicate].sort()).toEqual([false, true]);
+    expect(ctx.eventStore.list({ streamId: state.workflowId }).filter((event) => event.type === 'workflow_approved')).toHaveLength(1);
+  });
+
+  it('returns 400 for invalid message input', async () => {
+    server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
+    await server.start();
+
+    const res = await fetch(`http://localhost:${server.getPort()}/api/messages`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ type: 'general' }),
+    });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects reuse of a command ID for different decision content', async () => {
+    const engine = new WorkflowEngine(ctx);
+    const state = engine.startWorkflow({
+      id: 'full-task-workflow',
+      name: 'Approval conflict',
+      description: 'Approval conflict',
+      startStep: 'step-approve',
+      steps: [{
+        id: 'step-approve',
+        type: 'human_approval',
+        description: 'Approve',
+        onSuccess: '__end__',
+      }],
+    }, 'task-conflict');
+    await engine.executeStep(state);
+
+    server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
+    await server.start();
+    const url = `http://localhost:${server.getPort()}/api/workflows/${state.workflowId}/decision`;
+    const headers = {
+      Authorization: 'Bearer secret',
+      'Content-Type': 'application/json',
+    };
+    await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ commandId: 'same-id', decision: 'approve' }),
+    });
+    const conflict = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ commandId: 'same-id', decision: 'reject', reason: 'No' }),
+    });
+
+    expect(conflict.status).toBe(400);
   });
 });

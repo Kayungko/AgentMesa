@@ -37,7 +37,8 @@ type Capability =
   | 'read_projections'
   | 'rebuild_projections'
   | 'inspect_transports'
-  | 'manage_runs';
+  | 'manage_runs'
+  | 'manage_workflows';
 
 /**
  * Maps core service action keys to the least-privilege capability required.
@@ -63,6 +64,7 @@ const ACTION_CAPABILITY: Record<string, Capability> = {
   'run.create': 'manage_runs',
   'run.updateStatus': 'manage_runs',
   'run.read': 'manage_runs',
+  'workflow.decide': 'manage_workflows',
   'handoff.write': 'manage_runs',
   'handoff.read': 'manage_runs',
   'check.create': 'manage_runs',
@@ -85,6 +87,7 @@ const ROLE_CAPABILITIES: Record<string, Capability[]> = {
     'rebuild_projections',
     'inspect_transports',
     'manage_runs',
+    'manage_workflows',
   ],
   admin: [
     'read_task',
@@ -101,6 +104,7 @@ const ROLE_CAPABILITIES: Record<string, Capability[]> = {
     'rebuild_projections',
     'inspect_transports',
     'manage_runs',
+    'manage_workflows',
   ],
   builder: [
     'read_task',
@@ -170,6 +174,7 @@ const ROLE_CAPABILITIES: Record<string, Capability[]> = {
     'rebuild_projections',
     'inspect_transports',
     'manage_runs',
+    'manage_workflows',
   ],
   planner: [
     'read_task',
@@ -210,6 +215,7 @@ const ROLE_CAPABILITIES: Record<string, Capability[]> = {
     'rebuild_projections',
     'inspect_transports',
     'manage_runs',
+    'manage_workflows',
   ],
   researcher: [
     'read_task',

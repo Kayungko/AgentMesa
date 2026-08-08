@@ -2,6 +2,7 @@ export * from './version.js';
 export * from './ids.js';
 export * from './schemas.js';
 export * from './envelope.js';
+export * from './realtime.js';
 // types.ts infers from schemas — only export explicit types to avoid name conflicts with schemas
 export type {
   MesaAgent,

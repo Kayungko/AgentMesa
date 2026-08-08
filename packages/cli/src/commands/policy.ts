@@ -148,7 +148,7 @@ export function runPolicyInspect(args: ParsedArgs): void {
     'meeting.create', 'meeting.updateStatus', 'meeting.addTask', 'meeting.addAgent',
     'message.append', 'artifact.create', 'agent.register',
     'event.read', 'projection.read', 'projection.rebuild', 'transport.inspect',
-    'run.create', 'run.updateStatus', 'run.read',
+    'run.create', 'run.updateStatus', 'run.read', 'workflow.decide',
     'handoff.write', 'handoff.read',
     'check.create', 'check.read',
   ];

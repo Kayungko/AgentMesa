@@ -193,6 +193,16 @@ describe('MesaMessageSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('accepts realtime correlation fields', () => {
+    const result = MesaMessageSchema.safeParse({
+      ...validMessage,
+      correlationId: 'corr_123',
+      replyTo: 'request_123',
+      causationId: 'event_123',
+    });
+    expect(result.success).toBe(true);
+  });
+
   it('accepts message with artifact refs', () => {
     const result = MesaMessageSchema.safeParse({
       ...validMessage,
@@ -482,9 +492,13 @@ describe('MesaEventSchema', () => {
       'decision_made',
       'agent_run_created',
       'agent_run_status_changed',
+      'agent_run_progress',
       'agent_run_completed',
       'agent_run_failed',
       'agent_run_cancelled',
+      'workflow_waiting_approval',
+      'workflow_approved',
+      'workflow_rejected',
       'check_completed',
       'thread_created',
       'thread_resolved',

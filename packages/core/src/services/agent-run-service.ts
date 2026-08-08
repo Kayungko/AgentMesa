@@ -5,7 +5,7 @@ import {
   generateAgentRunId,
   currentProtocolVersion,
 } from '@agentmesa/protocol';
-import type { MesaAgentRun, CreateAgentRunInput, RunStatus } from '@agentmesa/protocol';
+import type { MesaAgentRun, CreateAgentRunInput, RunProgress, RunStatus } from '@agentmesa/protocol';
 import { RunNotFoundError, InvalidStatusTransitionError } from '../errors.js';
 import type { MesaRuntimeContext } from '../runtime/types.js';
 import {
@@ -30,6 +30,32 @@ export interface AgentRunFilter {
   taskId?: string;
   agentId?: string;
   status?: RunStatus;
+}
+
+export function appendAgentRunProgress(
+  ctx: MesaRuntimeContext,
+  runId: string,
+  progress: RunProgress,
+): void {
+  assertPolicy(ctx, 'run.updateStatus', `run:${runId}`);
+  const run = getAgentRun(ctx, runId);
+  if (run.status !== 'running') {
+    throw new InvalidStatusTransitionError(run.status, 'progress');
+  }
+  if (progress.percent !== undefined && (progress.percent < 0 || progress.percent > 100)) {
+    throw new RangeError('Run progress percent must be between 0 and 100');
+  }
+  appendRuntimeEvent(ctx, {
+    meetingId: run.meetingId ?? run.taskId ?? 'workspace',
+    type: 'agent_run_progress',
+    streamId: run.id,
+    streamType: 'agent_run',
+    data: {
+      stage: progress.stage,
+      message: progress.message,
+      ...(progress.percent !== undefined ? { percent: progress.percent } : {}),
+    },
+  });
 }
 
 export function createAgentRun(

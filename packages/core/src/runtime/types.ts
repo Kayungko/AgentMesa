@@ -1,5 +1,6 @@
 import type {
   AgentRole,
+  EventEnvelope,
   MesaEvent,
   MesaTransportCapabilities,
   PermissionLevel,
@@ -50,9 +51,13 @@ export interface MesaEventFilter {
   actor?: string;
 }
 
+export type MesaEventListener = (envelope: EventEnvelope) => void;
+
 export interface MesaEventStore {
   append(event: MesaEvent): void;
   list(filter?: MesaEventFilter): MesaEvent[];
+  listAfter?(cursor?: string, limit?: number): EventEnvelope[];
+  subscribe?(listener: MesaEventListener): () => void;
 }
 
 export interface MesaPolicyDecision {
