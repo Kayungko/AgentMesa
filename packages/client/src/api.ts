@@ -70,6 +70,29 @@ export function createEventStream(
   return stream;
 }
 
+export interface RoomStreamEvent {
+  roomId: string;
+  message: import('@agentmesa/protocol').RoomMessage;
+}
+
+/** Live room-message stream (global store has no per-workspace event log). */
+export function createRoomEventStream(
+  config: RuntimeConfig,
+  onEvent: (event: RoomStreamEvent) => void,
+  onOpen: () => void,
+  onError: () => void,
+): EventSource {
+  const params = new URLSearchParams();
+  if (config.token) params.set('access_token', config.token);
+  const stream = new EventSource(`${config.baseUrl}/api/rooms/events/stream?${params}`);
+  stream.addEventListener('open', onOpen);
+  stream.addEventListener('error', onError);
+  stream.addEventListener('room-event', (raw) => {
+    onEvent(JSON.parse((raw as MessageEvent<string>).data) as RoomStreamEvent);
+  });
+  return stream;
+}
+
 // --- Setup / deployment ---
 
 export type IntegrationSide = 'claude' | 'codex';
@@ -156,8 +179,14 @@ export function loadWorkspaceAgents(config: RuntimeConfig, workspaceId: string):
 
 // --- Rooms (cross-workspace group chat) ---
 
-export function loadRooms(config: RuntimeConfig): Promise<MesaRoom[]> {
-  return request<MesaRoom[]>(config, '/api/rooms');
+export type RoomSummary = MesaRoom & {
+  lastMessageId?: string;
+  lastMessageAt?: string;
+  lastMessagePreview?: string;
+};
+
+export function loadRooms(config: RuntimeConfig): Promise<RoomSummary[]> {
+  return request<RoomSummary[]>(config, '/api/rooms');
 }
 
 export function loadRoom(config: RuntimeConfig, roomId: string): Promise<RoomDetail> {

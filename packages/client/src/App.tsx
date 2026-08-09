@@ -13,6 +13,7 @@ import {
   loadRoom,
   loadRooms,
   loadSetupStatus,
+  createRoomEventStream,
   loadWorkspaces,
   loadWorkspaceAgents,
   loadWorkspaceMeetings,
@@ -28,6 +29,7 @@ import {
   updateTaskStatus,
   removeMeetingAgent,
   type IntegrationSide,
+  type RoomSummary,
   type RunnerSource,
   type SetupStatus,
 } from './api.js';
@@ -330,15 +332,58 @@ function WidgetView({ config }: { config: RuntimeConfig }) {
   );
 }
 
-function EventRow({ envelope }: { envelope: EventEnvelope }) {
+type EventCategory = 'all' | 'run' | 'task' | 'meeting' | 'workflow' | 'message' | 'agent' | 'check';
+
+const EVENT_CATEGORY_LABELS: Record<EventCategory, string> = {
+  all: '全部',
+  run: '运行',
+  task: '任务',
+  meeting: '会话',
+  workflow: '工作流',
+  message: '消息',
+  agent: 'Agent',
+  check: '检查',
+};
+
+function eventCategory(type: string): EventCategory {
+  if (type.startsWith('agent_run_')) return 'run';
+  if (type.startsWith('task_')) return 'task';
+  if (type.startsWith('meeting_')) return 'meeting';
+  if (type.startsWith('workflow_')) return 'workflow';
+  if (type === 'message_sent' || type.startsWith('thread_')) return 'message';
+  if (type.startsWith('agent_')) return 'agent';
+  if (type.startsWith('check_')) return 'check';
+  return 'all';
+}
+
+/** Whether an event can be opened into a detail view (run / workflow / session). */
+function isEventNavigable(event: EventEnvelope['event']): boolean {
+  const type = event.type;
+  if (type.startsWith('agent_run_')) return true;
+  if (type.startsWith('workflow_')) return true;
+  if (type === 'message_sent') return Boolean(event.meetingId);
+  if (type.startsWith('meeting_') || type.startsWith('task_')) return true;
+  return false;
+}
+
+function EventRow({ envelope, onNavigate }: { envelope: EventEnvelope; onNavigate?: (envelope: EventEnvelope) => void }) {
   const title = envelope.event.type.replaceAll('_', ' ');
+  const navigable = Boolean(onNavigate) && isEventNavigable(envelope.event);
   return (
     <li className="event-row">
-      <span className={`event-row__marker event-row__marker--${envelope.event.streamType}`} />
-      <div>
-        <strong>{title}</strong>
-        <small>{envelope.event.actor} · {new Date(envelope.event.timestamp).toLocaleTimeString()}</small>
-      </div>
+      <button
+        type="button"
+        className={`event-row__main ${navigable ? 'event-row__main--link' : ''}`}
+        onClick={() => navigable && onNavigate?.(envelope)}
+        disabled={!navigable}
+        title={navigable ? '查看详情' : undefined}
+      >
+        <span className={`event-row__marker event-row__marker--${envelope.event.streamType}`} />
+        <div>
+          <strong>{title}</strong>
+          <small>{envelope.event.actor} · {new Date(envelope.event.timestamp).toLocaleTimeString()}</small>
+        </div>
+      </button>
     </li>
   );
 }
@@ -1497,7 +1542,7 @@ function RoomsView({
   roomId?: string;
   onRoomChange: (id: string) => void;
 }) {
-  const [rooms, setRooms] = useState<MesaRoom[]>([]);
+  const [rooms, setRooms] = useState<RoomSummary[]>([]);
   const [selected, setSelected] = useState<RoomDetail>();
   const [workspaces, setWorkspaces] = useState<WorkspaceList['workspaces']>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>('');
@@ -1508,10 +1553,24 @@ function RoomsView({
   const [newPurpose, setNewPurpose] = useState('');
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string>();
+  const [unreadByRoom, setUnreadByRoom] = useState<Record<string, number>>({});
+  const [streamConnected, setStreamConnected] = useState(false);
+  // Read baseline per room: the last messageId the user has effectively seen.
+  // Set on first load so pre-existing messages are not counted as unread.
+  const lastSeenRef = useRef<Record<string, string | undefined>>({});
   const msgListRef = useRef<HTMLOListElement>(null);
 
   const refreshRooms = useCallback(() => {
-    loadRooms(config).then(setRooms).catch(() => undefined);
+    loadRooms(config)
+      .then((list) => {
+        setRooms(list);
+        for (const room of list) {
+          if (lastSeenRef.current[room.id] === undefined && room.lastMessageId) {
+            lastSeenRef.current[room.id] = room.lastMessageId;
+          }
+        }
+      })
+      .catch(() => undefined);
   }, [config]);
 
   const refreshSelected = useCallback(() => {
@@ -1529,14 +1588,41 @@ function RoomsView({
       .catch(() => undefined);
   }, [config]);
 
-  // Poll the selected room timeline (global store has no SSE in MVP).
+  // Live room-message stream: a new message in another room bumps its unread
+  // count; a message in the open room just refreshes the timeline.
+  useEffect(() => {
+    const stream = createRoomEventStream(
+      config,
+      (event) => {
+        if (event.roomId === roomId) {
+          setUnreadByRoom((prev) => ({ ...prev, [event.roomId]: 0 }));
+          refreshSelected();
+        } else {
+          setUnreadByRoom((prev) => ({ ...prev, [event.roomId]: (prev[event.roomId] ?? 0) + 1 }));
+        }
+        refreshRooms();
+      },
+      () => setStreamConnected(true),
+      () => setStreamConnected(false),
+    );
+    return () => stream.close();
+  }, [config, roomId, refreshRooms, refreshSelected]);
+
+  // Low-frequency poll as a fallback when the room watcher is unavailable (the
+  // stream itself carries the real-time path; this only covers silent drops).
   useEffect(() => {
     if (!selected) return;
-    const timer = setInterval(() => {
-      loadRoom(config, selected.id).then(setSelected).catch(() => undefined);
-    }, 3000);
+    const timer = setInterval(() => refreshSelected(), 30_000);
     return () => clearInterval(timer);
-  }, [config, selected?.id]);
+  }, [config, selected?.id, refreshSelected]);
+
+  // Opening a room marks it read.
+  useEffect(() => {
+    if (!roomId) return;
+    setUnreadByRoom((prev) => ({ ...prev, [roomId]: 0 }));
+    const room = rooms.find((entry) => entry.id === roomId);
+    if (room?.lastMessageId) lastSeenRef.current[roomId] = room.lastMessageId;
+  }, [roomId, rooms]);
 
   // Auto-scroll the timeline to the bottom when the room or its message count
   // changes, so new messages are always visible without manual scrolling.
@@ -1679,16 +1765,27 @@ function RoomsView({
           <EmptyState title="还没有群聊" detail="建一个群，把不同项目的会话和 Agent 拉进来。" />
         ) : (
           <div className="room-list">
-            {rooms.map((room) => (
-              <button
-                key={room.id}
-                className={`room-row ${selected?.id === room.id ? 'room-row--active' : ''}`}
-                onClick={() => onRoomChange(room.id)}
-              >
-                <strong>{room.name}</strong>
-                <small>{room.members.length} 成员</small>
-              </button>
-            ))}
+            {rooms.map((room) => {
+              const unread = unreadByRoom[room.id] ?? 0;
+              return (
+                <button
+                  key={room.id}
+                  className={`room-row ${selected?.id === room.id ? 'room-row--active' : ''}`}
+                  onClick={() => onRoomChange(room.id)}
+                >
+                  <span className="room-row__name">
+                    <strong>{room.name}</strong>
+                    {unread > 0 ? <span className="room-row__unread">{unread}</span> : null}
+                  </span>
+                  <small className="room-row__meta">
+                    {room.lastMessagePreview ? (
+                      <span className="room-row__preview">{room.lastMessagePreview}</span>
+                    ) : null}
+                    <span>{room.members.length} 成员</span>
+                  </small>
+                </button>
+              );
+            })}
           </div>
         )}
       </aside>
@@ -1701,7 +1798,12 @@ function RoomsView({
           <>
             <header className="rooms-stream__head">
               <h3>{selected.name}</h3>
-              <small>{selected.members.length} 成员</small>
+              <span className="rooms-stream__meta">
+                <small>{selected.members.length} 成员</small>
+                <span className={`room-live ${streamConnected ? 'room-live--on' : ''}`} title={streamConnected ? '实时推送已连接' : '实时推送未连接（低频轮询兜底）'}>
+                  <span className="room-live__dot" />{streamConnected ? '实时' : '轮询'}
+                </span>
+              </span>
             </header>
             {selected.purpose ? <p className="rooms-stream__purpose">{selected.purpose}</p> : null}
             {selected.members.length > 0 ? (
@@ -2105,6 +2207,43 @@ function MainView({ config }: { config: RuntimeConfig }) {
     () => [...runtime.runs].sort((left, right) => right.startedAt.localeCompare(left.startedAt)).slice(0, 8),
     [runtime.runs],
   );
+  const [eventFilter, setEventFilter] = useState<EventCategory>('all');
+  const visibleEvents = useMemo(
+    () => runtime.events.filter(({ event }) => eventFilter === 'all' || eventCategory(event.type) === eventFilter),
+    [runtime.events, eventFilter],
+  );
+
+  // Open the run / workflow / session a live event belongs to. Run and workflow
+  // use the in-page detail drawers; meeting/task/message events deep-link to the
+  // session page.
+  const handleEventNavigate = useCallback((envelope: EventEnvelope) => {
+    const event = envelope.event;
+    const data = event.data as Record<string, unknown>;
+    const type = event.type;
+    if (type.startsWith('agent_run_')) {
+      const runId = (data.run as { id?: string } | undefined)?.id ?? (data.runId as string | undefined) ?? event.streamId;
+      const run = runtime.runs.find((entry) => entry.id === runId);
+      if (run) {
+        go('#/runs', { section: 'runs' });
+        setSelectedRun(run);
+      }
+      return;
+    }
+    if (type.startsWith('workflow_')) {
+      const workflowId = (data.workflowId as string | undefined) ?? event.streamId;
+      const workflow = runtime.workflows.find((entry) => entry.workflowId === workflowId);
+      if (workflow) {
+        go('#/workflows', { section: 'workflows' });
+        setSelectedWorkflow(workflow);
+      }
+      return;
+    }
+    const meetingId = event.meetingId ?? (data.meeting as { id?: string } | undefined)?.id
+      ?? (data.task as { meetingId?: string } | undefined)?.meetingId;
+    if (meetingId) {
+      go(`#/sessions/${meetingId}`, { section: 'sessions', sessionId: meetingId });
+    }
+  }, [runtime.runs, runtime.workflows, go]);
 
   return (
     <main className="app-shell">
@@ -2236,12 +2375,24 @@ function MainView({ config }: { config: RuntimeConfig }) {
 
       <aside className="activity-panel">
         <div className="section-heading"><span>实时活动</span><small>{runtime.events.length}</small></div>
+        <div className="event-filters">
+          {(Object.keys(EVENT_CATEGORY_LABELS) as EventCategory[]).map((key) => (
+            <button
+              key={key}
+              type="button"
+              className={`event-filter ${eventFilter === key ? 'event-filter--active' : ''}`}
+              onClick={() => setEventFilter(key)}
+            >
+              {EVENT_CATEGORY_LABELS[key]}
+            </button>
+          ))}
+        </div>
         {!runtime.loaded ? (
           <SkeletonStack count={3} compact />
-        ) : runtime.events.length > 0 ? (
-          <ol className="event-list">{[...runtime.events].reverse().map((event) => <EventRow key={event.cursor} envelope={event} />)}</ol>
+        ) : visibleEvents.length > 0 ? (
+          <ol className="event-list">{[...visibleEvents].reverse().map((event) => <EventRow key={event.cursor} envelope={event} onNavigate={handleEventNavigate} />)}</ol>
         ) : (
-          <EmptyState title="等待事件" detail="时间线无需轮询，自动更新。" />
+          <EmptyState title="没有这类事件" detail="时间线无需轮询，自动更新。" />
         )}
       </aside>
 

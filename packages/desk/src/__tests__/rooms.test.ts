@@ -112,4 +112,50 @@ describe('DeskServer rooms', () => {
     });
     expect(res.status).toBe(400);
   });
+
+  it('enriches room list with the latest message preview', async () => {
+    const base = await startServer();
+    const room = (await (await fetch(`${base}/api/rooms`, {
+      method: 'POST',
+      headers: auth,
+      body: JSON.stringify({ name: '预览群' }),
+    })).json()) as { id: string };
+
+    await fetch(`${base}/api/rooms/${room.id}/members`, {
+      method: 'POST',
+      headers: auth,
+      body: JSON.stringify({ workspaceId: 'ws_1', kind: 'human', ref: 'user', label: '我' }),
+    });
+    await fetch(`${base}/api/rooms/${room.id}/messages`, {
+      method: 'POST',
+      headers: auth,
+      body: JSON.stringify({
+        workspaceId: 'ws_1',
+        from: { workspaceId: 'ws_1', kind: 'human', ref: 'user', label: '我' },
+        summary: '最后一条预览',
+      }),
+    });
+
+    const list = await fetch(`${base}/api/rooms`, { headers: { Authorization: 'Bearer secret' } });
+    const rooms = (await list.json()) as Array<{ id: string; lastMessagePreview?: string; lastMessageId?: string }>;
+    const found = rooms.find((entry) => entry.id === room.id);
+    expect(found?.lastMessagePreview).toBe('最后一条预览');
+    expect(found?.lastMessageId).toBeTruthy();
+  });
+
+  it('serves the room event stream endpoint (token-gated)', async () => {
+    const base = await startServer();
+    const stream = await fetch(`${base}/api/rooms/events/stream?access_token=secret`);
+    expect(stream.status).toBe(200);
+    expect(stream.headers.get('content-type')).toContain('text/event-stream');
+    // Read the initial retry frame then drop the connection.
+    const reader = stream.body!.getReader();
+    const first = await reader.read();
+    expect(new TextDecoder().decode(first.value)).toContain('retry:');
+    await reader.cancel();
+
+    // 无 token → 401
+    const denied = await fetch(`${base}/api/rooms/events/stream`);
+    expect(denied.status).toBe(401);
+  });
 });

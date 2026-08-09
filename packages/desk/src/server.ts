@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
+import { existsSync, mkdirSync, watch, type FSWatcher } from 'node:fs';
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import { join } from 'node:path';
 import {
@@ -29,6 +30,7 @@ import {
   setActiveWorkspace,
   readRegistry,
   createRoomStore,
+  roomStoreDir,
   updateTaskStatus,
   assignTask,
   updateMeetingStatus,
@@ -38,7 +40,7 @@ import {
   withLock,
 } from '@agentmesa/core';
 import type { MesaWorkspace } from '@agentmesa/protocol';
-import type { AgentRole, EventEnvelope, MeetingStatus, RunStatus, TaskStatus, WorkflowDecisionCommand } from '@agentmesa/protocol';
+import type { AgentRole, EventEnvelope, MeetingStatus, RoomMessage, RunStatus, TaskStatus, WorkflowDecisionCommand } from '@agentmesa/protocol';
 import {
   CreateMeetingInputSchema,
   CreateMessageInputSchema,
@@ -59,6 +61,69 @@ import { generateDashboardHtml } from './dashboard.js';
 
 /** Most recent room messages returned by the room detail endpoint. */
 const ROOM_MESSAGE_LIMIT = 200;
+
+// --- Global room message watcher -------------------------------------------
+// Room data lives in the global mesa home (outside any single workspace's event
+// log), so the per-workspace SSE stream never carries room messages. To push
+// new room messages in real time we watch the global `rooms/messages` directory
+// (recursive) and fan out newly written message files to room SSE clients.
+interface RoomMessageEvent {
+  roomId: string;
+  message: RoomMessage;
+}
+type RoomMessageListener = (payload: RoomMessageEvent) => void;
+
+interface RoomWatcherState {
+  watcher: FSWatcher | null;
+  listeners: Set<RoomMessageListener>;
+  sentMessageIds: Set<string>;
+}
+
+let roomWatcherState: RoomWatcherState | null = null;
+
+/** Lazily start the single global room watcher; best-effort (clients poll as fallback). */
+function ensureRoomWatcher(): RoomWatcherState {
+  if (roomWatcherState) return roomWatcherState;
+  const state: RoomWatcherState = { watcher: null, listeners: new Set(), sentMessageIds: new Set() };
+  try {
+    // Watch rooms/messages/<roomId>/<msgId>.json. The messages root must exist
+    // BEFORE we watch it: Windows recursive watch does not reliably track files
+    // written into subdirectories that are created after the watch starts, so
+    // we create it up front and watch exactly that root.
+    const messagesRoot = join(roomStoreDir(), 'messages');
+    if (!existsSync(messagesRoot)) {
+      mkdirSync(messagesRoot, { recursive: true });
+    }
+    const watcher = watch(messagesRoot, { recursive: true }, (_event, filename) => {
+      if (!filename) return;
+      const rel = String(filename).split(/[\\/]/);
+      const [roomId, msgFile] = rel;
+      if (!roomId || !msgFile || !msgFile.endsWith('.json')) return;
+      const msgId = msgFile.slice(0, -5);
+      if (state.sentMessageIds.has(msgId)) return;
+      // Reuse the store's parse/validate path; re-read on a later change event
+      // if the file is not fully flushed yet (write is atomic, so rare).
+      const message = createRoomStore().listMessages(roomId).find((entry) => entry.id === msgId);
+      if (!message) return;
+      state.sentMessageIds.add(msgId);
+      if (state.sentMessageIds.size > 5000) state.sentMessageIds.clear(); // bound memory
+      for (const listener of state.listeners) {
+        try {
+          listener({ roomId, message });
+        } catch {
+          // Listener errors never break the watcher.
+        }
+      }
+    });
+    watcher.unref();
+    state.watcher = watcher;
+  } catch (error) {
+    // Watcher failure is non-fatal: room clients fall back to polling.
+    console.error('Room message watcher failed to start:', error instanceof Error ? error.message : String(error));
+  }
+  roomWatcherState = state;
+  return state;
+}
 
 export interface DeskServerOptions {
   host?: string;
@@ -203,6 +268,10 @@ export class DeskServer {
       this.streamEvents(req, res, readContext, url.searchParams.get('cursor') ?? req.headers['last-event-id'] as string | undefined);
       return;
     }
+    if (pathname === '/api/rooms/events/stream') {
+      this.streamRoomEvents(req, res);
+      return;
+    }
     if (pathname === '/api/tasks') {
       this.sendJson(res, listTasks(readContext));
       return;
@@ -289,7 +358,19 @@ export class DeskServer {
     }
 
     if (pathname === '/api/rooms') {
-      this.sendJson(res, createRoomStore().listRooms());
+      // Enrich each room with its latest message so the list can show a preview
+      // and the client can compute unread state without opening every room.
+      const store = createRoomStore();
+      const rooms = store.listRooms().map((room) => {
+        const last = store.listMessages(room.id).at(-1);
+        return {
+          ...room,
+          lastMessageId: last?.id,
+          lastMessageAt: last?.createdAt,
+          lastMessagePreview: last?.summary,
+        };
+      });
+      this.sendJson(res, rooms);
       return;
     }
 
@@ -805,6 +886,67 @@ export class DeskServer {
     });
   }
 
+  /**
+   * Real-time room message stream. Unlike `/api/events/stream` (which replays a
+   * per-workspace event log), room messages live in the global store with no log
+   * to replay — this stream pushes live watcher events only, and clients poll
+   * at a low frequency as a fallback if the watcher is unavailable.
+   */
+  private streamRoomEvents(req: IncomingMessage, res: ServerResponse): void {
+    let closed = false;
+    let writeChain = Promise.resolve();
+    let heartbeat: NodeJS.Timeout | undefined;
+    const state = ensureRoomWatcher();
+
+    const cleanup = () => {
+      if (closed) return;
+      closed = true;
+      if (heartbeat) clearInterval(heartbeat);
+      state.listeners.delete(listener);
+      this.eventResponses.delete(res);
+    };
+
+    const listener: RoomMessageListener = (payload) => {
+      if (closed) return;
+      writeChain = writeChain
+        .then(async () => {
+          if (closed) return;
+          const frame = `event: room-event\ndata: ${JSON.stringify(payload)}\n\n`;
+          if (!res.write(frame)) {
+            await once(res, 'drain');
+          }
+        })
+        .catch(() => {
+          cleanup();
+        });
+    };
+
+    res.once('close', cleanup);
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    res.write('retry: 2000\n\n');
+    state.listeners.add(listener);
+    this.eventResponses.add(res);
+
+    heartbeat = setInterval(() => {
+      if (closed) return;
+      writeChain = writeChain
+        .then(async () => {
+          if (!closed && !res.write(': h\n\n')) {
+            await once(res, 'drain');
+          }
+        })
+        .catch(() => {
+          cleanup();
+        });
+    }, 15_000);
+    heartbeat.unref();
+  }
+
   private async executeIdempotentCommand(
     context: MesaRuntimeContext,
     commandId: string,
@@ -851,7 +993,8 @@ export class DeskServer {
 
   private isAuthorized(req: IncomingMessage, url: URL): boolean {
     const bearer = req.headers.authorization?.match(/^Bearer (.+)$/)?.[1];
-    const streamToken = url.pathname === '/api/events/stream'
+    const isEventStream = url.pathname === '/api/events/stream' || url.pathname === '/api/rooms/events/stream';
+    const streamToken = isEventStream
       ? url.searchParams.get('access_token') ?? undefined
       : undefined;
     return bearer === this.sessionToken || streamToken === this.sessionToken;
