@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- AgentMesa tray icon — the flat-topped M monogram alone, on a
+       transparent background (no container plate). Sized larger and with a
+       heavier stroke than the in-plate version so the mark survives 16px.
+       The stroke carries the brand vertical gradient so it stays visible
+       on both light and dark taskbars. -->
+  <defs>
+    <linearGradient id="m" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#A89BFF"/>
+      <stop offset="1" stop-color="#6E5CE7"/>
+    </linearGradient>
+  </defs>
+  <path d="M14 48 V24 H26 L32 34 L38 24 H50 V48"
+        fill="none" stroke="url(#m)" stroke-width="8"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

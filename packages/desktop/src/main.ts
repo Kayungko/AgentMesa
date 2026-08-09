@@ -128,7 +128,9 @@ function createWidgetWindow() {
 }
 
 function trayIcon(): NativeImage {
-  const asset = loadAssetIcon('icon-16.png');
+  // The tray shows the bare monogram on a transparent plate so it sits
+  // naturally in the system tray; fall back to the plated icon if absent.
+  const asset = loadAssetIcon('icon-tray-16.png') ?? loadAssetIcon('icon-16.png');
   if (asset) return asset;
 
   // Fallback: the original hand-built purple pixel art, used only if the
