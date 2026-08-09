@@ -127,14 +127,26 @@ function createWidgetWindow() {
   return widgetWindow;
 }
 
-function trayIcon(): NativeImage {
-  // The tray shows the bare monogram on a transparent plate so it sits
-  // naturally in the system tray; fall back to the plated icon if absent.
-  const asset = loadAssetIcon('icon-tray-16.png') ?? loadAssetIcon('icon-16.png');
-  if (asset) return asset;
+// Microsoft's recommended notification-area size ladder (100-300% scaling).
+const TRAY_SIZES = [16, 20, 24, 32, 40, 48] as const;
 
-  // Fallback: the original hand-built purple pixel art, used only if the
-  // pre-rendered assets are missing from a checkout.
+function trayIcon(): NativeImage {
+  // The tray shows the bare monogram on a transparent plate (no background)
+  // so it sits naturally in the notification area. Windows renders tray icons
+  // at 16px and scales for 125-300% DPI, so we ship the full official size
+  // ladder and pick the raster closest to the display's effective size.
+  const scaleFactor = screen.getPrimaryDisplay().scaleFactor || 1;
+  const target = Math.round(16 * scaleFactor);
+  const size = TRAY_SIZES.reduce(
+    (best, s) => (Math.abs(s - target) < Math.abs(best - target) ? s : best),
+    16,
+  );
+  const asset = loadAssetIcon(`icon-tray-${size}.png`) ?? loadAssetIcon('icon-16.png');
+  if (asset) return asset;
+  return pixelArtFallback();
+}
+
+function pixelArtFallback(): NativeImage {
   const size = 16;
   const data = Buffer.alloc(size * size * 4);
   for (let y = 0; y < size; y += 1) {
