@@ -92,3 +92,61 @@ export function buildDocumentPrompt(task: MesaTask): string {
 
   return prompt;
 }
+
+/**
+ * Build the prompt handed to a real CLI agent when it is invited into a session.
+ * The agent reads the meeting context (purpose, participants, tasks, recent
+ * messages) and produces a reply that is written back into the session.
+ */
+export function buildSessionPrompt(input: {
+  meetingId: string;
+  title: string;
+  purpose?: string;
+  agentId: string;
+  agentNames: Record<string, string>;
+  tasks: Array<{ id: string; title: string; status: string }>;
+  messages: Array<{ from: string; type: string; summary: string; createdAt: string }>;
+}): string {
+  const lines: string[] = [];
+  lines.push(`You have been invited to join an AgentMesa session.`);
+  lines.push(``);
+  lines.push(`Session: ${input.title}`);
+  if (input.purpose) {
+    lines.push(`Purpose: ${input.purpose}`);
+  }
+  lines.push(`Session ID: ${input.meetingId}`);
+  lines.push(`Your identity in this session: ${input.agentId}`);
+  lines.push(``);
+
+  const names = Object.values(input.agentNames).filter((name) => name && name !== input.agentId);
+  if (names.length > 0) {
+    lines.push(`Participants in this session:`);
+    for (const name of names) {
+      lines.push(`- ${name}`);
+    }
+    lines.push(``);
+  }
+
+  if (input.tasks.length > 0) {
+    lines.push(`Tasks in this session:`);
+    for (const task of input.tasks) {
+      lines.push(`- [${task.status}] ${task.title} (${task.id})`);
+    }
+    lines.push(``);
+  } else {
+    lines.push(`This session has no tasks yet.`);
+    lines.push(``);
+  }
+
+  if (input.messages.length > 0) {
+    lines.push(`Recent messages:`);
+    for (const message of input.messages) {
+      lines.push(`- [${message.createdAt}] ${message.from} (${message.type}): ${message.summary}`);
+    }
+    lines.push(``);
+  }
+
+  lines.push(`Please review the context above and share your analysis, plan, or next steps.`);
+  lines.push(`Your reply will be published as a message in this session for the other participants.`);
+  return lines.join('\n');
+}

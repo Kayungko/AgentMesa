@@ -225,7 +225,7 @@ export const MesaTaskSchema = z.object({
   assignedBuilder: z.string().optional(),
   reviewer: z.string().optional(),
   assignedReviewer: z.string().optional(),
-  meetingId: z.string().min(1),
+  meetingId: z.string().min(1).optional(),
   branch: z.string().optional(),
   priority: taskPrioritySchema.default('normal'),
   kind: taskKindSchema.default('implement'),

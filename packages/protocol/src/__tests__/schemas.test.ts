@@ -155,10 +155,13 @@ describe('MesaTaskSchema', () => {
     expect(result.success).toBe(false);
   });
 
-  it('rejects missing meetingId (now required)', () => {
+  it('accepts a task without meetingId (optional since tasks may exist standalone)', () => {
     const { meetingId, ...rest } = validTask;
     const result = MesaTaskSchema.safeParse(rest);
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.meetingId).toBeUndefined();
+    }
   });
 });
 

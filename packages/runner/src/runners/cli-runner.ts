@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 
 export interface CliInvocation {
   /** Env value, whitespace-split into program + fixed args (e.g. `claude -p`). */
@@ -43,4 +43,64 @@ export function runCli(inv: CliInvocation): CliResult {
     };
   }
   return { output: res.stdout ?? '', success: true };
+}
+
+const MAX_CLI_OUTPUT = 10 * 1024 * 1024; // 与 spawnSync maxBuffer 对齐
+
+function truncateOutput(value: string): string {
+  return value.length > MAX_CLI_OUTPUT ? value.slice(0, MAX_CLI_OUTPUT) : value;
+}
+
+/**
+ * Async variant of {@link runCli}. Same semantics (command from env/config,
+ * prompt via stdin, win32 via cmd shell) but uses non-blocking `child_process.spawn`
+ * so a long-running CLI never stalls the host event loop (used by the session
+ * collaboration fire-and-forget path). Errors, non-zero exits and timeouts are
+ * folded into a `CliResult` — never thrown.
+ */
+export function runCliAsync(inv: CliInvocation): Promise<CliResult> {
+  return new Promise((resolve) => {
+    const parts = inv.command.trim().split(/\s+/);
+    const program = parts[0]!;
+    const args = parts.slice(1);
+    const child = process.platform === 'win32'
+      ? spawn(inv.command.trim(), { cwd: inv.cwd, shell: true, stdio: ['pipe', 'pipe', 'pipe'] })
+      : spawn(program, args, { cwd: inv.cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+
+    const settle = (result: CliResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+
+    // Two-stage kill: SIGTERM first, SIGKILL if it hasn't closed shortly after.
+    const timer = setTimeout(() => {
+      child.kill('SIGTERM');
+      const killer = setTimeout(() => child.kill('SIGKILL'), 3000);
+      killer.unref?.();
+      settle({ output: `CLI timed out after ${inv.timeout ?? 300_000}ms`, success: false });
+    }, inv.timeout ?? 300_000);
+    timer.unref?.();
+
+    child.stdout.on('data', (data) => { stdout = truncateOutput(stdout + String(data)); });
+    child.stderr.on('data', (data) => { stderr = truncateOutput(stderr + String(data)); });
+    child.on('error', (error) => settle({ output: `CLI invocation failed: ${error.message}`, success: false }));
+    child.on('close', (code) => {
+      if (typeof code === 'number' && code !== 0) {
+        settle({ output: `CLI exited with code ${code}: ${stderr || stdout || ''}`, success: false });
+      } else {
+        settle({ output: stdout, success: true });
+      }
+    });
+
+    // A CLI may close stdin early (e.g. claude -p mode) — EPIPE is not a failure.
+    child.stdin.on('error', () => { /* ignore EPIPE */ });
+    child.stdin.write(inv.prompt);
+    child.stdin.end();
+  });
 }

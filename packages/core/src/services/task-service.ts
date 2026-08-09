@@ -17,7 +17,6 @@ import {
   InvalidStatusTransitionError,
 } from '../errors.js';
 import { appendMessage } from './message-service.js';
-import { createMeeting } from './meeting-service.js';
 import {
   appendRuntimeEvent,
   assertPolicy,
@@ -41,9 +40,10 @@ export function createTask(
     createdBy: ctx.actor.id,
   });
 
-  const meetingId =
-    validated.meetingId ??
-    createMeeting(ctx, { title: `Meeting for ${validated.title}` }).id;
+  // A task may exist without a session: keep meetingId as-is (may be
+  // undefined). Previously this auto-created a `Meeting for X` shell that
+  // cluttered the session list with empty rooms.
+  const meetingId = validated.meetingId;
 
   const now = new Date().toISOString();
   const task: MesaTask = {
@@ -74,7 +74,7 @@ export function createTask(
   });
 
   appendRuntimeEvent(ctx, {
-    meetingId,
+    meetingId: meetingId ?? 'workspace',
     type: 'task_created',
     streamId: task.id,
     streamType: 'task',
@@ -133,7 +133,7 @@ export function updateTaskStatus(
   });
 
   appendRuntimeEvent(ctx, {
-    meetingId: task.meetingId,
+    meetingId: task.meetingId ?? 'workspace',
     type: 'task_status_changed',
     streamId: taskId,
     streamType: 'task',
@@ -165,7 +165,7 @@ export function assignTask(
   writeTask(ctx, result);
 
   appendRuntimeEvent(ctx, {
-    meetingId: task.meetingId,
+    meetingId: task.meetingId ?? 'workspace',
     type: 'task_assigned',
     streamId: taskId,
     streamType: 'task',
@@ -193,7 +193,7 @@ export function deleteTask(ctx: MesaRuntimeContext, taskId: string): boolean {
   const deleted = ctx.storage.delete(filePath);
 
   appendRuntimeEvent(ctx, {
-    meetingId: task.meetingId,
+    meetingId: task.meetingId ?? 'workspace',
     type: 'task_deleted',
     streamId: taskId,
     streamType: 'task',
@@ -225,7 +225,7 @@ export function archiveTask(ctx: MesaRuntimeContext, taskId: string): MesaTask {
   writeTask(ctx, result);
 
   appendRuntimeEvent(ctx, {
-    meetingId: task.meetingId,
+    meetingId: task.meetingId ?? 'workspace',
     type: 'task_archived',
     streamId: taskId,
     streamType: 'task',

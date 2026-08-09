@@ -7,6 +7,7 @@ import type { MesaWorkspacePaths } from '../workspace.js';
 import { createRuntimeContext } from '../runtime/create-runtime-context.js';
 import type { MesaRuntimeContext } from '../runtime/types.js';
 import { createTask, getTask, listTasks, updateTaskStatus, assignTask, deleteTask } from '../services/task-service.js';
+import { listMeetings } from '../services/meeting-service.js';
 import { TaskNotFoundError, InvalidStatusTransitionError } from '../errors.js';
 
 let testDir: string;
@@ -34,6 +35,17 @@ describe('createTask', () => {
     expect(task.status).toBe('todo');
     expect(task.createdBy).toBe('user:test');
     expect(task.protocolVersion).toBe('0.2.0');
+  });
+
+  it('does not auto-create a meeting when no meetingId is given', () => {
+    const task = createTask(ctx, { title: 'Standalone' });
+    expect(task.meetingId).toBeUndefined();
+    expect(listMeetings(ctx)).toHaveLength(0);
+  });
+
+  it('links the task to the explicit meeting when one is provided', () => {
+    const task = createTask(ctx, { title: 'In session', meetingId: 'meeting_12345678' });
+    expect(task.meetingId).toBe('meeting_12345678');
   });
 
   it('creates a task with assignment', () => {

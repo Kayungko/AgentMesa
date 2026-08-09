@@ -115,7 +115,7 @@ describe('meeting service', () => {
     expect(result.agents).toContain('agent:claude');
 
     const events = ctx.eventStore.list({ streamId: meeting.id });
-    expect(events[events.length - 1].type).toBe('meeting_agent_removed');
+    expect(events.at(-1)?.type).toBe('meeting_agent_removed');
   });
 
   it('is idempotent when removing an absent agent', () => {

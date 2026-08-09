@@ -6,7 +6,8 @@ export type RunnerType =
   | 'codex-review'
   | 'codex-test'
   | 'shell-check'
-  | 'document';
+  | 'document'
+  | 'session';
 
 export type RunProgressSink = (progress: RunProgress) => void | Promise<void>;
 

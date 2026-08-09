@@ -105,10 +105,11 @@ describe('rebuildTaskProjections', () => {
     expect(rebuildTaskProjections(ctx)).toBe(0);
   });
 
-  it('treats auto-created meetings as meetings', () => {
-    // createTask auto-creates a meeting, so a meeting projection is expected
-    createTask(ctx, { title: 'Task with auto meeting' });
-    expect(rebuildMeetingProjections(ctx)).toBe(1);
+  it('does not auto-create a meeting for a task without meetingId', () => {
+    // createTask without meetingId no longer creates a shell meeting
+    const task = createTask(ctx, { title: 'Standalone task' });
+    expect(task.meetingId).toBeUndefined();
+    expect(rebuildMeetingProjections(ctx)).toBe(0);
   });
 });
 
@@ -202,7 +203,7 @@ describe('rebuildAgentProjections', () => {
 
 describe('rebuildAllProjections', () => {
   it('rebuilds task, meeting, and agent projections together', () => {
-    // each createTask auto-creates a meeting, so 2 tasks + 1 meeting = 3 meetings
+    // tasks without meetingId do not create meetings, so 2 tasks + 1 meeting = 1 meeting
     createTask(ctx, { title: 'Task 1' });
     createTask(ctx, { title: 'Task 2' });
     createMeeting(ctx, { title: 'Meeting 1' });
@@ -211,7 +212,7 @@ describe('rebuildAllProjections', () => {
 
     const result = rebuildAllProjections(ctx);
     expect(result.tasks).toBe(2);
-    expect(result.meetings).toBe(3);
+    expect(result.meetings).toBe(1);
     expect(result.agents).toBe(2);
   });
 

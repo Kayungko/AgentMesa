@@ -1124,6 +1124,7 @@ function TimelineItem({
           <small>{message.type.replace(/_/g, ' ')} · {formatTime(message.createdAt)}</small>
         </span>
         <p>{message.summary}</p>
+        {message.body ? <pre className="timeline-item__content">{message.body}</pre> : null}
       </div>
     </li>
   );
@@ -1348,7 +1349,7 @@ function SessionDetailView({
           <span>参与的 Agent</span>
           <small>{participants.length} / {runtime.agents.length}</small>
           {uninvited.length > 0 ? (
-            <button className="button button--ghost button--sm" onClick={() => setInviteOpen((value) => !value)} type="button">
+            <button className="button button--ghost button--sm" onClick={() => setInviteOpen((value) => !value)} type="button" title="邀请即启动真实 CLI agent，其回复会写回会话">
               {inviteOpen ? '收起' : '邀请加入'}
             </button>
           ) : null}

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -8,6 +8,8 @@ import {
   createTask,
   createAgentRun,
   createCheckResult,
+  createMeeting,
+  registerAgent,
   writeReviewRequest,
   appendMessage,
 } from '@agentmesa/core';
@@ -715,6 +717,87 @@ describe('DeskServer', () => {
       });
 
       expect(res.status).toBe(400);
+    });
+
+    it('inviting an agent fires a session run and writes the reply back as a message', async () => {
+      // Deterministic stub CLI: echoes the prompt back, which becomes the agent message.
+      const stubCli = join(testDir, 'echo-session.mjs');
+      writeFileSync(
+        stubCli,
+        "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>process.stdout.write('AGENT-REPLY:'+s));",
+      );
+      const prevCmd = process.env.AGENTMESA_CLAUDE_CMD;
+      process.env.AGENTMESA_CLAUDE_CMD = `node ${stubCli}`;
+
+      const meeting = createMeeting(ctx, { title: '邀请即激活会话' });
+      registerAgent(ctx, { id: 'agent:claude', name: 'Claude', client: 'claude', status: 'available', roles: ['builder'] });
+
+      try {
+        server = new DeskServer(testDir, 0, { sessionToken: 'secret', sessionRunTimeout: 5000 });
+        await server.start();
+        const base = `http://localhost:${server.getPort()}`;
+        const headers = { Authorization: 'Bearer secret', 'Content-Type': 'application/json' };
+
+        // 邀请立即返回 200（不阻塞等 CLI 结束）
+        const invited = await fetch(`${base}/api/meetings/${meeting.id}/agents`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ agentId: 'agent:claude' }),
+        });
+        expect(invited.status).toBe(200);
+        expect(((await invited.json()) as { agents: string[] }).agents).toContain('agent:claude');
+
+        // 轮询等 run 达 completed（后台 spawn 异步执行）
+        const runs = (await (await fetch(`${base}/api/runs`, { headers: { Authorization: 'Bearer secret' } })).json()) as Array<{ agentId: string; status: string }>;
+        const sessionRun = runs.find((r) => r.agentId === 'agent:claude');
+        expect(sessionRun).toBeTruthy();
+
+        // 等写回消息出现（最多 ~3s）
+        let detail: { messages: Array<{ from: string; body?: string }> };
+        for (let i = 0; i < 30; i += 1) {
+          detail = (await (await fetch(`${base}/api/meetings/${meeting.id}`, { headers: { Authorization: 'Bearer secret' } })).json()) as { messages: Array<{ from: string; body?: string }> };
+          if (detail.messages.some((m) => m.from === 'agent:claude' && (m.body ?? '').includes('AGENT-REPLY'))) break;
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        expect(detail!.messages.some((m) => m.from === 'agent:claude' && (m.body ?? '').includes('AGENT-REPLY'))).toBe(true);
+      } finally {
+        if (prevCmd === undefined) delete process.env.AGENTMESA_CLAUDE_CMD;
+        else process.env.AGENTMESA_CLAUDE_CMD = prevCmd;
+      }
+    });
+
+    it('inviting an agent with no CLI configured marks the run failed', async () => {
+      // Deterministic no-CLI path: SessionRunner fails explicitly without spawning.
+      const prevCmd = process.env.AGENTMESA_CLAUDE_CMD;
+      delete process.env.AGENTMESA_CLAUDE_CMD;
+      delete process.env.AGENTMESA_CODEX_CMD;
+
+      const meeting = createMeeting(ctx, { title: '未配置会话' });
+      registerAgent(ctx, { id: 'agent:codex', name: 'Codex', client: 'codex', status: 'available', roles: ['reviewer'] });
+
+      try {
+        server = new DeskServer(testDir, 0, { sessionToken: 'secret', sessionRunTimeout: 5000 });
+        await server.start();
+        const base = `http://localhost:${server.getPort()}`;
+        const headers = { Authorization: 'Bearer secret', 'Content-Type': 'application/json' };
+
+        await fetch(`${base}/api/meetings/${meeting.id}/agents`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ agentId: 'agent:codex' }),
+        });
+
+        let runs: Array<{ agentId: string; status: string }> = [];
+        for (let i = 0; i < 20; i += 1) {
+          runs = (await (await fetch(`${base}/api/runs`, { headers: { Authorization: 'Bearer secret' } })).json()) as Array<{ agentId: string; status: string }>;
+          if (runs.some((r) => r.agentId === 'agent:codex' && r.status === 'failed')) break;
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        expect(runs.some((r) => r.agentId === 'agent:codex' && r.status === 'failed')).toBe(true);
+      } finally {
+        if (prevCmd === undefined) delete process.env.AGENTMESA_CLAUDE_CMD;
+        else process.env.AGENTMESA_CLAUDE_CMD = prevCmd;
+      }
     });
   });
 });

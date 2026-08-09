@@ -7,6 +7,7 @@ import {
   addAgentToMeeting,
   addTaskToMeeting,
   appendMessage,
+  createAgentRun,
   createMeeting,
   createRuntimeContext,
   createTask,
@@ -49,6 +50,7 @@ import {
 } from '@agentmesa/protocol';
 import type { MesaActor, MesaRuntimeContext } from '@agentmesa/core';
 import { WorkflowEngine, decideWorkflow, listWorkflowStates } from '@agentmesa/orchestrator';
+import { buildSessionPrompt, executeSessionRun } from '@agentmesa/runner';
 import {
   getSetupStatus,
   installMcpIntegration,
@@ -131,6 +133,8 @@ export interface DeskServerOptions {
   writeActor?: MesaActor;
   /** Called after the active workspace changes (desktop uses it to restart the desk for the new root). */
   onActivateWorkspace?: (workspace: MesaWorkspace) => Promise<void> | void;
+  /** Max time (ms) a session-collaboration CLI process may run before it is killed. */
+  sessionRunTimeout?: number;
 }
 
 interface StoredCommandResult {
@@ -149,6 +153,7 @@ export class DeskServer {
   private readonly sessionToken?: string;
   private readonly writeActor: MesaActor;
   private readonly onActivateWorkspace?: (workspace: MesaWorkspace) => Promise<void> | void;
+  private readonly sessionRunTimeout?: number;
   private actualPort = 0;
   private server: Server | null = null;
   private readonly eventResponses = new Set<ServerResponse>();
@@ -165,6 +170,7 @@ export class DeskServer {
       client: 'agentmesa-desk',
     };
     this.onActivateWorkspace = options.onActivateWorkspace;
+    this.sessionRunTimeout = options.sessionRunTimeout;
   }
 
   async start(): Promise<void> {
@@ -230,6 +236,61 @@ export class DeskServer {
     return createRuntimeContext({
       rootDir: this.rootDir,
       actor: this.writeActor,
+    });
+  }
+
+  /**
+   * Invite-and-activate: spawn a real CLI agent (claude -p / codex exec) to
+   * join the meeting. Creates a `session` run carrying the meeting context and
+   * executes it in the background; the agent's reply is written back into the
+   * session timeline. Called fire-and-forget from the invite endpoint.
+   */
+  private async activateMeetingAgent(
+    meetingId: string,
+    agentId: string,
+    writeContext: MesaRuntimeContext,
+  ): Promise<void> {
+    // 防重：该 agent 在此会话已有进行中的 run 则跳过，避免重复 spawn。
+    const hasActive = listAgentRuns(writeContext, { agentId })
+      .filter((run) => run.meetingId === meetingId)
+      .some((run) => run.status === 'pending' || run.status === 'running');
+    if (hasActive) return;
+
+    const meeting = getMeeting(writeContext, meetingId);
+    const tasks = listTasks(writeContext).filter((task) => meeting.tasks.includes(task.id));
+    const messages = listMessages(writeContext)
+      .filter((message) => message.meetingId === meetingId)
+      .slice(-20);
+    const agentNames = Object.fromEntries(
+      listAgents(writeContext).map((agent) => [agent.id, agent.name]),
+    );
+
+    const prompt = buildSessionPrompt({
+      meetingId,
+      title: meeting.title,
+      purpose: meeting.purpose,
+      agentId,
+      agentNames,
+      tasks: tasks.map((task) => ({ id: task.id, title: task.title, status: task.status })),
+      messages: messages.map((message) => ({
+        from: message.from,
+        type: message.type,
+        summary: message.summary,
+        createdAt: message.createdAt,
+      })),
+    });
+
+    const run = createAgentRun(writeContext, {
+      agentId,
+      meetingId,
+      input: prompt,
+      action: 'custom',
+      runnerType: 'session',
+    });
+
+    await executeSessionRun(writeContext, run.id, {
+      writeBackToMeetingId: meetingId,
+      timeout: this.sessionRunTimeout,
     });
   }
 
@@ -639,7 +700,18 @@ export class DeskServer {
       if (typeof body.agentId !== 'string' || body.agentId.length === 0) {
         throw new MesaError('VALIDATION_ERROR', 'agentId is required');
       }
-      this.sendJson(res, addAgentToMeeting(writeContext, meetingAgentMatch[1]!, body.agentId));
+      const meetingId = meetingAgentMatch[1]!;
+      const meeting = addAgentToMeeting(writeContext, meetingId, body.agentId);
+      // 邀请即激活：立即返回 200，后台 fire-and-forget spawn 真实 CLI agent。
+      // 绝不 await —— 否则邀请请求会阻塞到 CLI 进程结束（最长 300s）。
+      void this.activateMeetingAgent(meetingId, body.agentId, writeContext).catch((error) => {
+        writeContext.logger.error('Failed to activate meeting agent', {
+          meetingId,
+          agentId: body.agentId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+      this.sendJson(res, meeting);
       return;
     }
 

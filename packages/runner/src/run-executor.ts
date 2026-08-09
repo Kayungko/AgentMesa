@@ -18,6 +18,7 @@ const RUNNER_TYPES: readonly RunnerType[] = [
   'codex-test',
   'shell-check',
   'document',
+  'session',
 ];
 
 export function isRunnerType(value: string | undefined): value is RunnerType {
