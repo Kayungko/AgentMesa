@@ -14,7 +14,8 @@ export type MesaErrorCode =
   | 'PROJECTION_STALE'
   | 'TRANSPORT_NOT_FOUND'
   | 'RUN_NOT_FOUND'
-  | 'CHECK_RESULT_NOT_FOUND';
+  | 'CHECK_RESULT_NOT_FOUND'
+  | 'ROOM_NOT_FOUND';
 
 export class MesaError extends Error {
   readonly code: MesaErrorCode;

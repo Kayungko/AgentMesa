@@ -8,12 +8,14 @@ import type { MesaRuntimeContext } from '../runtime/types.js';
 import {
   addAgentToMeeting,
   addTaskToMeeting,
+  canTransitionMeetingStatus,
   createMeeting,
   getMeeting,
   listMeetings,
+  removeAgentFromMeeting,
   updateMeetingStatus,
 } from '../services/meeting-service.js';
-import { MeetingNotFoundError } from '../errors.js';
+import { InvalidStatusTransitionError, MeetingNotFoundError } from '../errors.js';
 
 let testDir: string;
 let ctx: MesaRuntimeContext;
@@ -70,6 +72,59 @@ describe('meeting service', () => {
       'meeting_agent_added',
     ]);
     expect(events.every((event) => event.actor === 'user:test')).toBe(true);
+  });
+
+  it('enforces the meeting status state machine', () => {
+    // open → active / paused / completed / archived / closed
+    expect(canTransitionMeetingStatus('open', 'active')).toBe(true);
+    expect(canTransitionMeetingStatus('open', 'paused')).toBe(true);
+    expect(canTransitionMeetingStatus('open', 'completed')).toBe(true);
+    expect(canTransitionMeetingStatus('open', 'archived')).toBe(true);
+    expect(canTransitionMeetingStatus('open', 'closed')).toBe(true);
+
+    // paused ↔ active
+    expect(canTransitionMeetingStatus('paused', 'active')).toBe(true);
+    expect(canTransitionMeetingStatus('active', 'paused')).toBe(true);
+
+    // terminal states are immutable
+    expect(canTransitionMeetingStatus('completed', 'active')).toBe(false);
+    expect(canTransitionMeetingStatus('archived', 'active')).toBe(false);
+    expect(canTransitionMeetingStatus('closed', 'open')).toBe(false);
+
+    // same status is a no-op
+    expect(canTransitionMeetingStatus('active', 'active')).toBe(true);
+  });
+
+  it('throws InvalidStatusTransitionError on illegal meeting status change', () => {
+    const meeting = createMeeting(ctx, { title: 'Feature Review' });
+    updateMeetingStatus(ctx, meeting.id, 'completed');
+
+    expect(() => updateMeetingStatus(ctx, meeting.id, 'active')).toThrow(
+      InvalidStatusTransitionError
+    );
+  });
+
+  it('removes an agent from a meeting and emits meeting_agent_removed', () => {
+    const meeting = createMeeting(ctx, { title: 'Feature Review' });
+    addAgentToMeeting(ctx, meeting.id, 'agent:codex');
+    addAgentToMeeting(ctx, meeting.id, 'agent:claude');
+
+    const result = removeAgentFromMeeting(ctx, meeting.id, 'agent:codex');
+
+    expect(result.agents).not.toContain('agent:codex');
+    expect(result.agents).toContain('agent:claude');
+
+    const events = ctx.eventStore.list({ streamId: meeting.id });
+    expect(events[events.length - 1].type).toBe('meeting_agent_removed');
+  });
+
+  it('is idempotent when removing an absent agent', () => {
+    const meeting = createMeeting(ctx, { title: 'Feature Review' });
+    const result = removeAgentFromMeeting(ctx, meeting.id, 'agent:nobody');
+
+    expect(result.agents).toHaveLength(0);
+    const events = ctx.eventStore.list({ streamId: meeting.id });
+    expect(events.map((event) => event.type)).not.toContain('meeting_agent_removed');
   });
 
   it('rejects meeting mutation denied by policy', () => {

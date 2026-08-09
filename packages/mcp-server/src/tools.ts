@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { MesaRuntimeContext } from '@agentmesa/core';
 import {
   createTask,
+  createRuntimeContext,
   getTask,
   listTasks,
   updateTaskStatus,
@@ -30,6 +31,9 @@ import {
   createCheckResult,
   getCheckResult,
   listCheckResults,
+  createRoomStore,
+  getWorkspace,
+  getMeeting,
 } from '@agentmesa/core';
 import { executeRun } from '@agentmesa/runner';
 import {
@@ -125,6 +129,43 @@ export const createMeetingInputSchema = {
 };
 
 export const listMeetingsInputSchema = {};
+
+// --- Room tools ---
+
+export const createRoomInputSchema = {
+  name: z.string().min(1),
+};
+
+export const listRoomsInputSchema = {};
+
+export const inviteToRoomInputSchema = {
+  roomId: z.string().min(1),
+  workspaceId: z.string().min(1),
+  kind: z.enum(['session', 'agent', 'human']),
+  ref: z.string().min(1),
+  label: z.string().optional(),
+};
+
+export const leaveRoomInputSchema = {
+  roomId: z.string().min(1),
+  workspaceId: z.string().min(1),
+  kind: z.enum(['session', 'agent', 'human']),
+  ref: z.string().min(1),
+};
+
+export const sendRoomMessageInputSchema = {
+  roomId: z.string().min(1),
+  workspaceId: z.string().min(1),
+  fromKind: z.enum(['session', 'agent', 'human']),
+  fromRef: z.string().min(1),
+  fromLabel: z.string().optional(),
+  summary: z.string().min(1),
+  type: z.string().optional(),
+};
+
+export const listRoomMessagesInputSchema = {
+  roomId: z.string().min(1),
+};
 
 export const registerAgentInputSchema = {
   id: z.string().min(1),
@@ -321,6 +362,120 @@ export function handleCreateMeeting(
 export function handleListMeetings(ctx: MesaRuntimeContext): string {
   const meetings = listMeetings(ctx);
   return JSON.stringify(meetings);
+}
+
+// --- Room handlers ---
+
+function roomStore() {
+  return createRoomStore();
+}
+
+function resolveMemberLabel(
+  ctx: MesaRuntimeContext,
+  workspaceId: string,
+  kind: 'session' | 'agent' | 'human',
+  ref: string,
+): string | undefined {
+  if (kind === 'human') return '我';
+  try {
+    if (kind === 'session') {
+      const workspace = getWorkspace(workspaceId);
+      const targetCtx = workspace
+        ? createRuntimeContext({
+            rootDir: workspace.rootDir,
+            actor: { id: 'system:mcp', type: 'system', roles: ['read_only'] },
+          })
+        : ctx;
+      return getMeeting(targetCtx, ref).title;
+    }
+    const workspace = getWorkspace(workspaceId);
+    const targetCtx = workspace
+      ? createRuntimeContext({
+          rootDir: workspace.rootDir,
+          actor: { id: 'system:mcp', type: 'system', roles: ['read_only'] },
+        })
+      : ctx;
+    return listAgents(targetCtx).find((agent) => agent.id === ref)?.name;
+  } catch {
+    return undefined;
+  }
+}
+
+export function handleCreateRoom(
+  _ctx: MesaRuntimeContext,
+  args: { name: string },
+): string {
+  const room = roomStore().createRoom({ name: args.name });
+  return JSON.stringify(room);
+}
+
+export function handleListRooms(_ctx: MesaRuntimeContext): string {
+  return JSON.stringify(roomStore().listRooms());
+}
+
+export function handleInviteToRoom(
+  ctx: MesaRuntimeContext,
+  args: {
+    roomId: string;
+    workspaceId: string;
+    kind: 'session' | 'agent' | 'human';
+    ref: string;
+    label?: string;
+  },
+): string {
+  const label = args.label ?? resolveMemberLabel(ctx, args.workspaceId, args.kind, args.ref);
+  const room = roomStore().invite(args.roomId, {
+    workspaceId: args.workspaceId,
+    kind: args.kind,
+    ref: args.ref,
+    ...(label ? { label } : {}),
+  });
+  return JSON.stringify(room);
+}
+
+export function handleLeaveRoom(
+  _ctx: MesaRuntimeContext,
+  args: { roomId: string; workspaceId: string; kind: 'session' | 'agent' | 'human'; ref: string },
+): string {
+  const room = roomStore().leave(args.roomId, {
+    workspaceId: args.workspaceId,
+    kind: args.kind,
+    ref: args.ref,
+  });
+  return JSON.stringify(room);
+}
+
+export function handleSendRoomMessage(
+  _ctx: MesaRuntimeContext,
+  args: {
+    roomId: string;
+    workspaceId: string;
+    fromKind: 'session' | 'agent' | 'human';
+    fromRef: string;
+    fromLabel?: string;
+    summary: string;
+    type?: string;
+  },
+): string {
+  const message = roomStore().sendMessage(args.roomId, {
+    workspaceId: args.workspaceId,
+    from: {
+      workspaceId: args.workspaceId,
+      kind: args.fromKind,
+      ref: args.fromRef,
+      ...(args.fromLabel ? { label: args.fromLabel } : {}),
+    },
+    summary: args.summary,
+    ...(args.type ? { type: args.type } : {}),
+  });
+  return JSON.stringify(message);
+}
+
+export function handleListRoomMessages(
+  _ctx: MesaRuntimeContext,
+  args: { roomId: string },
+): string {
+  return JSON.stringify(roomStore().listMessages(args.roomId));
 }
 
 export function handleRegisterAgent(

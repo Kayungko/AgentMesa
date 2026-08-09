@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { EventEnvelope, MesaAgentRun } from '@agentmesa/protocol';
-import { createEventStream, decideWorkflow, loadRuns, loadWorkflows } from './api.js';
+import type { EventEnvelope, MesaAgent, MesaAgentRun, MesaMeeting, MesaTask } from '@agentmesa/protocol';
+import {
+  addMeetingAgent,
+  createEventStream,
+  createMeeting,
+  createTask,
+  decideWorkflow,
+  loadAgents,
+  loadMeetings,
+  loadRuns,
+  loadTasks,
+  loadWorkflows,
+} from './api.js';
 import type { RuntimeConfig, WorkflowState } from './types.js';
 
 export type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'offline';
@@ -11,6 +22,9 @@ export function useMesaRuntime(config: RuntimeConfig) {
   const cursorKey = `agentmesa.event.cursor.${config.view}`;
   const [runs, setRuns] = useState<MesaAgentRun[]>([]);
   const [workflows, setWorkflows] = useState<WorkflowState[]>([]);
+  const [meetings, setMeetings] = useState<MesaMeeting[]>([]);
+  const [agents, setAgents] = useState<MesaAgent[]>([]);
+  const [tasks, setTasks] = useState<MesaTask[]>([]);
   const [events, setEvents] = useState<EventEnvelope[]>([]);
   const [connection, setConnection] = useState<ConnectionState>('connecting');
   const [error, setError] = useState<string>();
@@ -19,12 +33,18 @@ export function useMesaRuntime(config: RuntimeConfig) {
   const seenRef = useRef(new Set<string>());
 
   const refresh = useCallback(async () => {
-    const [nextRuns, nextWorkflows] = await Promise.all([
+    const [nextRuns, nextWorkflows, nextMeetings, nextAgents, nextTasks] = await Promise.all([
       loadRuns(config),
       loadWorkflows(config),
+      loadMeetings(config),
+      loadAgents(config),
+      loadTasks(config),
     ]);
     setRuns(nextRuns);
     setWorkflows(nextWorkflows);
+    setMeetings(nextMeetings);
+    setAgents(nextAgents);
+    setTasks(nextTasks);
     setError(undefined);
     setLoaded(true);
   }, [config]);
@@ -53,7 +73,10 @@ export function useMesaRuntime(config: RuntimeConfig) {
         setEvents((current) => [...current, envelope].slice(-MAX_EVENTS));
         if (
           envelope.event.streamType === 'agent_run' ||
-          envelope.event.streamType === 'workflow'
+          envelope.event.streamType === 'workflow' ||
+          envelope.event.streamType === 'meeting' ||
+          envelope.event.streamType === 'task' ||
+          envelope.event.streamType === 'message'
         ) {
           refresh().catch(() => undefined);
         }
@@ -101,9 +124,43 @@ export function useMesaRuntime(config: RuntimeConfig) {
     await refresh();
   }, [config, refresh]);
 
+  const createSession = useCallback(async (
+    input: { title: string; purpose?: string; agents?: string[] },
+  ): Promise<MesaMeeting> => {
+    const meeting = await createMeeting(config, input);
+    await refresh();
+    return meeting;
+  }, [config, refresh]);
+
+  const inviteAgent = useCallback(async (
+    meetingId: string,
+    agentId: string,
+  ): Promise<MesaMeeting> => {
+    const meeting = await addMeetingAgent(config, meetingId, agentId);
+    await refresh();
+    return meeting;
+  }, [config, refresh]);
+
+  const createTaskInSession = useCallback(async (
+    input: {
+      title: string;
+      description?: string;
+      assignedTo?: string;
+      reviewer?: string;
+      meetingId?: string;
+    },
+  ): Promise<MesaTask> => {
+    const task = await createTask(config, input);
+    await refresh();
+    return task;
+  }, [config, refresh]);
+
   return {
     runs,
     workflows,
+    meetings,
+    agents,
+    tasks,
     events,
     waiting,
     activeRuns,
@@ -113,5 +170,8 @@ export function useMesaRuntime(config: RuntimeConfig) {
     loaded,
     refresh,
     decide,
+    createSession,
+    inviteAgent,
+    createTaskInSession,
   };
 }

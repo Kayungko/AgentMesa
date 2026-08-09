@@ -451,6 +451,7 @@ describe('MesaEventSchema', () => {
       'meeting_status_changed',
       'meeting_task_added',
       'meeting_agent_added',
+      'meeting_agent_removed',
       'agent_registered',
     ] as const;
 
@@ -484,6 +485,7 @@ describe('MesaEventSchema', () => {
       'meeting_status_changed',
       'meeting_task_added',
       'meeting_agent_added',
+      'meeting_agent_removed',
       'agent_joined',
       'agent_left',
       'agent_registered',

@@ -3,13 +3,19 @@ import { once } from 'node:events';
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import { join } from 'node:path';
 import {
+  addAgentToMeeting,
+  addTaskToMeeting,
   appendMessage,
+  createMeeting,
   createRuntimeContext,
+  createTask,
+  getAgentRun,
   getArtifact,
   getMeeting,
   getTask,
   listAgents,
   listAgentRuns,
+  updateAgentRunStatus,
   listArtifacts,
   listCheckResults,
   listInboundHandoffs,
@@ -17,11 +23,28 @@ import {
   listMessages,
   listOutboundHandoffs,
   listTasks,
+  addWorkspace,
+  getWorkspace,
+  removeWorkspace,
+  setActiveWorkspace,
+  readRegistry,
+  createRoomStore,
+  updateTaskStatus,
+  assignTask,
+  updateMeetingStatus,
+  removeAgentFromMeeting,
+  registerAgent,
   MesaError,
   withLock,
 } from '@agentmesa/core';
-import type { EventEnvelope, WorkflowDecisionCommand } from '@agentmesa/protocol';
-import { CreateMessageInputSchema, WorkflowDecisionCommandSchema } from '@agentmesa/protocol';
+import type { MesaWorkspace } from '@agentmesa/protocol';
+import type { AgentRole, EventEnvelope, MeetingStatus, RunStatus, TaskStatus, WorkflowDecisionCommand } from '@agentmesa/protocol';
+import {
+  CreateMeetingInputSchema,
+  CreateMessageInputSchema,
+  CreateTaskInputSchema,
+  WorkflowDecisionCommandSchema,
+} from '@agentmesa/protocol';
 import type { MesaActor, MesaRuntimeContext } from '@agentmesa/core';
 import { WorkflowEngine, decideWorkflow, listWorkflowStates } from '@agentmesa/orchestrator';
 import {
@@ -34,10 +57,15 @@ import {
 } from '@agentmesa/setup';
 import { generateDashboardHtml } from './dashboard.js';
 
+/** Most recent room messages returned by the room detail endpoint. */
+const ROOM_MESSAGE_LIMIT = 200;
+
 export interface DeskServerOptions {
   host?: string;
   sessionToken?: string;
   writeActor?: MesaActor;
+  /** Called after the active workspace changes (desktop uses it to restart the desk for the new root). */
+  onActivateWorkspace?: (workspace: MesaWorkspace) => Promise<void> | void;
 }
 
 interface StoredCommandResult {
@@ -55,6 +83,7 @@ export class DeskServer {
   private readonly host: string;
   private readonly sessionToken?: string;
   private readonly writeActor: MesaActor;
+  private readonly onActivateWorkspace?: (workspace: MesaWorkspace) => Promise<void> | void;
   private actualPort = 0;
   private server: Server | null = null;
   private readonly eventResponses = new Set<ServerResponse>();
@@ -70,6 +99,7 @@ export class DeskServer {
       roles: ['owner'],
       client: 'agentmesa-desk',
     };
+    this.onActivateWorkspace = options.onActivateWorkspace;
   }
 
   async start(): Promise<void> {
@@ -151,7 +181,7 @@ export class DeskServer {
       return;
     }
 
-    if (req.method === 'POST') {
+    if (req.method === 'POST' || req.method === 'PATCH' || req.method === 'DELETE') {
       await this.handleWriteRequest(req, res, pathname);
       return;
     }
@@ -191,8 +221,11 @@ export class DeskServer {
     const meetingMatch = pathname.match(/^\/api\/meetings\/([^/]+)$/);
     if (meetingMatch) {
       const meeting = getMeeting(readContext, meetingMatch[1]!);
+      // Include meeting-level messages (sent directly to the meeting with no
+      // taskId) in addition to per-task ones — agents often post status updates
+      // straight to the meeting, and those were previously invisible.
       const messages = listMessages(readContext).filter((message) =>
-        meeting.tasks.some((taskId) => message.taskId === taskId),
+        message.meetingId === meeting.id || meeting.tasks.some((taskId) => message.taskId === taskId),
       );
       this.sendJson(res, { ...meeting, messages });
       return;
@@ -246,6 +279,50 @@ export class DeskServer {
       });
       return;
     }
+    if (pathname === '/api/workspaces') {
+      const registry = readRegistry();
+      this.sendJson(res, {
+        workspaces: registry.workspaces,
+        activeWorkspaceId: registry.activeWorkspaceId,
+      });
+      return;
+    }
+
+    if (pathname === '/api/rooms') {
+      this.sendJson(res, createRoomStore().listRooms());
+      return;
+    }
+
+    const roomMatch = pathname.match(/^\/api\/rooms\/([^/]+)$/);
+    if (roomMatch) {
+      const roomId = roomMatch[1]!;
+      const store = createRoomStore();
+      // Cap the timeline to the most recent 200 messages so long-lived rooms
+      // don't load unbounded history; `totalMessages` keeps the count visible.
+      const allMessages = store.listMessages(roomId);
+      this.sendJson(res, {
+        ...store.getRoom(roomId),
+        messages: allMessages.slice(-ROOM_MESSAGE_LIMIT),
+        totalMessages: allMessages.length,
+      });
+      return;
+    }
+
+    const workspaceReadMatch = pathname.match(/^\/api\/workspaces\/([^/]+)\/(meetings|agents)$/);
+    if (workspaceReadMatch) {
+      const workspace = getWorkspace(workspaceReadMatch[1]!);
+      if (!workspace) {
+        this.sendError(res, 404, `Unknown workspace: ${workspaceReadMatch[1]}`);
+        return;
+      }
+      const targetCtx = createRuntimeContext({
+        rootDir: workspace.rootDir,
+        actor: { id: 'system:desk', type: 'system', roles: ['read_only'] },
+      });
+      const data = workspaceReadMatch[2] === 'meetings' ? listMeetings(targetCtx) : listAgents(targetCtx);
+      this.sendJson(res, data);
+      return;
+    }
 
     this.sendError(res, 404, 'Not found');
   }
@@ -261,9 +338,260 @@ export class DeskServer {
     }
 
     const writeContext = this.createWriteContext();
+    if (pathname === '/api/agents') {
+      const body = await this.readJsonBody(req) as {
+        id?: unknown;
+        name?: unknown;
+        client?: unknown;
+        roles?: unknown;
+        clientId?: unknown;
+        workspaceId?: unknown;
+      };
+      if (
+        typeof body.id !== 'string' || body.id.trim().length === 0
+        || typeof body.name !== 'string' || body.name.trim().length === 0
+        || typeof body.client !== 'string' || body.client.trim().length === 0
+        || !Array.isArray(body.roles) || body.roles.length === 0
+      ) {
+        throw new MesaError('VALIDATION_ERROR', 'id, name, client, and roles (non-empty) are required');
+      }
+      const agent = registerAgent(writeContext, {
+        id: body.id,
+        name: body.name,
+        client: body.client,
+        status: 'available',
+        roles: body.roles as AgentRole[],
+        ...(typeof body.clientId === 'string' && body.clientId.trim() ? { clientId: body.clientId } : {}),
+        ...(typeof body.workspaceId === 'string' && body.workspaceId.trim() ? { workspaceId: body.workspaceId } : {}),
+      });
+      this.sendJson(res, agent, 201);
+      return;
+    }
+
+    if (pathname === '/api/workspaces') {
+      const body = await this.readJsonBody(req) as { rootDir?: unknown; name?: unknown };
+      if (typeof body.rootDir !== 'string' || body.rootDir.trim().length === 0) {
+        throw new MesaError('VALIDATION_ERROR', 'rootDir is required');
+      }
+      const workspace = addWorkspace({
+        rootDir: body.rootDir,
+        ...(typeof body.name === 'string' && body.name.trim() ? { name: body.name } : {}),
+      });
+      this.sendJson(res, workspace, 201);
+      return;
+    }
+
+    const workspaceActivateMatch = pathname.match(/^\/api\/workspaces\/([^/]+)\/activate$/);
+    if (workspaceActivateMatch) {
+      const workspace = setActiveWorkspace(workspaceActivateMatch[1]!);
+      // Fire the supervisor hook off the request's await chain. The desktop
+      // supervisor restarts the desk for the new root (stopping this server),
+      // and `server.close()` waits for in-flight request connections — awaiting
+      // the restart here would deadlock: the restart waits for this request,
+      // this request waits for the restart.
+      if (this.onActivateWorkspace) {
+        const hook = this.onActivateWorkspace;
+        const restart = setImmediate(() => {
+          Promise.resolve(hook(workspace)).catch((error) => {
+            console.error('Failed to restart desk for workspace:', error);
+          });
+        });
+        restart.unref?.();
+      }
+      this.sendJson(res, { ...workspace, switched: true });
+      return;
+    }
+
+    const workspaceDeleteMatch = pathname.match(/^\/api\/workspaces\/([^/]+)$/);
+    if (workspaceDeleteMatch && !pathname.includes('/activate')) {
+      removeWorkspace(workspaceDeleteMatch[1]!);
+      this.sendJson(res, { ok: true });
+      return;
+    }
+
+    // --- Room endpoints (global, cross-workspace) ---
+
+    if (pathname === '/api/rooms') {
+      const body = await this.readJsonBody(req) as { name?: unknown; purpose?: unknown };
+      if (typeof body.name !== 'string' || body.name.trim().length === 0) {
+        throw new MesaError('VALIDATION_ERROR', 'name is required');
+      }
+      const room = createRoomStore().createRoom({
+        name: body.name,
+        ...(typeof body.purpose === 'string' && body.purpose.trim() ? { purpose: body.purpose } : {}),
+      });
+      this.sendJson(res, room, 201);
+      return;
+    }
+
+    const roomMemberMatch = pathname.match(/^\/api\/rooms\/([^/]+)\/members$/);
+    if (roomMemberMatch) {
+      const body = await this.readJsonBody(req) as {
+        workspaceId?: unknown;
+        kind?: unknown;
+        ref?: unknown;
+        label?: unknown;
+      };
+      if (
+        typeof body.workspaceId !== 'string' ||
+        typeof body.kind !== 'string' ||
+        typeof body.ref !== 'string'
+      ) {
+        throw new MesaError('VALIDATION_ERROR', 'workspaceId, kind, and ref are required');
+      }
+      if (body.kind !== 'session' && body.kind !== 'agent' && body.kind !== 'human') {
+        throw new MesaError('VALIDATION_ERROR', 'kind must be "session", "agent", or "human"');
+      }
+      const room = createRoomStore().invite(roomMemberMatch[1]!, {
+        workspaceId: body.workspaceId,
+        kind: body.kind,
+        ref: body.ref,
+        ...(typeof body.label === 'string' ? { label: body.label } : {}),
+      });
+      this.sendJson(res, room);
+      return;
+    }
+
+    const roomLeaveMatch = pathname.match(/^\/api\/rooms\/([^/]+)\/leave$/);
+    if (roomLeaveMatch) {
+      const body = await this.readJsonBody(req) as {
+        workspaceId?: unknown;
+        kind?: unknown;
+        ref?: unknown;
+      };
+      if (
+        typeof body.workspaceId !== 'string' ||
+        typeof body.kind !== 'string' ||
+        typeof body.ref !== 'string'
+      ) {
+        throw new MesaError('VALIDATION_ERROR', 'workspaceId, kind, and ref are required');
+      }
+      if (body.kind !== 'session' && body.kind !== 'agent' && body.kind !== 'human') {
+        throw new MesaError('VALIDATION_ERROR', 'kind must be "session", "agent", or "human"');
+      }
+      const room = createRoomStore().leave(roomLeaveMatch[1]!, {
+        workspaceId: body.workspaceId,
+        kind: body.kind,
+        ref: body.ref,
+      });
+      this.sendJson(res, room);
+      return;
+    }
+
+    const roomMessageMatch = pathname.match(/^\/api\/rooms\/([^/]+)\/messages$/);
+    if (roomMessageMatch) {
+      const body = await this.readJsonBody(req) as {
+        workspaceId?: unknown;
+        from?: unknown;
+        summary?: unknown;
+        type?: unknown;
+      };
+      const store = createRoomStore();
+      const message = store.sendMessage(roomMessageMatch[1]!, {
+        workspaceId: body.workspaceId,
+        from: body.from,
+        summary: body.summary,
+        ...(typeof body.type === 'string' ? { type: body.type } : {}),
+      });
+      this.sendJson(res, message, 201);
+      return;
+    }
+
+    const roomDeleteMatch = pathname.match(/^\/api\/rooms\/([^/]+)$/);
+    if (roomDeleteMatch) {
+      createRoomStore().deleteRoom(roomDeleteMatch[1]!);
+      this.sendJson(res, { ok: true });
+      return;
+    }
+
+    const taskStatusMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/status$/);
+    if (taskStatusMatch) {
+      const body = await this.readJsonBody(req) as { status?: unknown; updatedBy?: unknown };
+      if (typeof body.status !== 'string' || body.status.length === 0) {
+        throw new MesaError('VALIDATION_ERROR', 'status is required');
+      }
+      const task = updateTaskStatus(writeContext, taskStatusMatch[1]!, body.status as TaskStatus);
+      this.sendJson(res, task);
+      return;
+    }
+
+    const runStatusMatch = pathname.match(/^\/api\/runs\/([^/]+)\/status$/);
+    if (runStatusMatch) {
+      const body = await this.readJsonBody(req) as { status?: unknown; output?: unknown; error?: unknown };
+      if (typeof body.status !== 'string' || body.status.length === 0) {
+        throw new MesaError('VALIDATION_ERROR', 'status is required');
+      }
+      const run = updateAgentRunStatus(writeContext, runStatusMatch[1]!, body.status as RunStatus, {
+        ...(typeof body.output === 'string' ? { output: body.output } : {}),
+        ...(typeof body.error === 'string' ? { error: body.error } : {}),
+      });
+      this.sendJson(res, run);
+      return;
+    }
+
+    const taskAssignMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/assign$/);
+    if (taskAssignMatch) {
+      const body = await this.readJsonBody(req) as { assignedTo?: unknown };
+      if (typeof body.assignedTo !== 'string' || body.assignedTo.length === 0) {
+        throw new MesaError('VALIDATION_ERROR', 'assignedTo is required');
+      }
+      const task = assignTask(writeContext, taskAssignMatch[1]!, body.assignedTo);
+      this.sendJson(res, task);
+      return;
+    }
+
     if (pathname === '/api/messages') {
       const input = CreateMessageInputSchema.omit({ from: true }).parse(await this.readJsonBody(req));
       this.sendJson(res, appendMessage(writeContext, input), 201);
+      return;
+    }
+
+    if (pathname === '/api/meetings') {
+      const input = CreateMeetingInputSchema.parse(await this.readJsonBody(req));
+      this.sendJson(res, createMeeting(writeContext, input), 201);
+      return;
+    }
+
+    const meetingAgentMatch = pathname.match(/^\/api\/meetings\/([^/]+)\/agents$/);
+    if (meetingAgentMatch) {
+      const body = await this.readJsonBody(req) as { agentId?: unknown };
+      if (typeof body.agentId !== 'string' || body.agentId.length === 0) {
+        throw new MesaError('VALIDATION_ERROR', 'agentId is required');
+      }
+      this.sendJson(res, addAgentToMeeting(writeContext, meetingAgentMatch[1]!, body.agentId));
+      return;
+    }
+
+    const meetingStatusMatch = pathname.match(/^\/api\/meetings\/([^/]+)\/status$/);
+    if (meetingStatusMatch) {
+      const body = await this.readJsonBody(req) as { status?: unknown };
+      if (typeof body.status !== 'string' || body.status.length === 0) {
+        throw new MesaError('VALIDATION_ERROR', 'status is required');
+      }
+      const meeting = updateMeetingStatus(
+        writeContext,
+        meetingStatusMatch[1]!,
+        body.status as MeetingStatus,
+      );
+      this.sendJson(res, meeting);
+      return;
+    }
+
+    const meetingAgentRemoveMatch = pathname.match(/^\/api\/meetings\/([^/]+)\/agents\/([^/]+)$/);
+    if (meetingAgentRemoveMatch) {
+      const meeting = removeAgentFromMeeting(writeContext, meetingAgentRemoveMatch[1]!, meetingAgentRemoveMatch[2]!);
+      this.sendJson(res, meeting);
+      return;
+    }
+
+    if (pathname === '/api/tasks') {
+      const input = CreateTaskInputSchema.omit({ createdBy: true }).parse(await this.readJsonBody(req));
+      const task = createTask(writeContext, input);
+      // Link the task into its meeting so the session surface can list it.
+      if (task.meetingId) {
+        addTaskToMeeting(writeContext, task.meetingId, task.id);
+      }
+      this.sendJson(res, task, 201);
       return;
     }
 
@@ -304,7 +632,7 @@ export class DeskServer {
         throw new MesaError('VALIDATION_ERROR', 'side must be "claude" or "codex"');
       }
       const result = pathname === '/api/setup/install'
-        ? installMcpIntegration(body.side)
+        ? installMcpIntegration(body.side, undefined, this.rootDir)
         : uninstallMcpIntegration(body.side);
       this.sendJson(res, result, result.ok ? 200 : 502);
       return;
@@ -567,7 +895,7 @@ export class DeskServer {
     if (error instanceof MesaError) {
       const status = error.code === 'POLICY_DENIED' ? 403
         : error.code.endsWith('_NOT_FOUND') ? 404
-          : error.code === 'VALIDATION_ERROR' ? 400
+          : error.code === 'VALIDATION_ERROR' || error.code === 'INVALID_STATUS_TRANSITION' ? 400
             : 500;
       this.sendError(res, status, error.message);
       return;

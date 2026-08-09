@@ -8,6 +8,9 @@ build/
 .agentmesa/state.sqlite
 .agentmesa/logs/
 .agentmesa/locks/
+# Local runtime data (agent registrations, meetings, events) — never versioned.
+.agentmesa/
+packages/core/.agentmesa/
 *.tsbuildinfo
 .codegraph/
 test-results/

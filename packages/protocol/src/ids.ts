@@ -65,3 +65,13 @@ export function generateEnvelopeId(): string {
 export function generateCheckResultId(): string {
   return `check_${shortId()}`;
 }
+
+/** Generate a MesaWorkspace ID. Format: `ws_xxxxxxxx` */
+export function generateWorkspaceId(): string {
+  return `ws_${shortId()}`;
+}
+
+/** Generate a MesaRoom ID. Format: `room_xxxxxxxx` */
+export function generateRoomId(): string {
+  return `room_${shortId()}`;
+}

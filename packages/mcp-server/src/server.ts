@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { currentProtocolVersion } from '@agentmesa/protocol';
-import { createRuntimeContext } from '@agentmesa/core';
+import { createRuntimeContext, getWorkspace } from '@agentmesa/core';
 import type { MesaActor, MesaRuntimeContext } from '@agentmesa/core';
 import {
   createTaskInputSchema,
@@ -39,6 +39,18 @@ import {
   getCheckInputSchema,
   linkPrInputSchema,
   importCiResultsInputSchema,
+  createRoomInputSchema,
+  listRoomsInputSchema,
+  inviteToRoomInputSchema,
+  leaveRoomInputSchema,
+  sendRoomMessageInputSchema,
+  listRoomMessagesInputSchema,
+  handleCreateRoom,
+  handleListRooms,
+  handleInviteToRoom,
+  handleLeaveRoom,
+  handleSendRoomMessage,
+  handleListRoomMessages,
   handleCreateTask,
   handleListTasks,
   handleReadTask,
@@ -91,12 +103,18 @@ export function resolveActor(): MesaActor {
   return { id, type: 'agent', roles, client: 'mcp' };
 }
 
-function createMcpContextFactory(rootDir: string): () => MesaRuntimeContext {
+function createMcpContextFactory(rootDir: string): (args?: Record<string, unknown>) => MesaRuntimeContext {
   const actor = resolveActor();
-  return () => createRuntimeContext({ rootDir, actor });
+  return (args) => {
+    // A per-call `workspaceId` lets a tool operate on another workspace's
+    // data (used by room tools); absent that, fall back to the server root.
+    const workspaceId = typeof args?.workspaceId === 'string' ? args.workspaceId : undefined;
+    const targetRoot = workspaceId ? getWorkspace(workspaceId)?.rootDir ?? rootDir : rootDir;
+    return createRuntimeContext({ rootDir: targetRoot, actor });
+  };
 }
 
-type ContextFactory = () => MesaRuntimeContext;
+type ContextFactory = (args?: Record<string, unknown>) => MesaRuntimeContext;
 
 function errorEnvelope(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
@@ -113,7 +131,7 @@ function wrapRuntimeHandler<T extends Record<string, any>>(
 ) {
   return async (args: T) => {
     try {
-      return { content: [{ type: 'text' as const, text: handler(makeCtx(), args) }] };
+      return { content: [{ type: 'text' as const, text: handler(makeCtx(args), args) }] };
     } catch (error) {
       return errorEnvelope(error);
     }
@@ -127,7 +145,7 @@ function wrapAsyncRuntimeHandler<T extends Record<string, any>>(
 ) {
   return async (args: T) => {
     try {
-      return { content: [{ type: 'text' as const, text: await handler(makeCtx(), args) }] };
+      return { content: [{ type: 'text' as const, text: await handler(makeCtx(args), args) }] };
     } catch (error) {
       return errorEnvelope(error);
     }
@@ -350,6 +368,37 @@ export function createMcpServer(rootDir: string): McpServer {
     description: 'Import GitHub Actions CI status for the current repo via `gh run list`, recording a MesaCheckResult per finished run',
     inputSchema: importCiResultsInputSchema,
   }, wrapAsyncRuntimeHandler(makeCtx, handleImportCiResults));
+
+  // Room tools (global, cross-workspace group chat)
+  server.registerTool('mesa_create_room', {
+    description: 'Create a new cross-workspace Room (group chat)',
+    inputSchema: createRoomInputSchema,
+  }, wrapRuntimeHandler(makeCtx, handleCreateRoom));
+
+  server.registerTool('mesa_list_rooms', {
+    description: 'List all Rooms',
+    inputSchema: listRoomsInputSchema,
+  }, wrapRuntimeNoArgHandler(makeCtx, handleListRooms));
+
+  server.registerTool('mesa_invite_to_room', {
+    description: 'Invite a session or agent from a workspace into a Room',
+    inputSchema: inviteToRoomInputSchema,
+  }, wrapRuntimeHandler(makeCtx, handleInviteToRoom));
+
+  server.registerTool('mesa_leave_room', {
+    description: 'Remove a session or agent from a Room',
+    inputSchema: leaveRoomInputSchema,
+  }, wrapRuntimeHandler(makeCtx, handleLeaveRoom));
+
+  server.registerTool('mesa_send_room_message', {
+    description: 'Post a message into a Room (cross-workspace)',
+    inputSchema: sendRoomMessageInputSchema,
+  }, wrapRuntimeHandler(makeCtx, handleSendRoomMessage));
+
+  server.registerTool('mesa_list_room_messages', {
+    description: 'List messages in a Room',
+    inputSchema: listRoomMessagesInputSchema,
+  }, wrapRuntimeHandler(makeCtx, handleListRoomMessages));
 
   return server;
 }

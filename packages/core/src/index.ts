@@ -1,4 +1,5 @@
 export * from './workspace.js';
+export * from './workspace-registry.js';
 export * from './errors.js';
 export * from './storage.js';
 export * from './runtime/types.js';
@@ -19,6 +20,7 @@ export * from './services/agent-registry.js';
 export * from './services/agent-run-service.js';
 export * from './services/check-result-service.js';
 export * from './services/handoff-service.js';
+export * from './services/room-service.js';
 export * from './services/lock-manager.js';
 export * from './services/event-service.js';
 export { appendRuntimeEvent, assertPolicy } from './services/runtime-service-utils.js';

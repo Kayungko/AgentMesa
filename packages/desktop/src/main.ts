@@ -13,6 +13,12 @@ import {
 } from 'electron';
 import type { NativeImage } from 'electron';
 import { DeskServer } from '@agentmesa/desk';
+import {
+  addWorkspace,
+  getActiveWorkspace,
+  listWorkspaces,
+} from '@agentmesa/core';
+import type { MesaWorkspace } from '@agentmesa/protocol';
 
 const WIDGET_COLLAPSED = { width: 220, height: 52 };
 const WIDGET_EXPANDED = { width: 380, height: 520 };
@@ -225,9 +231,39 @@ function registerIpc() {
   ipcMain.handle('main:close', () => mainWindow?.hide());
 }
 
-async function startRuntime() {
-  const rootDir = resolve(process.env['AGENTMESA_WORKSPACE'] ?? process.cwd());
-  sessionToken = randomBytes(32).toString('hex');
+function resolveStartupWorkspace(): string {
+  const envRoot = process.env['AGENTMESA_WORKSPACE']?.trim();
+  if (envRoot) return resolve(envRoot);
+  const active = getActiveWorkspace();
+  if (active) return active.rootDir;
+  return resolve(process.cwd());
+}
+
+function reloadRendererWindows() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.loadURL(rendererUrl('main', '')).catch(console.error);
+  }
+  if (widgetWindow && !widgetWindow.isDestroyed()) {
+    widgetWindow.loadURL(rendererUrl('widget')).catch(console.error);
+  }
+}
+
+async function createDeskForWorkspace(rootDir: string): Promise<void> {
+  // Adopt the startup workspace into the registry so the switcher can show it.
+  const registered = listWorkspaces().some((workspace) => workspace.rootDir === rootDir);
+  if (!registered) {
+    try {
+      addWorkspace({ rootDir });
+    } catch {
+      // Not an initialized AgentMesa workspace — leave it out of the registry.
+    }
+  }
+
+  if (desk) {
+    await desk.stop();
+    desk = undefined;
+  }
+
   desk = new DeskServer(rootDir, 0, {
     host: '127.0.0.1',
     sessionToken,
@@ -237,9 +273,19 @@ async function startRuntime() {
       roles: ['owner'],
       client: 'agentmesa-desktop',
     },
+    onActivateWorkspace: async (workspace: MesaWorkspace) => {
+      await createDeskForWorkspace(workspace.rootDir);
+    },
   });
   await desk.start();
   baseUrl = `http://127.0.0.1:${desk.getPort()}`;
+  reloadRendererWindows();
+}
+
+async function startRuntime() {
+  sessionToken = randomBytes(32).toString('hex');
+  const rootDir = resolveStartupWorkspace();
+  await createDeskForWorkspace(rootDir);
 }
 
 const singleInstance = app.requestSingleInstanceLock();

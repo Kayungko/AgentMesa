@@ -18,6 +18,7 @@ import { runChecks } from './commands/checks.js';
 import { runGithub } from './commands/github.js';
 import { runDesk } from './commands/desk.js';
 import { runPlugin } from './commands/plugin.js';
+import { runWorkspace } from './commands/workspace.js';
 
 const args = parseArgs(process.argv);
 
@@ -105,6 +106,10 @@ switch (args.command) {
     }
     break;
 
+  case 'workspace':
+    runWorkspace(args);
+    break;
+
   case 'help':
   default:
     printHelp();
@@ -169,6 +174,11 @@ Inspection Commands:
   policy check <action> <res>  Check if action is allowed for an actor
                    --actor <id> --role <role>
   policy inspect              Show role capability matrix
+  workspace list              List registered workspaces + active one
+  workspace add <rootDir>     Register a workspace (must be mesa init-ed) [--name <n>]
+  workspace use <id>          Set the active workspace
+  workspace show [<id>]       Show a workspace (default: active)
+  workspace remove <id>       Remove a workspace from the registry
 
 Flags:
   --json        Output in JSON format (safe for local AI consumption)

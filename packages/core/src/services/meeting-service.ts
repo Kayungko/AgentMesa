@@ -6,7 +6,7 @@ import {
   generateMeetingId,
 } from '@agentmesa/protocol';
 import type { MesaMeeting, CreateMeetingInput, MeetingStatus } from '@agentmesa/protocol';
-import { MeetingNotFoundError } from '../errors.js';
+import { InvalidStatusTransitionError, MeetingNotFoundError } from '../errors.js';
 import type { MesaRuntimeContext } from '../runtime/types.js';
 import {
   appendRuntimeEvent,
@@ -71,6 +71,10 @@ export function updateMeetingStatus(
 ): MesaMeeting {
   assertPolicy(ctx, 'meeting.updateStatus', `meeting:${meetingId}`);
   const meeting = getMeeting(ctx, meetingId);
+
+  if (!canTransitionMeetingStatus(meeting.status, status)) {
+    throw new InvalidStatusTransitionError(meeting.status, status);
+  }
 
   const updated: MesaMeeting = {
     ...meeting,
@@ -154,6 +158,62 @@ export function addAgentToMeeting(
   });
 
   return result;
+}
+
+export function removeAgentFromMeeting(
+  ctx: MesaRuntimeContext,
+  meetingId: string,
+  agentId: string
+): MesaMeeting {
+  assertPolicy(ctx, 'meeting.removeAgent', `meeting:${meetingId}`);
+  const meeting = getMeeting(ctx, meetingId);
+
+  if (!meeting.agents.includes(agentId)) {
+    return meeting;
+  }
+
+  const updated: MesaMeeting = {
+    ...meeting,
+    agents: meeting.agents.filter((id) => id !== agentId),
+    updatedAt: new Date().toISOString(),
+  };
+
+  const result = MesaMeetingSchema.parse(updated);
+  writeMeeting(ctx, result);
+
+  appendRuntimeEvent(ctx, {
+    meetingId,
+    type: 'meeting_agent_removed',
+    streamId: meetingId,
+    streamType: 'meeting',
+    data: { agentId },
+  });
+
+  return result;
+}
+
+/** Meeting status transitions allowed by the state machine. */
+export function canTransitionMeetingStatus(
+  from: MeetingStatus,
+  to: MeetingStatus,
+): boolean {
+  if (from === to) return true;
+  switch (from) {
+    case 'open':
+      return to === 'active' || to === 'paused' || to === 'completed' || to === 'archived' || to === 'closed';
+    case 'active':
+      return to === 'paused' || to === 'completed' || to === 'archived' || to === 'closed';
+    case 'paused':
+      return to === 'active' || to === 'completed' || to === 'archived' || to === 'closed';
+    case 'planning':
+      return to === 'active' || to === 'archived' || to === 'closed';
+    case 'completed':
+    case 'archived':
+    case 'closed':
+      return false; // terminal — immutable
+    default:
+      return false;
+  }
 }
 
 function writeMeeting(ctx: MesaRuntimeContext, meeting: MesaMeeting): void {

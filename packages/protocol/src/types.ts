@@ -17,8 +17,13 @@ import type {
   MesaMessageSchema,
   MesaArtifactSchema,
   MesaMeetingSchema,
+  MesaWorkspaceSchema,
   MesaThreadSchema,
   MesaDecisionSchema,
+  MesaRoomSchema,
+  RoomMemberSchema,
+  RoomMemberInputSchema,
+  RoomMessageSchema,
   MesaEventSchema,
   MesaClientSchema,
   MesaTransportSchema,
@@ -141,6 +146,8 @@ export type TaskKind =
 
 export type ThreadResolution = 'unresolved' | 'resolved' | 'stale';
 
+export type RoomMemberKind = 'session' | 'agent' | 'human';
+
 // EventType is inferred from the schema enum — the schema is the single source
 // of truth for the append-only event vocabulary, so the type cannot drift from it.
 export type EventType = z.infer<typeof eventTypeSchema>;
@@ -179,6 +186,11 @@ export type ArtifactMimeType =
 
 // --- Entity types (inferred from schemas) ---
 
+export type MesaWorkspace = z.infer<typeof MesaWorkspaceSchema>;
+export type MesaRoom = z.infer<typeof MesaRoomSchema>;
+export type RoomMember = z.infer<typeof RoomMemberSchema>;
+export type RoomMemberInput = z.infer<typeof RoomMemberInputSchema>;
+export type RoomMessage = z.infer<typeof RoomMessageSchema>;
 export type MesaAgent = z.infer<typeof MesaAgentSchema>;
 export type MesaAgentCapability = z.infer<typeof MesaAgentCapabilitySchema>;
 export type MesaTask = z.infer<typeof MesaTaskSchema>;

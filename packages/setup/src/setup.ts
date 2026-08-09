@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { loadConfig, WorkspaceNotFoundError } from '@agentmesa/core';
 import type { MesaConfig } from '@agentmesa/core';
 import { installClaudePlugin } from '@agentmesa/plugin-claude';
@@ -146,20 +146,27 @@ function toActionResult(side: IntegrationSide, argv: string[], res: ExecResult):
  * Register the agentmesa MCP server with a native CLI via its own `mcp add`
  * command, so the CLI owns the config format (~/.claude.json / ~/.codex/config.toml).
  */
-export function installMcpIntegration(side: IntegrationSide, exec: ExecFn = defaultExec): SetupActionResult {
+export function installMcpIntegration(
+  side: IntegrationSide,
+  exec: ExecFn = defaultExec,
+  workspaceRootDir?: string,
+): SetupActionResult {
   const { actorId, actorRoles } = INTEGRATIONS[side];
   const bin = resolveMcpServerBin();
+  const workspaceEnv = workspaceRootDir ? [`AGENTMESA_WORKSPACE=${resolve(workspaceRootDir)}`] : [];
   const argv = side === 'claude'
     ? [
         'mcp', 'add', MCP_SERVER_NAME, '-s', 'user',
         '-e', `AGENTMESA_MCP_ACTOR_ID=${actorId}`,
         '-e', `AGENTMESA_MCP_ACTOR_ROLES=${actorRoles}`,
+        ...workspaceEnv.map((value) => ['-e', value] as [string, string]).flat(),
         '--', 'node', bin,
       ]
     : [
         'mcp', 'add', MCP_SERVER_NAME,
         '--env', `AGENTMESA_MCP_ACTOR_ID=${actorId}`,
         '--env', `AGENTMESA_MCP_ACTOR_ROLES=${actorRoles}`,
+        ...workspaceEnv.map((value) => ['--env', value] as [string, string]).flat(),
         '--', 'node', bin,
       ];
   return toActionResult(side, argv, exec(INTEGRATIONS[side].cli, argv));

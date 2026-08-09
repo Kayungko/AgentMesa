@@ -122,6 +122,7 @@ export const eventTypeSchema = z.enum([
   'meeting_status_changed',
   'meeting_task_added',
   'meeting_agent_added',
+  'meeting_agent_removed',
   'agent_joined',
   'agent_left',
   'agent_registered',
@@ -184,6 +185,7 @@ export const MesaAgentSchema = z.object({
   clientId: z.string().optional(),
   roles: z.array(agentRoleSchema).min(1),
   status: agentStatusSchema.default('available'),
+  workspaceId: z.string().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -303,6 +305,17 @@ export const MesaMeetingSchema = z.object({
   completedAt: z.string().optional(),
 });
 
+// --- Workspace ---
+
+export const MesaWorkspaceSchema = z.object({
+  protocolVersion: protocolVersionSchema,
+  id: z.string().min(1),
+  name: z.string().min(1),
+  rootDir: z.string().min(1),
+  createdAt: z.string().min(1),
+  updatedAt: z.string().min(1),
+});
+
 // --- Thread ---
 
 export const MesaThreadSchema = z.object({
@@ -330,6 +343,58 @@ export const MesaDecisionSchema = z.object({
   selectedOption: z.string().optional(),
   rationale: z.string().min(1).optional(),
   createdAt: z.string().min(1),
+});
+
+// --- Room ---
+
+export const RoomMemberKindSchema = z.enum(['session', 'agent', 'human']);
+
+export const RoomMemberSchema = z.object({
+  workspaceId: z.string().min(1),
+  kind: RoomMemberKindSchema,
+  ref: z.string().min(1),
+  label: z.string().optional(),
+  joinedAt: z.string().min(1),
+});
+
+export const RoomMemberInputSchema = z.object({
+  workspaceId: z.string().min(1),
+  kind: RoomMemberKindSchema,
+  ref: z.string().min(1),
+  label: z.string().optional(),
+});
+
+export const MesaRoomSchema = z.object({
+  protocolVersion: protocolVersionSchema,
+  id: z.string().min(1),
+  name: z.string().min(1),
+  purpose: z.string().optional(),
+  members: z.array(RoomMemberSchema).default([]),
+  createdAt: z.string().min(1),
+  updatedAt: z.string().min(1),
+});
+
+export const RoomMessageSchema = z.object({
+  protocolVersion: protocolVersionSchema,
+  id: z.string().min(1),
+  roomId: z.string().min(1),
+  workspaceId: z.string().min(1),
+  from: RoomMemberInputSchema,
+  type: z.string().default('general'),
+  summary: z.string().min(1),
+  createdAt: z.string().min(1),
+});
+
+export const CreateRoomInputSchema = z.object({
+  name: z.string().min(1),
+  purpose: z.string().optional(),
+});
+
+export const SendRoomMessageInputSchema = z.object({
+  workspaceId: z.string().min(1),
+  from: RoomMemberInputSchema,
+  summary: z.string().min(1),
+  type: z.string().optional(),
 });
 
 // --- Event ---
@@ -520,6 +585,7 @@ export const CreateMeetingInputSchema = z.object({
   purpose: z.string().optional(),
   tasks: z.array(z.string()).default([]),
   agents: z.array(z.string()).default([]),
+  workspaceId: z.string().optional(),
 });
 
 export const CreateThreadInputSchema = z.object({

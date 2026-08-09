@@ -13,10 +13,13 @@
     "start": "electron ."
   },
   "dependencies": {
-    "@agentmesa/desk": "workspace:*"
+    "@agentmesa/core": "workspace:*",
+    "@agentmesa/desk": "workspace:*",
+    "@agentmesa/protocol": "workspace:*"
   },
   "devDependencies": {
     "@agentmesa/client": "workspace:*",
+    "@types/node": "^22.10.2",
     "@playwright/test": "^1.55.1",
     "electron": "^36.9.3",
     "tsup": "^8.3.5",
