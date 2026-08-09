@@ -52,7 +52,7 @@ export class CodexRunner extends AbstractRunner {
       return this.recordResult(options, options.runnerType, logContent, artifacts, startTime, true);
     }
 
-    const cliCommand = process.env.AGENTMESA_CODEX_CMD?.trim();
+    const cliCommand = process.env.AGENTMESA_CODEX_CMD?.trim() || ctx.config.runners?.codexCmd?.trim();
     let output: string;
     let success = true;
     if (cliCommand) {

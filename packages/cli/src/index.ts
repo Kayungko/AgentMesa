@@ -17,6 +17,7 @@ import { runWorkflow } from './commands/workflow.js';
 import { runChecks } from './commands/checks.js';
 import { runGithub } from './commands/github.js';
 import { runDesk } from './commands/desk.js';
+import { runPlugin } from './commands/plugin.js';
 
 const args = parseArgs(process.argv);
 
@@ -90,6 +91,10 @@ switch (args.command) {
     void runDesk(args);
     break;
 
+  case 'plugin':
+    runPlugin(args);
+    break;
+
   case 'policy':
     if (args.subcommand === 'check') {
       runPolicyCheck(args);
@@ -155,6 +160,12 @@ Inspection Commands:
   github link-pr <task> <pr>   Link a GitHub pull request to a task (requires gh CLI)
   github import-ci <task>      Import gh run status as check results (--agent)
   desk [--port <n>]            Start the Mesa Desk web dashboard (default port 3456)
+  plugin status                Show CLI / MCP / runner integration status
+  plugin install <claude|codex>  Register agentmesa MCP with the CLI (user scope)
+                   --project <dir>  Also write project files into <dir>
+  plugin uninstall <claude|codex>  Remove the agentmesa MCP registration
+  plugin runner <claude|codex> "<cmd>"  Store runner CLI command in config.json
+  plugin runner <claude|codex> --clear  Clear the stored runner command
   policy check <action> <res>  Check if action is allowed for an actor
                    --actor <id> --role <role>
   policy inspect              Show role capability matrix

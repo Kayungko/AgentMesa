@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -256,6 +256,29 @@ describe('DeskServer', () => {
     expect(text).toContain('task_created');
   });
 
+  it('falls back to a full replay when the stream cursor is unknown', async () => {
+    createTask(ctx, { title: 'Replay task' });
+    server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
+    await server.start();
+    const controller = new AbortController();
+    const response = await fetch(
+      `http://localhost:${server.getPort()}/api/events/stream?access_token=secret&cursor=event_missing`,
+      { signal: controller.signal },
+    );
+    const reader = response.body!.getReader();
+    const deadline = Date.now() + 3000;
+    let text = '';
+    while (!text.includes('task_created') && Date.now() < deadline) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      text += new TextDecoder().decode(chunk.value);
+    }
+    controller.abort();
+
+    expect(response.status).toBe(200);
+    expect(text).toContain('task_created');
+  });
+
   it('posts messages with correlation fields', async () => {
     server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
     await server.start();
@@ -373,5 +396,104 @@ describe('DeskServer', () => {
     });
 
     expect(conflict.status).toBe(400);
+  });
+
+  describe('setup endpoints', () => {
+    it('GET /api/setup/status returns the integration shape', async () => {
+      server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
+      await server.start();
+      const res = await fetch(`http://localhost:${server.getPort()}/api/setup/status`, {
+        headers: { Authorization: 'Bearer secret' },
+      });
+      const body = (await res.json()) as {
+        claude: { cliAvailable: boolean; mcpInstalled: boolean };
+        codex: { cliAvailable: boolean; mcpInstalled: boolean };
+        runners: Record<string, unknown>;
+        runnerSources: { claude: string; codex: string };
+      };
+
+      expect(res.status).toBe(200);
+      expect(typeof body.claude.cliAvailable).toBe('boolean');
+      expect(typeof body.codex.cliAvailable).toBe('boolean');
+      expect(['env', 'config', 'stub']).toContain(body.runnerSources.claude);
+    });
+
+    it('POST /api/setup/runners requires the session token', async () => {
+      server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
+      await server.start();
+      const res = await fetch(`http://localhost:${server.getPort()}/api/setup/runners`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ claudeCmd: 'claude -p' }),
+      });
+
+      expect(res.status).toBe(401);
+    });
+
+    it('POST /api/setup/runners is rejected when no session token is configured', async () => {
+      server = new DeskServer(testDir, 0);
+      await server.start();
+      const res = await fetch(`http://localhost:${server.getPort()}/api/setup/runners`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ claudeCmd: 'claude -p' }),
+      });
+
+      expect(res.status).toBe(403);
+    });
+
+    it('POST /api/setup/runners persists commands to config.json', async () => {
+      server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
+      await server.start();
+      const res = await fetch(`http://localhost:${server.getPort()}/api/setup/runners`, {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer secret',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ claudeCmd: 'claude -p', codexCmd: 'codex exec -' }),
+      });
+      const body = (await res.json()) as { claudeCmd?: string; codexCmd?: string };
+
+      expect(res.status).toBe(200);
+      expect(body).toEqual({ claudeCmd: 'claude -p', codexCmd: 'codex exec -' });
+
+      const config = JSON.parse(readFileSync(join(testDir, '.agentmesa', 'config.json'), 'utf-8'));
+      expect(config.runners).toEqual({ claudeCmd: 'claude -p', codexCmd: 'codex exec -' });
+    });
+
+    it('POST /api/setup/runners clears values with null', async () => {
+      server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
+      await server.start();
+      const headers = { Authorization: 'Bearer secret', 'Content-Type': 'application/json' };
+      await fetch(`http://localhost:${server.getPort()}/api/setup/runners`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ codexCmd: 'codex exec -' }),
+      });
+      const res = await fetch(`http://localhost:${server.getPort()}/api/setup/runners`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ codexCmd: null }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({});
+    });
+
+    it('POST /api/setup/install rejects an unknown side', async () => {
+      server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
+      await server.start();
+      const res = await fetch(`http://localhost:${server.getPort()}/api/setup/install`, {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer secret',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ side: 'cursor' }),
+      });
+
+      expect(res.status).toBe(400);
+    });
   });
 });

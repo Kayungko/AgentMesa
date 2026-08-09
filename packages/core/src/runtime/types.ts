@@ -32,6 +32,11 @@ export interface MesaConfig {
   readModel?: {
     mode?: ReadModelMode;
   };
+  /** Runner CLI commands, resolved after env vars and before stub mode. */
+  runners?: {
+    claudeCmd?: string;
+    codexCmd?: string;
+  };
 }
 
 export interface MesaStorageAdapter {

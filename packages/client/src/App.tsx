@@ -1,6 +1,15 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { EventEnvelope, MesaAgentRun } from '@agentmesa/protocol';
 import { useMesaRuntime, type ConnectionState } from './useMesaRuntime.js';
+import {
+  installIntegration,
+  loadSetupStatus,
+  saveRunnerCommands,
+  uninstallIntegration,
+  type IntegrationSide,
+  type RunnerSource,
+  type SetupStatus,
+} from './api.js';
 import type { RuntimeConfig, WorkflowState } from './types.js';
 import './styles.css';
 
@@ -135,7 +144,7 @@ function SkeletonStack({ count, compact = false }: { count: number; compact?: bo
   );
 }
 
-function RailIcon({ kind }: { kind: 'overview' | 'runs' | 'workflows' }) {
+function RailIcon({ kind }: { kind: 'overview' | 'runs' | 'workflows' | 'deploy' }) {
   const common = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round' } as const;
   if (kind === 'overview') {
     return (
@@ -151,6 +160,16 @@ function RailIcon({ kind }: { kind: 'overview' | 'runs' | 'workflows' }) {
     return (
       <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
         <path d="M10 2 L4 10 H9 L8 16 L14 8 H9 Z" {...common} />
+      </svg>
+    );
+  }
+  if (kind === 'deploy') {
+    return (
+      <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+        <path
+          d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"
+          {...common}
+        />
       </svg>
     );
   }
@@ -261,6 +280,214 @@ function EventRow({ envelope }: { envelope: EventEnvelope }) {
   );
 }
 
+const runnerSourceLabels: Record<RunnerSource, string> = {
+  env: '环境变量',
+  config: '工作区配置',
+  stub: 'stub 演示模式',
+};
+
+const sideLabels: Record<IntegrationSide, { name: string; role: string }> = {
+  claude: { name: 'Claude Code', role: 'builder · 实现与修复' },
+  codex: { name: 'Codex', role: 'reviewer · 审核与测试' },
+};
+
+function DeployCard({
+  side,
+  status,
+  busy,
+  error,
+  onAct,
+}: {
+  side: IntegrationSide;
+  status: SetupStatus;
+  busy?: string;
+  error?: string;
+  onAct: (kind: 'install' | 'uninstall', side: IntegrationSide) => void;
+}) {
+  const s = status[side];
+  const busyInstall = busy === `install:${side}`;
+  const busyUninstall = busy === `uninstall:${side}`;
+  return (
+    <article className="deploy-card">
+      <div className="deploy-card__heading">
+        <strong>{sideLabels[side].name}</strong>
+        <small>{sideLabels[side].role}</small>
+      </div>
+      <div className="deploy-card__row">
+        <span>CLI</span>
+        <strong className={s.cliAvailable ? 'deploy-ok' : 'deploy-warn'}>
+          {s.cliAvailable ? '可用' : '未检测到'}
+        </strong>
+      </div>
+      <div className="deploy-card__row">
+        <span>MCP 服务器</span>
+        <strong className={s.mcpInstalled ? 'deploy-ok' : 'deploy-warn'}>
+          {s.mcpInstalled ? '已注册' : '未注册'}
+        </strong>
+      </div>
+      <div className="deploy-card__row">
+        <span>运行后端</span>
+        <strong>{runnerSourceLabels[status.runnerSources[side]]}</strong>
+      </div>
+      {error ? <p className="inline-error">{error}</p> : null}
+      <div className="deploy-card__actions">
+        <button
+          className="button button--primary"
+          disabled={!s.cliAvailable || s.mcpInstalled || busyInstall || busyUninstall}
+          title={s.cliAvailable ? '写入 CLI 的用户级 MCP 配置' : '请先在本机安装该 CLI'}
+          onClick={() => onAct('install', side)}
+        >
+          {busyInstall ? '安装中…' : '注册 MCP'}
+        </button>
+        <button
+          className="button button--ghost"
+          disabled={!s.mcpInstalled || busyInstall || busyUninstall}
+          onClick={() => onAct('uninstall', side)}
+        >
+          {busyUninstall ? '移除中…' : '移除'}
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function DeployView({ config }: { config: RuntimeConfig }) {
+  const [status, setStatus] = useState<SetupStatus>();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string>();
+  const [sideError, setSideError] = useState<{ side: IntegrationSide; message: string }>();
+  const [busy, setBusy] = useState<string>();
+  const [claudeCmd, setClaudeCmd] = useState('');
+  const [codexCmd, setCodexCmd] = useState('');
+  const [saved, setSaved] = useState(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      const next = await loadSetupStatus(config);
+      setStatus(next);
+      setClaudeCmd(next.runners.claudeCmd ?? '');
+      setCodexCmd(next.runners.codexCmd ?? '');
+      setError(undefined);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setLoading(false);
+    }
+  }, [config]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const act = async (kind: 'install' | 'uninstall', side: IntegrationSide) => {
+    setBusy(`${kind}:${side}`);
+    setSideError(undefined);
+    setSaved(false);
+    try {
+      if (kind === 'install') {
+        await installIntegration(config, side);
+      } else {
+        await uninstallIntegration(config, side);
+      }
+      await refresh();
+    } catch (reason) {
+      setSideError({ side, message: reason instanceof Error ? reason.message : String(reason) });
+    } finally {
+      setBusy(undefined);
+    }
+  };
+
+  const saveRunners = async () => {
+    setBusy('runners');
+    setError(undefined);
+    setSideError(undefined);
+    setSaved(false);
+    try {
+      await saveRunnerCommands(config, {
+        claudeCmd: claudeCmd.trim() || null,
+        codexCmd: codexCmd.trim() || null,
+      });
+      await refresh();
+      setSaved(true);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(undefined);
+    }
+  };
+
+  if (!loading && error) {
+    return (
+      <div className="error-state">
+        <strong>无法加载部署状态</strong>
+        <p>{error}</p>
+        <button className="button button--primary" onClick={() => { setLoading(true); void refresh(); }}>重试</button>
+      </div>
+    );
+  }
+
+  if (loading || !status) {
+    return <SkeletonStack count={2} />;
+  }
+
+  return (
+    <>
+      <section className="content-block">
+        <div className="section-heading">
+          <span>Agent CLI 集成</span>
+          <small>注册后，Agent 会话可直接调用 mesa 工具</small>
+        </div>
+        <div className="deploy-grid">
+          {(['claude', 'codex'] as const).map((side) => (
+            <DeployCard
+              key={side}
+              side={side}
+              status={status}
+              busy={busy}
+              error={sideError?.side === side ? sideError.message : undefined}
+              onAct={act}
+            />
+          ))}
+        </div>
+      </section>
+
+      <section className="content-block">
+        <div className="section-heading">
+          <span>运行后端命令</span>
+          <small>留空则回退到环境变量或 stub 模式</small>
+        </div>
+        <div className="deploy-form">
+          <label>
+            Claude 命令（builder）
+            <input
+              value={claudeCmd}
+              onChange={(event) => { setClaudeCmd(event.target.value); setSaved(false); }}
+              placeholder="例如 claude -p"
+              spellCheck={false}
+            />
+          </label>
+          <label>
+            Codex 命令（reviewer）
+            <input
+              value={codexCmd}
+              onChange={(event) => { setCodexCmd(event.target.value); setSaved(false); }}
+              placeholder="例如 codex exec -"
+              spellCheck={false}
+            />
+          </label>
+          {error ? <p className="inline-error">{error}</p> : null}
+          {saved ? <p className="deploy-saved">已保存到工作区配置</p> : null}
+          <div>
+            <button className="button button--primary" disabled={busy === 'runners'} onClick={() => void saveRunners()}>
+              {busy === 'runners' ? '保存中…' : '保存命令'}
+            </button>
+          </div>
+        </div>
+      </section>
+    </>
+  );
+}
+
 function MainView({ config }: { config: RuntimeConfig }) {
   const runtime = useMesaRuntime(config);
   const initialSection = window.location.hash.startsWith('#/runs/')
@@ -268,7 +495,7 @@ function MainView({ config }: { config: RuntimeConfig }) {
     : window.location.hash.startsWith('#/workflows/')
       ? 'workflows'
       : 'overview';
-  const [section, setSection] = useState<'overview' | 'runs' | 'workflows'>(initialSection);
+  const [section, setSection] = useState<'overview' | 'runs' | 'workflows' | 'deploy'>(initialSection);
   const recentRuns = useMemo(
     () => [...runtime.runs].sort((left, right) => right.startedAt.localeCompare(left.startedAt)).slice(0, 8),
     [runtime.runs],
@@ -298,6 +525,7 @@ function MainView({ config }: { config: RuntimeConfig }) {
           <button className={section === 'overview' ? 'active' : ''} onClick={() => setSection('overview')} title="概览" aria-label="概览"><RailIcon kind="overview" /></button>
           <button className={section === 'runs' ? 'active' : ''} onClick={() => setSection('runs')} title="运行" aria-label="运行"><RailIcon kind="runs" /></button>
           <button className={section === 'workflows' ? 'active' : ''} onClick={() => setSection('workflows')} title="工作流" aria-label="工作流"><RailIcon kind="workflows" /></button>
+          <button className={section === 'deploy' ? 'active' : ''} onClick={() => setSection('deploy')} title="部署" aria-label="部署"><RailIcon kind="deploy" /></button>
         </nav>
         <span className="rail__avatar">AM</span>
       </aside>
@@ -306,61 +534,69 @@ function MainView({ config }: { config: RuntimeConfig }) {
         <header className="workspace__header">
           <div>
             <span className="eyebrow">实时控制中心</span>
-            <h1>{section === 'overview' ? '概览' : section === 'runs' ? 'Agent 运行' : '工作流'}</h1>
+            <h1>{section === 'overview' ? '概览' : section === 'runs' ? 'Agent 运行' : section === 'workflows' ? '工作流' : '部署'}</h1>
           </div>
           <button className="button button--ghost" onClick={() => runtime.refresh()}>刷新</button>
         </header>
 
         {runtime.error ? <div className="banner banner--error">{runtime.error}</div> : null}
 
-        <div className="metric-grid">
-          <article><small>运行中的 Agent</small><strong>{runtime.activeRuns.length}</strong></article>
-          <article><small>待审批</small><strong>{runtime.waiting.length}</strong></article>
-          <article><small>失败的运行</small><strong>{runtime.failedRuns.length}</strong></article>
-        </div>
-
-        {runtime.waiting.length > 0 && section !== 'runs' ? (
-          <section className="content-block">
-            <div className="section-heading"><span>决策队列</span><small>{runtime.waiting.length}</small></div>
-            <div className="approval-grid">
-              {runtime.waiting.map((workflow) => (
-                <ApprovalCard
-                  key={workflow.workflowId}
-                  workflow={workflow}
-                  onDecide={(decision, message) => runtime.decide(workflow.workflowId, decision, message)}
-                />
-              ))}
-            </div>
-          </section>
+        {section !== 'deploy' ? (
+          <div className="metric-grid">
+            <article><small>运行中的 Agent</small><strong>{runtime.activeRuns.length}</strong></article>
+            <article><small>待审批</small><strong>{runtime.waiting.length}</strong></article>
+            <article><small>失败的运行</small><strong>{runtime.failedRuns.length}</strong></article>
+          </div>
         ) : null}
 
-        {section !== 'workflows' ? (
-          <section className="content-block">
-            <div className="section-heading"><span>最近的运行</span><small>{runtime.runs.length}</small></div>
-            {!runtime.loaded ? (
-              <SkeletonStack count={2} />
-            ) : recentRuns.length > 0 ? (
-              <div className="run-grid">{recentRuns.map((run) => <RunCard key={run.id} run={run} />)}</div>
-            ) : (
-              <EmptyState title="暂无运行" detail="工作流启动后，Agent 运行会立即显示。" />
-            )}
-          </section>
+        {section === 'deploy' ? (
+          <DeployView config={config} />
         ) : (
-          <section className="content-block">
-            <div className="section-heading"><span>工作流状态</span><small>{runtime.workflows.length}</small></div>
-            {!runtime.loaded ? (
-              <SkeletonStack count={2} />
+          <>
+            {runtime.waiting.length > 0 && section === 'overview' ? (
+              <section className="content-block">
+                <div className="section-heading"><span>决策队列</span><small>{runtime.waiting.length}</small></div>
+                <div className="approval-grid">
+                  {runtime.waiting.map((workflow) => (
+                    <ApprovalCard
+                      key={workflow.workflowId}
+                      workflow={workflow}
+                      onDecide={(decision, message) => runtime.decide(workflow.workflowId, decision, message)}
+                    />
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            {section === 'overview' || section === 'runs' ? (
+              <section className="content-block">
+                <div className="section-heading"><span>最近的运行</span><small>{runtime.runs.length}</small></div>
+                {!runtime.loaded ? (
+                  <SkeletonStack count={2} />
+                ) : recentRuns.length > 0 ? (
+                  <div className="run-grid">{recentRuns.map((run) => <RunCard key={run.id} run={run} />)}</div>
+                ) : (
+                  <EmptyState title="暂无运行" detail="工作流启动后，Agent 运行会立即显示。" />
+                )}
+              </section>
             ) : (
-              <div className="workflow-list">
-                {runtime.workflows.map((workflow) => (
-                  <button key={workflow.workflowId} onClick={() => window.agentmesa?.openMain(`/workflows/${workflow.workflowId}`)}>
-                    <span><strong>{workflow.taskId}</strong><small>{workflow.currentStep}</small></span>
-                    <span className={`status status--${workflow.status}`}>{workflow.status}</span>
-                  </button>
-                ))}
-              </div>
+              <section className="content-block">
+                <div className="section-heading"><span>工作流状态</span><small>{runtime.workflows.length}</small></div>
+                {!runtime.loaded ? (
+                  <SkeletonStack count={2} />
+                ) : (
+                  <div className="workflow-list">
+                    {runtime.workflows.map((workflow) => (
+                      <button key={workflow.workflowId} onClick={() => window.agentmesa?.openMain(`/workflows/${workflow.workflowId}`)}>
+                        <span><strong>{workflow.taskId}</strong><small>{workflow.currentStep}</small></span>
+                        <span className={`status status--${workflow.status}`}>{workflow.status}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
             )}
-          </section>
+          </>
         )}
       </section>
 

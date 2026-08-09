@@ -245,3 +245,21 @@ body { background: transparent; }
   .activity-panel { display: none; }
   .workspace { padding: 25px 24px 45px; }
 }
+
+.deploy-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.deploy-card { padding: 16px; display: grid; gap: 9px; border: 1px solid var(--line); border-radius: 13px; background: rgba(255,255,255,.025); }
+.deploy-card__heading { display: grid; gap: 3px; }
+.deploy-card__heading strong { font-size: 13px; }
+.deploy-card__heading small { color: var(--muted); font-size: 10px; }
+.deploy-card__row { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
+.deploy-card__row strong { font-size: 11px; font-weight: 600; color: #dfe3ec; }
+.deploy-ok { color: var(--accent-2) !important; }
+.deploy-warn { color: var(--warning) !important; }
+.deploy-card__actions { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 4px; }
+.deploy-form { display: grid; gap: 11px; max-width: 560px; }
+.deploy-form label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; }
+.deploy-form input { padding: 9px 10px; color: white; border: 1px solid var(--line); border-radius: 10px; outline: none; background: rgba(0,0,0,.2); font-size: 12px; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
+.deploy-form input:focus { border-color: rgba(139,124,255,.48); }
+.deploy-form input::placeholder { color: rgba(141,149,167,.55); }
+.deploy-saved { margin: 0; color: var(--accent-2); font-size: 11px; }
+

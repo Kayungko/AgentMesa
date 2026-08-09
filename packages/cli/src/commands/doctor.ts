@@ -14,6 +14,7 @@ import {
   listAgentProjections,
 } from '@agentmesa/core';
 import type { DiagnosticFinding, MesaRuntimeContext } from '@agentmesa/core';
+import { getSetupStatus } from '@agentmesa/setup';
 import { existsSync } from 'node:fs';
 import type { ParsedArgs } from '../parse-args.js';
 import { printSuccess, printWarning, printError, printInfo, outputResult } from '../output.js';
@@ -83,6 +84,29 @@ export function runDoctor(args: ParsedArgs): void {
     recordSimple('ok', 'node_modules exists');
   } else {
     recordSimple('ok', 'No node_modules found. Run your package manager install first.');
+  }
+
+  // Agent CLI integrations (claude / codex)
+  try {
+    const setup = getSetupStatus(rootDir);
+    for (const side of ['claude', 'codex'] as const) {
+      const s = setup[side];
+      const label = side === 'claude' ? 'Claude CLI' : 'Codex CLI';
+      if (!s.cliAvailable) {
+        recordSimple('warn', `${label} not found on PATH — real ${side} runs are unavailable.`);
+      } else if (!s.mcpInstalled) {
+        recordSimple('warn', `${label} found but agentmesa MCP is not registered. Run "mesa plugin install ${side}".`);
+      } else {
+        recordSimple('ok', `${label} registered with agentmesa MCP.`);
+      }
+      if (setup.runnerSources[side] === 'stub') {
+        recordSimple('warn', `${label} runner is in stub mode. Set a command via "mesa plugin runner ${side} <cmd>" or the AGENTMESA_${side.toUpperCase()}_CMD env var.`);
+      } else {
+        recordSimple('ok', `${label} runner command resolved from ${setup.runnerSources[side]}.`);
+      }
+    }
+  } catch (err) {
+    recordSimple('warn', `Skipping integration checks — ${String(err)}`);
   }
 
   // Workspace diagnostics

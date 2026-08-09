@@ -19,13 +19,19 @@ export function runCli(inv: CliInvocation): CliResult {
   const program = parts[0]!;
   const args = parts.slice(1);
 
-  const res = spawnSync(program, args, {
+  // On Windows, CLIs installed via npm are .cmd shims that spawnSync cannot
+  // resolve without a shell, so run the configured command line through cmd.
+  // The prompt still travels via stdin, never as part of the command line.
+  const options = {
     cwd: inv.cwd,
     input: inv.prompt,
-    encoding: 'utf-8',
+    encoding: 'utf-8' as const,
     timeout: inv.timeout ?? 300_000,
     maxBuffer: 10 * 1024 * 1024,
-  });
+  };
+  const res = process.platform === 'win32'
+    ? spawnSync(inv.command.trim(), { ...options, shell: true })
+    : spawnSync(program, args, options);
 
   if (res.error) {
     return { output: `CLI invocation failed: ${res.error.message}`, success: false };

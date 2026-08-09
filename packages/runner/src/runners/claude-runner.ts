@@ -54,7 +54,7 @@ export class ClaudeRunner extends AbstractRunner {
       return this.recordResult(options, options.runnerType, logContent, artifacts, startTime, true);
     }
 
-    const cliCommand = process.env.AGENTMESA_CLAUDE_CMD?.trim();
+    const cliCommand = process.env.AGENTMESA_CLAUDE_CMD?.trim() || ctx.config.runners?.claudeCmd?.trim();
     let output: string;
     let success = true;
     if (cliCommand) {

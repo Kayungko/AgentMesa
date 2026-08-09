@@ -41,6 +41,8 @@ describe('runCli', () => {
   it('reports failure when the binary is missing', () => {
     const res = runCli({ command: 'agentmesa-no-such-bin-xyz', prompt: 'x', cwd: dir });
     expect(res.success).toBe(false);
-    expect(res.output).toContain('CLI invocation failed');
+    // Without a shell the spawn itself fails (ENOENT); on Windows the cmd
+    // shim layer exits non-zero with its own message instead.
+    expect(res.output).toMatch(/CLI invocation failed|CLI exited with code/);
   });
 });

@@ -69,3 +69,49 @@ export function createEventStream(
   });
   return stream;
 }
+
+// --- Setup / deployment ---
+
+export type IntegrationSide = 'claude' | 'codex';
+export type RunnerSource = 'env' | 'config' | 'stub';
+
+export interface SetupStatus {
+  claude: { cliAvailable: boolean; mcpInstalled: boolean };
+  codex: { cliAvailable: boolean; mcpInstalled: boolean };
+  runners: { claudeCmd?: string; codexCmd?: string };
+  runnerSources: Record<IntegrationSide, RunnerSource>;
+}
+
+export function loadSetupStatus(config: RuntimeConfig) {
+  return request<SetupStatus>(config, '/api/setup/status');
+}
+
+async function postJson<T>(config: RuntimeConfig, path: string, body: unknown): Promise<T> {
+  const response = await fetch(`${config.baseUrl}${path}`, {
+    method: 'POST',
+    headers: headers(config, true),
+    body: JSON.stringify(body),
+  });
+  const parsed = (await response.json().catch(() => undefined)) as
+    | { error?: string; output?: string }
+    | undefined;
+  if (!response.ok) {
+    throw new Error(parsed?.error ?? parsed?.output ?? `Request failed (${response.status})`);
+  }
+  return parsed as T;
+}
+
+export function installIntegration(config: RuntimeConfig, side: IntegrationSide) {
+  return postJson<{ ok: boolean; output: string }>(config, '/api/setup/install', { side });
+}
+
+export function uninstallIntegration(config: RuntimeConfig, side: IntegrationSide) {
+  return postJson<{ ok: boolean; output: string }>(config, '/api/setup/uninstall', { side });
+}
+
+export function saveRunnerCommands(
+  config: RuntimeConfig,
+  patch: { claudeCmd?: string | null; codexCmd?: string | null },
+) {
+  return postJson<SetupStatus['runners']>(config, '/api/setup/runners', patch);
+}

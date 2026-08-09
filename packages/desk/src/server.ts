@@ -24,6 +24,14 @@ import type { EventEnvelope, WorkflowDecisionCommand } from '@agentmesa/protocol
 import { CreateMessageInputSchema, WorkflowDecisionCommandSchema } from '@agentmesa/protocol';
 import type { MesaActor, MesaRuntimeContext } from '@agentmesa/core';
 import { WorkflowEngine, decideWorkflow, listWorkflowStates } from '@agentmesa/orchestrator';
+import {
+  getSetupStatus,
+  installMcpIntegration,
+  uninstallMcpIntegration,
+  setRunnerCommands,
+  isIntegrationSide,
+  type RunnerCommandPatch,
+} from '@agentmesa/setup';
 import { generateDashboardHtml } from './dashboard.js';
 
 export interface DeskServerOptions {
@@ -222,6 +230,10 @@ export class DeskServer {
       this.sendJson(res, listCheckResults(readContext));
       return;
     }
+    if (pathname === '/api/setup/status') {
+      this.sendJson(res, getSetupStatus(this.rootDir));
+      return;
+    }
     if (pathname === '/api/status') {
       this.sendJson(res, {
         tasks: listTasks(readContext).length,
@@ -283,6 +295,35 @@ export class DeskServer {
         return state;
       });
       this.sendJson(res, result, 202);
+      return;
+    }
+
+    if (pathname === '/api/setup/install' || pathname === '/api/setup/uninstall') {
+      const body = await this.readJsonBody(req) as { side?: unknown };
+      if (typeof body.side !== 'string' || !isIntegrationSide(body.side)) {
+        throw new MesaError('VALIDATION_ERROR', 'side must be "claude" or "codex"');
+      }
+      const result = pathname === '/api/setup/install'
+        ? installMcpIntegration(body.side)
+        : uninstallMcpIntegration(body.side);
+      this.sendJson(res, result, result.ok ? 200 : 502);
+      return;
+    }
+
+    if (pathname === '/api/setup/runners') {
+      const body = await this.readJsonBody(req) as { claudeCmd?: unknown; codexCmd?: unknown };
+      const patch: RunnerCommandPatch = {};
+      for (const key of ['claudeCmd', 'codexCmd'] as const) {
+        const value = body[key];
+        if (value === null) {
+          patch[key] = null;
+        } else if (typeof value === 'string') {
+          patch[key] = value;
+        } else if (value !== undefined) {
+          throw new MesaError('VALIDATION_ERROR', `${key} must be a string or null`);
+        }
+      }
+      this.sendJson(res, setRunnerCommands(this.rootDir, patch));
       return;
     }
 
@@ -379,15 +420,27 @@ export class DeskServer {
       this.eventResponses.add(res);
 
       let replayCursor = cursor;
-      let page: EventEnvelope[];
-      do {
-        page = this.listEventEnvelopes(context, replayCursor, 500);
+      let page: EventEnvelope[] = [];
+      while (!closed) {
+        try {
+          page = this.listEventEnvelopes(context, replayCursor, 500);
+        } catch (error) {
+          // A cursor persisted by an older client can outlive the event log
+          // (workspace reset, log rotation). Replay from the start instead of
+          // killing the stream, which would loop the client forever.
+          if (replayCursor && error instanceof MesaError && error.code === 'VALIDATION_ERROR') {
+            replayCursor = undefined;
+            continue;
+          }
+          throw error;
+        }
         for (const envelope of page) {
           livePending.delete(envelope.cursor);
           await writeEnvelope(envelope);
         }
         replayCursor = page.at(-1)?.cursor ?? replayCursor;
-      } while (!closed && page.length === 500);
+        if (page.length < 500) break;
+      }
 
       for (const envelope of livePending.values()) {
         await writeEnvelope(envelope);

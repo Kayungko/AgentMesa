@@ -485,6 +485,18 @@ partly parallelize.
    `agentmesa-review` skill instructions (`review-skill.ts` already used correct tool names
    and needed no changes). `agents-md.ts` now tells the builder to use `mesa_update_status`
    instead of the fictional `mesa_transition_task`. Stage B is complete.
+6. **Setup / deployment entry points** — `done`. The plugin generators had no human-facing
+   install path (configs only existed in scratch dirs), so real CLIs never saw the mesa
+   MCP. New `@agentmesa/setup` package shells out to each CLI's native commands —
+   `claude mcp add agentmesa -s user -e AGENTMESA_MCP_ACTOR_ID=… -- node <bin>` and
+   `codex mcp add agentmesa --env … -- node <bin>` — so the CLI owns its config format;
+   probing via `mcp get` / removal via `mcp remove`. Exposed as `mesa plugin
+   status|install|uninstall|runner` and as a Deploy section in the desktop app
+   (`GET /api/setup/status`, token-gated `POST /api/setup/{install,uninstall,runners}`).
+   Runner backends are now configurable: `MesaConfig.runners.{claudeCmd,codexCmd}` in
+   `.agentmesa/config.json`, resolved after env vars and before stub
+   (`mesa plugin runner claude "claude -p"` or the desktop form). Windows note: spawn
+   goes through the shell on win32 so npm `.cmd` shims resolve.
 
 ### Stage C — External integrations
 6. **GitHub integration** — `done`. `@agentmesa/connector-github` was already real

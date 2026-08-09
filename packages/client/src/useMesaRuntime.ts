@@ -65,6 +65,10 @@ export function useMesaRuntime(config: RuntimeConfig) {
       },
       () => {
         if (!active) return;
+        // A persisted cursor can outlive the server's event log; drop it so a
+        // reconnect starts from a clean replay instead of looping on the error.
+        localStorage.removeItem(cursorKey);
+        cursorRef.current = undefined;
         setConnection((current) => current === 'connecting' ? 'offline' : 'reconnecting');
       },
     );

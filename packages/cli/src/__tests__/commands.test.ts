@@ -26,6 +26,7 @@ import { runTransports } from '../commands/transports.js';
 import { runDoctor } from '../commands/doctor.js';
 import { runChecks } from '../commands/checks.js';
 import { runGithub } from '../commands/github.js';
+import { runPlugin } from '../commands/plugin.js';
 import type { ParsedArgs } from '../parse-args.js';
 
 let testDir: string;
@@ -1008,5 +1009,94 @@ describe('CLI github commands', () => {
         logSpy.mockRestore();
       }
     });
+  });
+});
+
+describe('CLI plugin commands', () => {
+  function withCwd(dir: string, run: () => void): void {
+    const origCwd = process.cwd;
+    process.cwd = () => dir;
+    try {
+      run();
+    } finally {
+      process.cwd = origCwd;
+    }
+  }
+
+  it('rejects an unknown side for install/uninstall/runner', () => {
+    const prevExitCode = process.exitCode;
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    process.exitCode = 0;
+    try {
+      for (const subcommand of ['install', 'uninstall', 'runner']) {
+        process.exitCode = 0;
+        runPlugin({ command: 'plugin', subcommand, positional: ['cursor'], flags: {} });
+        expect(process.exitCode).toBe(1);
+      }
+      const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+      expect(stdout).toContain('<claude|codex>');
+    } finally {
+      process.exitCode = prevExitCode;
+      logSpy.mockRestore();
+    }
+  });
+
+  it('stores and clears runner commands in config.json', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      withCwd(testDir, () => {
+        runPlugin({ command: 'plugin', subcommand: 'runner', positional: ['codex', 'codex exec -'], flags: {} });
+      });
+      const config = JSON.parse(readFileSync(join(testDir, '.agentmesa', 'config.json'), 'utf-8'));
+      expect(config.runners).toEqual({ codexCmd: 'codex exec -' });
+      expect(config.policy).toEqual({ mode: 'role-based' });
+
+      withCwd(testDir, () => {
+        runPlugin({ command: 'plugin', subcommand: 'runner', positional: ['codex'], flags: { clear: true } });
+      });
+      const cleared = JSON.parse(readFileSync(join(testDir, '.agentmesa', 'config.json'), 'utf-8'));
+      expect(cleared.runners).toBeUndefined();
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it('runner without a command or --clear prints usage', () => {
+    const prevExitCode = process.exitCode;
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    process.exitCode = 0;
+    try {
+      withCwd(testDir, () => {
+        runPlugin({ command: 'plugin', subcommand: 'runner', positional: ['claude'], flags: {} });
+      });
+      expect(process.exitCode).toBe(1);
+      const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+      expect(stdout).toContain('Usage: mesa plugin runner');
+    } finally {
+      process.exitCode = prevExitCode;
+      logSpy.mockRestore();
+    }
+  });
+
+  it('status --json returns the documented shape', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      withCwd(testDir, () => {
+        runPlugin({ command: 'plugin', subcommand: 'status', positional: [], flags: { json: true } });
+      });
+      const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+      const parsed = JSON.parse(stdout) as {
+        claude: { cliAvailable: boolean; mcpInstalled: boolean };
+        codex: { cliAvailable: boolean; mcpInstalled: boolean };
+        runners: Record<string, unknown>;
+        runnerSources: { claude: string; codex: string };
+      };
+      expect(typeof parsed.claude.cliAvailable).toBe('boolean');
+      expect(typeof parsed.codex.mcpInstalled).toBe('boolean');
+      expect(['env', 'config', 'stub']).toContain(parsed.runnerSources.claude);
+      expect(['env', 'config', 'stub']).toContain(parsed.runnerSources.codex);
+    } finally {
+      logSpy.mockRestore();
+    }
   });
 });

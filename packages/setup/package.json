@@ -1,5 +1,5 @@
 {
-  "name": "@agentmesa/mcp-server",
+  "name": "@agentmesa/setup",
   "version": "0.1.0",
   "type": "module",
   "license": "MIT",
@@ -7,35 +7,28 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/agentmesa/agentmesa",
-    "directory": "packages/mcp-server"
+    "directory": "packages/setup"
   },
-  "keywords": ["agentmesa", "ai-agents", "claude-code", "codex", "mcp"],
+  "keywords": ["agentmesa", "ai-agents", "claude-code", "codex", "mcp", "setup"],
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "bin": {
-    "mesa-mcp": "dist/bin.js"
-  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    },
-    "./bin": "./dist/bin.js"
+    }
   },
   "scripts": {
-    "build": "tsup src/index.ts src/bin.ts --format esm --dts",
+    "build": "tsup src/index.ts --format esm --dts",
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@agentmesa/connector-github": "workspace:*",
     "@agentmesa/core": "workspace:*",
-    "@agentmesa/orchestrator": "workspace:*",
-    "@agentmesa/protocol": "workspace:*",
-    "@agentmesa/runner": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "zod": "^3.23.8"
+    "@agentmesa/mcp-server": "workspace:*",
+    "@agentmesa/plugin-claude": "workspace:*",
+    "@agentmesa/plugin-codex": "workspace:*"
   },
   "devDependencies": {
     "tsup": "^8.3.5",

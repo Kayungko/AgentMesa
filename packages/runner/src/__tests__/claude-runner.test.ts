@@ -58,6 +58,6 @@ describe('ClaudeRunner CLI invocation', () => {
     const result = await runner.run({ taskId, runnerType: 'claude-implement', agentId: 'builder' });
 
     expect(result.success).toBe(false);
-    expect(result.output).toContain('CLI invocation failed');
+    expect(result.output).toMatch(/CLI invocation failed|CLI exited with code/);
   });
 });

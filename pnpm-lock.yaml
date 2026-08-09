@@ -41,6 +41,9 @@ importers:
       '@agentmesa/runner':
         specifier: workspace:*
         version: link:../runner
+      '@agentmesa/setup':
+        specifier: workspace:*
+        version: link:../setup
     devDependencies:
       tsup:
         specifier: ^8.3.5
@@ -170,6 +173,9 @@ importers:
       '@agentmesa/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@agentmesa/setup':
+        specifier: workspace:*
+        version: link:../setup
     devDependencies:
       tsup:
         specifier: ^8.3.5
@@ -305,6 +311,31 @@ importers:
       '@agentmesa/protocol':
         specifier: workspace:*
         version: link:../protocol
+    devDependencies:
+      tsup:
+        specifier: ^8.3.5
+        version: 8.5.1(postcss@8.5.15)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.19.20)
+
+  packages/setup:
+    dependencies:
+      '@agentmesa/core':
+        specifier: workspace:*
+        version: link:../core
+      '@agentmesa/mcp-server':
+        specifier: workspace:*
+        version: link:../mcp-server
+      '@agentmesa/plugin-claude':
+        specifier: workspace:*
+        version: link:../../plugins/claude
+      '@agentmesa/plugin-codex':
+        specifier: workspace:*
+        version: link:../../plugins/codex
     devDependencies:
       tsup:
         specifier: ^8.3.5

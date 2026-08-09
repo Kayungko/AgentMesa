@@ -27,7 +27,8 @@
     "@agentmesa/desk": "workspace:*",
     "@agentmesa/orchestrator": "workspace:*",
     "@agentmesa/protocol": "workspace:*",
-    "@agentmesa/runner": "workspace:*"
+    "@agentmesa/runner": "workspace:*",
+    "@agentmesa/setup": "workspace:*"
   },
   "devDependencies": {
     "tsup": "^8.3.5",
