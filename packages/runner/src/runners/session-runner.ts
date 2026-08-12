@@ -3,6 +3,7 @@ import type { MesaWorkspacePaths } from '@agentmesa/core';
 import type { RunOptions, RunResult } from '../types.js';
 import { AbstractRunner } from './base-runner.js';
 import { runCliAsync } from './cli-runner.js';
+import { trackSessionChild } from '../session-children.js';
 
 /**
  * Runs a session-level collaboration for a real CLI agent. Unlike the task
@@ -64,6 +65,9 @@ export class SessionRunner extends AbstractRunner {
       command: cliCommand,
       prompt,
       cwd: this.paths.rootDir,
+      // Register the child so the desk host can kill in-flight session CLIs on
+      // shutdown / workspace switch instead of leaving orphaned processes.
+      onSpawn: trackSessionChild,
       ...(options.timeout !== undefined ? { timeout: options.timeout } : {}),
     });
 

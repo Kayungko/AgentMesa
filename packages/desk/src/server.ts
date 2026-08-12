@@ -50,7 +50,7 @@ import {
 } from '@agentmesa/protocol';
 import type { MesaActor, MesaRuntimeContext } from '@agentmesa/core';
 import { WorkflowEngine, decideWorkflow, listWorkflowStates } from '@agentmesa/orchestrator';
-import { buildSessionPrompt, executeSessionRun } from '@agentmesa/runner';
+import { activateSessionAgent, terminateSessionChildren } from '@agentmesa/runner';
 import {
   getSetupStatus,
   installMcpIntegration,
@@ -174,6 +174,11 @@ export class DeskServer {
   }
 
   async start(): Promise<void> {
+    // A previous desk process may have crashed mid-run, leaving `running` runs
+    // whose CLI children are gone. Reconcile them to `failed` so the UI does
+    // not show them as "in progress" forever.
+    this.reconcileInFlightRuns();
+
     const readContext = this.createReadContext();
 
     return new Promise((resolve, reject) => {
@@ -195,6 +200,10 @@ export class DeskServer {
   }
 
   async stop(): Promise<void> {
+    // Kill any in-flight session-collaboration CLI processes first so they do
+    // not linger as orphans after the host stops or switches workspace.
+    terminateSessionChildren();
+
     for (const response of this.eventResponses) {
       response.end();
     }
@@ -240,6 +249,31 @@ export class DeskServer {
   }
 
   /**
+   * Startup reconciliation: runs left in `running` by a previous desk process
+   * can never finish (their CLI children are gone), so mark them `failed`.
+   * `running → failed` is a valid transition (agent-run-service.ts).
+   */
+  private reconcileInFlightRuns(): void {
+    const ctx = this.createWriteContext();
+    for (const run of listAgentRuns(ctx).filter((r) => r.status === 'running')) {
+      try {
+        updateAgentRunStatus(ctx, run.id, 'failed', {
+          error: 'Desk restarted while this run was in flight; execution was interrupted.',
+        });
+        ctx.logger.warn('Reconciled in-flight run to failed after desk restart', {
+          runId: run.id,
+          agentId: run.agentId,
+        });
+      } catch (error) {
+        ctx.logger.warn('Failed to reconcile in-flight run', {
+          runId: run.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
+  /**
    * Invite-and-activate: spawn a real CLI agent (claude -p / codex exec) to
    * join the meeting. Creates a `session` run carrying the meeting context and
    * executes it in the background; the agent's reply is written back into the
@@ -250,46 +284,7 @@ export class DeskServer {
     agentId: string,
     writeContext: MesaRuntimeContext,
   ): Promise<void> {
-    // 防重：该 agent 在此会话已有进行中的 run 则跳过，避免重复 spawn。
-    const hasActive = listAgentRuns(writeContext, { agentId })
-      .filter((run) => run.meetingId === meetingId)
-      .some((run) => run.status === 'pending' || run.status === 'running');
-    if (hasActive) return;
-
-    const meeting = getMeeting(writeContext, meetingId);
-    const tasks = listTasks(writeContext).filter((task) => meeting.tasks.includes(task.id));
-    const messages = listMessages(writeContext)
-      .filter((message) => message.meetingId === meetingId)
-      .slice(-20);
-    const agentNames = Object.fromEntries(
-      listAgents(writeContext).map((agent) => [agent.id, agent.name]),
-    );
-
-    const prompt = buildSessionPrompt({
-      meetingId,
-      title: meeting.title,
-      purpose: meeting.purpose,
-      agentId,
-      agentNames,
-      tasks: tasks.map((task) => ({ id: task.id, title: task.title, status: task.status })),
-      messages: messages.map((message) => ({
-        from: message.from,
-        type: message.type,
-        summary: message.summary,
-        createdAt: message.createdAt,
-      })),
-    });
-
-    const run = createAgentRun(writeContext, {
-      agentId,
-      meetingId,
-      input: prompt,
-      action: 'custom',
-      runnerType: 'session',
-    });
-
-    await executeSessionRun(writeContext, run.id, {
-      writeBackToMeetingId: meetingId,
+    await activateSessionAgent(writeContext, meetingId, agentId, {
       timeout: this.sessionRunTimeout,
     });
   }

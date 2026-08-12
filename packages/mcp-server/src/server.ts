@@ -23,6 +23,7 @@ import {
   readRunInputSchema,
   updateRunStatusInputSchema,
   execRunInputSchema,
+  activateSessionAgentInputSchema,
   listWorkflowsInputSchema,
   readWorkflowInputSchema,
   runWorkflowInputSchema,
@@ -70,6 +71,7 @@ import {
   handleReadRun,
   handleUpdateRunStatus,
   handleExecRun,
+  handleActivateSessionAgent,
   handleListWorkflows,
   handleReadWorkflow,
   handleRunWorkflow,
@@ -283,6 +285,11 @@ export function createMcpServer(rootDir: string): McpServer {
     description: 'Execute a pending agent run through its runner backend (drives the real CLI when configured)',
     inputSchema: execRunInputSchema,
   }, wrapAsyncRuntimeHandler(makeCtx, handleExecRun));
+
+  server.registerTool('mesa_activate_session_agent', {
+    description: 'Invite a registered agent into a session and drive the real CLI agent to participate — the agent replies are written back into the session timeline',
+    inputSchema: activateSessionAgentInputSchema,
+  }, wrapAsyncRuntimeHandler(makeCtx, handleActivateSessionAgent));
 
   // Workflow tools
   server.registerTool('mesa_list_workflows', {

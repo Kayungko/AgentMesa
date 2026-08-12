@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createRuntimeContext, initWorkspace } from '@agentmesa/core';
@@ -20,6 +20,8 @@ import {
   handleListMeetings,
   handleRegisterAgent,
   handleListAgents,
+  handleActivateSessionAgent,
+  handleCreateRun,
 } from '../tools.js';
 
 let testDir: string;
@@ -400,5 +402,81 @@ describe('handleListAgents', () => {
     });
     const result = parse<MesaAgent[]>(handleListAgents(ctx));
     expect(result).toHaveLength(2);
+  });
+});
+
+describe('handleActivateSessionAgent', () => {
+  it('activates a registered agent into a meeting with a stub CLI, writing the reply back', async () => {
+    const prevCmd = process.env.AGENTMESA_CLAUDE_CMD;
+    const stubCli = join(testDir, 'echo-session.mjs');
+    writeFileSync(
+      stubCli,
+      "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>process.stdout.write('MCP-AGENT-REPLY'));",
+    );
+    process.env.AGENTMESA_CLAUDE_CMD = `node ${stubCli}`;
+
+    try {
+      const meeting = parse<MesaMeeting>(handleCreateMeeting(ctx, { title: 'MCP 激活会话' }));
+      handleRegisterAgent(ctx, {
+        id: 'agent:claude',
+        name: 'Claude',
+        client: 'claude',
+        roles: ['builder'],
+      });
+
+      const result = parse<{ run: { id: string; status: string; agentId: string }; executed: boolean }>(
+        await handleActivateSessionAgent(ctx, { meetingId: meeting.id, agentId: 'agent:claude' }),
+      );
+
+      expect(result.executed).toBe(true);
+      expect(result.run.agentId).toBe('agent:claude');
+      expect(result.run.status).toBe('completed');
+
+      // 回复写回会话时间线
+      const messages = parse<MesaMessage[]>(handleListMessages(ctx, {}));
+      expect(messages.some((m) => m.meetingId === meeting.id && (m.body ?? '').includes('MCP-AGENT-REPLY'))).toBe(true);
+    } finally {
+      if (prevCmd === undefined) delete process.env.AGENTMESA_CLAUDE_CMD;
+      else process.env.AGENTMESA_CLAUDE_CMD = prevCmd;
+    }
+  });
+
+  it('skips re-spawning while the agent already has an in-flight run in the meeting', async () => {
+    const prevCmd = process.env.AGENTMESA_CLAUDE_CMD;
+    const stubCli = join(testDir, 'echo-session.mjs');
+    writeFileSync(
+      stubCli,
+      "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>process.stdout.write('REPLY'));",
+    );
+    process.env.AGENTMESA_CLAUDE_CMD = `node ${stubCli}`;
+
+    try {
+      const meeting = parse<MesaMeeting>(handleCreateMeeting(ctx, { title: '防并发会话' }));
+      handleRegisterAgent(ctx, {
+        id: 'agent:claude',
+        name: 'Claude',
+        client: 'claude',
+        roles: ['builder'],
+      });
+
+      // 预置一个 pending run（不执行），模拟「已有进行中 run」。
+      parse(handleCreateRun(ctx, {
+        agentId: 'agent:claude',
+        meetingId: meeting.id,
+        input: 'manual pending run',
+        action: 'custom',
+        runnerType: 'session',
+      }));
+
+      const result = parse<{ executed: boolean; run: { status: string } }>(
+        await handleActivateSessionAgent(ctx, { meetingId: meeting.id, agentId: 'agent:claude' }),
+      );
+
+      expect(result.executed).toBe(false); // 已有 pending run，跳过，不重复 spawn
+      expect(result.run.status).toBe('pending');
+    } finally {
+      if (prevCmd === undefined) delete process.env.AGENTMESA_CLAUDE_CMD;
+      else process.env.AGENTMESA_CLAUDE_CMD = prevCmd;
+    }
   });
 });

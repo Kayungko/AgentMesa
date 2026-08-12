@@ -91,4 +91,19 @@ describe('runCliAsync', () => {
     expect(res.success).toBe(false);
     expect(res.output).toContain('timed out');
   });
+
+  it('calls onSpawn with the child process so a host can track it', async () => {
+    let spawned: import('node:child_process').ChildProcess | null = null;
+    const res = await runCliAsync({
+      command: `node ${echoScript}`,
+      prompt: 'track-me',
+      cwd: dir,
+      onSpawn: (child) => {
+        spawned = child;
+        expect(child.pid).toBeGreaterThan(0);
+      },
+    });
+    expect(res.success).toBe(true);
+    expect(spawned).not.toBeNull();
+  });
 });

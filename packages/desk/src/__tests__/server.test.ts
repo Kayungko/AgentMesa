@@ -10,11 +10,13 @@ import {
   createCheckResult,
   createMeeting,
   registerAgent,
+  updateAgentRunStatus,
   writeReviewRequest,
   appendMessage,
 } from '@agentmesa/core';
 import type { MesaRuntimeContext } from '@agentmesa/core';
 import { WorkflowEngine } from '@agentmesa/orchestrator';
+import { activeSessionChildCount } from '@agentmesa/runner';
 import { DeskServer } from '../server.js';
 
 let testDir: string;
@@ -799,5 +801,65 @@ describe('DeskServer', () => {
         else process.env.AGENTMESA_CLAUDE_CMD = prevCmd;
       }
     });
+  });
+
+  it('reconciles runs left running by a previous desk process to failed on startup', async () => {
+    // Simulate a crash: a run persisted in `running` whose CLI is long gone.
+    const task = createTask(ctx, { title: 'Crash 遗留任务', createdBy: 'user:test' });
+    const run = createAgentRun(ctx, { agentId: 'builder-1', input: 'in flight', taskId: task.id });
+    updateAgentRunStatus(ctx, run.id, 'running');
+
+    server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
+    await server.start();
+    const base = `http://localhost:${server.getPort()}`;
+    const headers = { Authorization: 'Bearer secret' };
+
+    const runs = (await (await fetch(`${base}/api/runs`, { headers })).json()) as Array<{ id: string; status: string }>;
+    const reconciled = runs.find((r) => r.id === run.id);
+    expect(reconciled).toBeTruthy();
+    expect(reconciled!.status).toBe('failed');
+  });
+
+  it('keeps an in-flight session CLI running until desk.stop() kills it', async () => {
+    // Stub CLI that never exits on its own — must only stop via our shutdown kill.
+    const stubCli = join(testDir, 'hang-session.mjs');
+    writeFileSync(stubCli, 'setInterval(()=>{},1000);');
+    const prevCmd = process.env.AGENTMESA_CLAUDE_CMD;
+    process.env.AGENTMESA_CLAUDE_CMD = `node ${stubCli}`;
+
+    const meeting = createMeeting(ctx, { title: '清理在途进程会话' });
+    registerAgent(ctx, { id: 'agent:claude', name: 'Claude', client: 'claude', status: 'available', roles: ['builder'] });
+
+    try {
+      server = new DeskServer(testDir, 0, { sessionToken: 'secret', sessionRunTimeout: 30_000 });
+      await server.start();
+      const base = `http://localhost:${server.getPort()}`;
+      const headers = { Authorization: 'Bearer secret', 'Content-Type': 'application/json' };
+
+      await fetch(`${base}/api/meetings/${meeting.id}/agents`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ agentId: 'agent:claude' }),
+      });
+
+      // 后台 spawn 后 registry 里应有一个在途 CLI。
+      for (let i = 0; i < 50; i += 1) {
+        if (activeSessionChildCount() === 1) break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      expect(activeSessionChildCount()).toBe(1);
+
+      await server.stop();
+
+      // stop() 会 SIGTERM 在途 CLI → child close → 从 registry 移除。
+      for (let i = 0; i < 50; i += 1) {
+        if (activeSessionChildCount() === 0) break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      expect(activeSessionChildCount()).toBe(0);
+    } finally {
+      if (prevCmd === undefined) delete process.env.AGENTMESA_CLAUDE_CMD;
+      else process.env.AGENTMESA_CLAUDE_CMD = prevCmd;
+    }
   });
 });

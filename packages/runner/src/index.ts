@@ -33,5 +33,11 @@ export type { CliInvocation, CliResult } from './runners/cli-runner.js';
 export { executeRun, resolveRunnerType, isRunnerType } from './run-executor.js';
 export type { RunExecutorOptions, RunExecutionResult } from './run-executor.js';
 
-export { executeSessionRun } from './session-run.js';
-export type { SessionRunOptions } from './session-run.js';
+export { executeSessionRun, activateSessionAgent } from './session-run.js';
+export type { SessionRunOptions, ActivateSessionAgentOptions } from './session-run.js';
+
+export {
+  trackSessionChild,
+  terminateSessionChildren,
+  activeSessionChildCount,
+} from './session-children.js';

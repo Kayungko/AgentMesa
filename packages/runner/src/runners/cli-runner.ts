@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 
 export interface CliInvocation {
   /** Env value, whitespace-split into program + fixed args (e.g. `claude -p`). */
@@ -7,6 +7,11 @@ export interface CliInvocation {
   prompt: string;
   cwd: string;
   timeout?: number;
+  /**
+   * Called immediately after spawn so a long-lived host can track the child
+   * (e.g. the desk killing in-flight session CLIs on shutdown).
+   */
+  onSpawn?: (child: ChildProcess) => void;
 }
 
 export interface CliResult {
@@ -67,6 +72,8 @@ export function runCliAsync(inv: CliInvocation): Promise<CliResult> {
       ? spawn(inv.command.trim(), { cwd: inv.cwd, shell: true, stdio: ['pipe', 'pipe', 'pipe'] })
       : spawn(program, args, { cwd: inv.cwd, stdio: ['pipe', 'pipe', 'pipe'] });
 
+    inv.onSpawn?.(child);
+
     let stdout = '';
     let stderr = '';
     let settled = false;
@@ -90,9 +97,13 @@ export function runCliAsync(inv: CliInvocation): Promise<CliResult> {
     child.stdout.on('data', (data) => { stdout = truncateOutput(stdout + String(data)); });
     child.stderr.on('data', (data) => { stderr = truncateOutput(stderr + String(data)); });
     child.on('error', (error) => settle({ output: `CLI invocation failed: ${error.message}`, success: false }));
-    child.on('close', (code) => {
+    child.on('close', (code, signal) => {
+      // A `null` code with a signal means the host (or our timeout kill) SIGTERM'd
+      // the child — that is a failure, not a clean exit.
       if (typeof code === 'number' && code !== 0) {
         settle({ output: `CLI exited with code ${code}: ${stderr || stdout || ''}`, success: false });
+      } else if (signal) {
+        settle({ output: `CLI terminated by signal ${signal}: ${stderr || stdout || ''}`, success: false });
       } else {
         settle({ output: stdout, success: true });
       }

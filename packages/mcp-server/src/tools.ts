@@ -35,7 +35,7 @@ import {
   getWorkspace,
   getMeeting,
 } from '@agentmesa/core';
-import { executeRun } from '@agentmesa/runner';
+import { executeRun, activateSessionAgent } from '@agentmesa/runner';
 import {
   WorkflowEngine,
   getWorkflowDefinition,
@@ -533,6 +533,12 @@ export const execRunInputSchema = {
   timeout: z.number().optional(),
 };
 
+export const activateSessionAgentInputSchema = {
+  meetingId: z.string().min(1),
+  agentId: z.string().min(1),
+  timeout: z.number().optional(),
+};
+
 // --- Workflow schemas ---
 
 export const listWorkflowsInputSchema = {};
@@ -699,6 +705,22 @@ export async function handleExecRun(
     dryRun: args.dryRun,
     createArtifacts: args.createArtifacts,
     timeout: args.timeout,
+  });
+  return JSON.stringify(result);
+}
+
+/**
+ * Activate a session agent: ensure the agent joins the meeting and drive a
+ * `session` run so the real CLI agent participates. Awaits the run to
+ * completion so the caller (an AI client) can act on the agent's reply; the
+ * run's output is written back into the session timeline.
+ */
+export async function handleActivateSessionAgent(
+  ctx: MesaRuntimeContext,
+  args: { meetingId: string; agentId: string; timeout?: number }
+): Promise<string> {
+  const result = await activateSessionAgent(ctx, args.meetingId, args.agentId, {
+    ...(args.timeout !== undefined ? { timeout: args.timeout } : {}),
   });
   return JSON.stringify(result);
 }
