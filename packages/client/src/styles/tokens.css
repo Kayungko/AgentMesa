@@ -1,0 +1,250 @@
+/* ============================================================================
+ * AgentMesa Design Tokens
+ * ----------------------------------------------------------------------------
+ * DIRECTION CONTRACT (locked 2026-08-12, user-pinned canon, no roll)
+ *
+ *   THESIS     AgentMesa 是「AI agents 像同事一样协作的群聊」，不是霓虹 AI 监控台。
+ *              骨架取飞书/QQ 聊天软件文法（三栏/会话列表/气泡/未读角标），
+ *              拒绝 near-black + neon-purple 的品类默认。
+ *   OWN-WORLD  Apple 语义 token 体系（label/bg/separator 语义、明暗自适应成对、
+ *              扁平哑光、无发光）；签名色 teal（浅 #30B0C7 / 暗 #64D2FF）；
+ *              红橙绿锁定为状态色，永不当品牌色。
+ *   STORY      打开应用看到会话列表与未读 → 进群聊看到 agents 像同事一样对话 →
+ *              任务/运行/审批以卡片出现在流里，一键处理。
+ *   FIRST-VIEWPORT  三栏 IM 外壳：左=统一会话列表（未读角标），中=聊天主区
+ *              （气泡/日期分隔/输入区），右=上下文面板（任务/运行/文件）。
+ *   FORM       Category canon（飞书/QQ 语法 × Apple token），用户钉选。
+ *   FINISH     "unreviewed and undocumented is unfinished; this build ends with
+ *              the finish review, the verdict, and DESIGN.md"
+ *
+ * 三层结构（组件只消费 Tier 2/3，禁止直接引用 Tier 1）：
+ *   Tier 1  Primitive   --prim-*   色板常量；整体换主题色时只改 teal 色阶
+ *   Tier 2  Semantic    --color-* / --text-* / --space-* / --radius-* / ...
+ *   Tier 3  Component   --size-* / --bubble-*  聊天外壳布局常量
+ *
+ * 主题机制：<html data-theme="light|dark">。浅色是默认主题；暗色为成对覆盖。
+ * ========================================================================== */
+
+:root {
+  /* ---------- Tier 1 · Primitives（只读参照；勿在组件直接引用） ---------- */
+
+  /* Teal 色阶 —— 签名色族。换主题色 = 替换这一组 + 语义层两处 accent 指向 */
+  --prim-teal-50:  #edfafc;
+  --prim-teal-100: #d5f2f7;
+  --prim-teal-200: #a8e4ef;
+  --prim-teal-300: #7ad5e6;
+  --prim-teal-400: #64d2ff;  /* 暗主题 accent：深底上提亮保证对比（用户确认值） */
+  --prim-teal-500: #30b0c7;  /* 浅主题 accent：Apple systemTeal */
+  --prim-teal-600: #1d7a8f;  /* 浅主题填充面：白字气泡/主按钮，对比 4.98:1 */
+  --prim-teal-700: #175e72;
+  --prim-teal-800: #12485a;
+  --prim-teal-900: #0b3341;
+
+  /* 状态色 · Apple system 成对值（语义锁定：红=错误 橙=警告 绿=成功） */
+  --prim-red-light: #ff3b30;    --prim-red-dark: #ff453a;
+  --prim-orange-light: #ff9500; --prim-orange-dark: #ff9f0a;
+  --prim-green-light: #34c759;  --prim-green-dark: #30d158;
+
+  /* ---------- Tier 2 · Semantic（浅色为默认主题） ---------- */
+  color-scheme: light;
+
+  /* 背景：systemBackground / secondarySystemBackground / secondarySystemGroupedBackground */
+  --color-bg:           #ffffff;  /* 聊天主区 */
+  --color-bg-secondary: #f2f2f7;  /* grouped surface */
+  --color-bg-grouped:   #f2f2f7;  /* 应用整体背景 */
+  --color-bg-elevated:  #ffffff;  /* 卡片 / 弹层（浮于 grouped 之上） */
+  --color-bg-inset:     rgba(118, 118, 128, 0.08);  /* 凹陷区：代码块 / 输入井 */
+  --color-sidebar:      rgba(242, 242, 247, 0.88);
+  --color-sidebar-solid: #f2f2f7;
+  --color-content:      #ffffff;
+  --color-context:      #f2f2f7;
+  --color-material:     rgba(255, 255, 255, 0.78);
+  --color-material-heavy: rgba(242, 242, 247, 0.92);
+
+  /* 交互填充：Apple systemFill 族（hover / active / 选中底） */
+  --color-fill:            rgba(120, 120, 128, 0.20);
+  --color-fill-secondary:  rgba(120, 120, 128, 0.16);
+  --color-fill-tertiary:   rgba(120, 120, 128, 0.12);
+  --color-fill-quaternary: rgba(120, 120, 128, 0.08);
+  --color-selection:       var(--color-fill-secondary);
+  --color-selection-strong: var(--color-fill);
+  --color-focus-ring:      rgba(48, 176, 199, 0.48);
+  --color-control-primary: #1d1d1f;
+  --color-control-primary-hover: #3a3a3c;
+  --color-control-on-primary: #ffffff;
+
+  /* 文本：label 族。secondary 只用于元信息/时间戳，正文一律用 label */
+  --color-label:            #000000;
+  --color-label-secondary:  rgba(60, 60, 67, 0.60);
+  --color-label-tertiary:   rgba(60, 60, 67, 0.30);
+  --color-label-quaternary: rgba(60, 60, 67, 0.18);
+  --color-label-inverse:    #ffffff;
+
+  /* 分隔线：separator 族 */
+  --color-separator:        rgba(60, 60, 67, 0.29);
+  --color-separator-subtle: rgba(60, 60, 67, 0.16);
+  --color-separator-strong: rgba(60, 60, 67, 0.29);
+  --color-separator-opaque: #c6c6c8;
+
+  /* 签名色（teal） */
+  --color-accent:        var(--prim-teal-500);  /* 链接/active/图标；不承载正文 */
+  --color-accent-strong: var(--prim-teal-600);  /* 按压态 */
+  --color-accent-filled: var(--prim-teal-600);  /* 承载白字的填充面（主按钮/自有气泡） */
+  --color-on-accent:     #ffffff;
+  --color-accent-soft:   rgba(48, 176, 199, 0.10);  /* 少量品牌强调，不用于整行选中 */
+
+  /* 状态色（锁定语义） */
+  --color-danger:  var(--prim-red-light);
+  --color-warning: var(--prim-orange-light);
+  --color-success: var(--prim-green-light);
+  --color-danger-soft:  rgba(255, 59, 48, 0.10);
+  --color-warning-soft: rgba(255, 149, 0, 0.12);
+  --color-success-soft: rgba(52, 199, 89, 0.12);
+
+  /* 聊天气泡（iMessage 文法：他人灰泡、自有品牌泡） */
+  --color-bubble-own:      var(--prim-teal-600);  /* 浅主题深 teal，白字 4.98:1 */
+  --color-on-bubble-own:   #ffffff;
+  --color-bubble-other:    #e9e9eb;
+  --color-on-bubble-other: var(--color-label);
+  --color-unread:          var(--prim-red-light);  /* 未读角标=红，聊天品类语法 */
+  --color-on-unread:       #ffffff;
+
+  /* 字体：系统栈（Apple 方式）。Windows 落 Segoe UI，macOS 落 SF */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text",
+               "Segoe UI", Inter, system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-ui: var(--font-sans);
+  --font-mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, monospace;
+
+  /* 字号阶（桌面校准：系统正文 13，聊天消息 14） */
+  --text-2xs: 11px;  /* caption / 时间戳 */
+  --text-xs:  12px;  /* 次要信息 */
+  --text-sm:  13px;  /* 系统正文 */
+  --text-md:  14px;  /* 聊天消息正文 */
+  --text-lg:  15px;  /* subhead */
+  --text-xl:  17px;  /* headline / 会话标题 */
+  --text-2xl: 20px;  /* 页标题 */
+  --text-3xl: 24px;  /* 大标题 */
+  --text-caption: var(--text-2xs);
+  --text-body: var(--text-md);
+  --text-headline: var(--text-xl);
+  --leading-tight: 1.35;
+  --leading-body:  1.5;
+  --weight-regular: 400;
+  --weight-medium:  500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* 间距（4px 基数） */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* 圆角（Apple 连续曲率量级） */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-full: 999px;
+  --radius-control: var(--radius-sm);
+  --radius-row: 10px;
+  --radius-card: var(--radius-md);
+  --radius-sheet: 14px;
+  --radius-bubble: var(--bubble-radius);
+
+  /* 深度（浅色主题用柔和投影；暗色主题主要靠填充层级） */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04), 0 2px 8px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.08), 0 12px 32px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.12), 0 24px 64px rgba(0, 0, 0, 0.14);
+
+  /* 动效（Apple 标准曲线 + 指数出） */
+  --ease-standard: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+  --motion-slow: 320ms;
+
+  /* ---------- Tier 3 · 聊天外壳布局常量 ---------- */
+  --size-titlebar: 40px;
+  --size-statusbar: 28px;
+  --size-conv-list: 280px;        /* 会话列表栏宽 */
+  --size-conv-list-min: 220px;
+  --size-context-panel: 320px;    /* 右上下文面板 */
+  --size-avatar-sm: 24px;
+  --size-avatar-md: 36px;
+  --size-avatar-lg: 44px;
+  --size-conv-row: 64px;          /* 会话列表行高 */
+  --width-chat-content: 800px;    /* 聊天内容列最大宽 */
+  --bubble-radius: 16px;
+  --bubble-max-width: 62%;
+}
+
+/* ============================================================================
+ * 暗色主题覆盖
+ * ========================================================================== */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-bg:           #000000;
+  --color-bg-secondary: #1c1c1e;
+  --color-bg-grouped:   #000000;
+  --color-bg-elevated:  #2c2c2e;
+  --color-bg-inset:     rgba(255, 255, 255, 0.05);
+  --color-sidebar:      rgba(28, 28, 30, 0.90);
+  --color-sidebar-solid: #1c1c1e;
+  --color-content:      #000000;
+  --color-context:      #1c1c1e;
+  --color-material:     rgba(44, 44, 46, 0.82);
+  --color-material-heavy: rgba(28, 28, 30, 0.94);
+
+  --color-fill:            rgba(120, 120, 128, 0.36);
+  --color-fill-secondary:  rgba(120, 120, 128, 0.32);
+  --color-fill-tertiary:   rgba(120, 120, 128, 0.24);
+  --color-fill-quaternary: rgba(120, 120, 128, 0.16);
+  --color-selection:       var(--color-fill-secondary);
+  --color-selection-strong: var(--color-fill);
+  --color-focus-ring:      rgba(100, 210, 255, 0.58);
+  --color-control-primary: #f2f2f7;
+  --color-control-primary-hover: #ffffff;
+  --color-control-on-primary: #000000;
+
+  --color-label-secondary:  rgba(235, 235, 245, 0.60);
+  --color-label-tertiary:   rgba(235, 235, 245, 0.30);
+  --color-label-quaternary: rgba(235, 235, 245, 0.16);
+  --color-label-inverse:    #000000;
+
+  --color-separator:        rgba(84, 84, 88, 0.60);
+  --color-separator-subtle: rgba(84, 84, 88, 0.36);
+  --color-separator-strong: rgba(84, 84, 88, 0.60);
+  --color-separator-opaque: #38383a;
+
+  --color-accent:        var(--prim-teal-400);
+  --color-accent-strong: var(--prim-teal-300);
+  --color-accent-filled: var(--prim-teal-400);  /* 暗主题亮泡，配深色字 */
+  --color-on-accent:     #00262e;               /* 亮 teal 上深字，对比 ~9:1 */
+  --color-accent-soft:   rgba(100, 210, 255, 0.14);
+
+  --color-danger:  var(--prim-red-dark);
+  --color-warning: var(--prim-orange-dark);
+  --color-success: var(--prim-green-dark);
+  --color-danger-soft:  rgba(255, 69, 58, 0.16);
+  --color-warning-soft: rgba(255, 159, 10, 0.16);
+  --color-success-soft: rgba(48, 209, 88, 0.16);
+
+  --color-bubble-own:      var(--prim-teal-400);
+  --color-on-bubble-own:   #00262e;
+  --color-bubble-other:    #26262a;
+  --color-on-bubble-other: var(--color-label);
+  --color-unread:          var(--prim-red-dark);
+  --color-on-unread:       #ffffff;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.50);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.50), 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 8px 16px rgba(0, 0, 0, 0.55), 0 24px 60px rgba(0, 0, 0, 0.45);
+}

@@ -255,6 +255,10 @@ export function loadTasks(config: RuntimeConfig): Promise<MesaTask[]> {
   return request<MesaTask[]>(config, '/api/tasks');
 }
 
+export function loadArtifacts(config: RuntimeConfig): Promise<import('@agentmesa/protocol').MesaArtifact[]> {
+  return request<import('@agentmesa/protocol').MesaArtifact[]>(config, '/api/artifacts');
+}
+
 export function createMeeting(
   config: RuntimeConfig,
   input: { title: string; purpose?: string; agents?: string[] },

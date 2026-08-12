@@ -82,8 +82,9 @@ function createMainWindow() {
     minWidth: 900,
     minHeight: 620,
     show: false,
-    backgroundColor: '#090b10',
+    transparent: true,
     frame: false,
+    roundedCorners: true,
     ...(icon ? { icon } : {}),
     webPreferences: commonWebPreferences(),
   });
