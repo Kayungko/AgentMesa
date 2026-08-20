@@ -1,0 +1,26 @@
+// Single import point for @phosphor-icons/react. Components must not import
+// the package directly — keeps tree-shaking and icon policy in one place.
+export {
+  ArrowCounterClockwise,
+  At,
+  Archive,
+  BellSimple,
+  CaretRight,
+  ChatCircle,
+  ChatsCircle,
+  Check,
+  CheckSquare,
+  ClipboardText,
+  GearSix,
+  Info,
+  MagnifyingGlass,
+  Paperclip,
+  PaperPlaneTilt,
+  PencilSimple,
+  Plus,
+  SlidersHorizontal,
+  Users,
+  UsersThree,
+  WarningCircle,
+  X,
+} from '@phosphor-icons/react';

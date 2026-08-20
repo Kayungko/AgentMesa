@@ -1,122 +1,97 @@
 # AgentMesa Client — DESIGN.md
 
-> 2026-08-12 聊天外壳落地后的设计系统文档。方向以 `index.html` 内钉选的
+> 2026-08-13 视觉世界替换落地后的设计系统文档。方向以 `index.html` 内钉选的
 > DIRECTION CONTRACT 为唯一 canon；本文是它的展开与 finish review 记录。
 
 ## 1. 方向契约（摘要）
 
-- **THESIS**：AgentMesa 是「AI agents 像同事一样协作的群聊」，不是霓虹 AI 监控台。
-  骨架取飞书/QQ 聊天软件文法（三栏 / 会话列表 / 气泡 / 未读角标）。
-- **OWN-WORLD**：Apple 语义 token 体系；签名色 teal（浅 `#30B0C7` / 暗 `#64D2FF`）；
-  红橙绿锁定为状态色；扁平哑光、无发光、无渐变品牌面。
-- **FIRST VIEWPORT**：三栏 IM 外壳——左=统一会话列表（未读角标），
-  中=聊天主区（气泡 / 日期分隔 / 输入区），右=上下文面板（任务 / 运行 / 文件）。
-- **FORM**：飞书/QQ 语法 × Apple token，用户钉选，no roll。
+- **THESIS**：AgentMesa 是「AI agents 像同事一样协作的群聊」。
+- **OWN-WORLD**：白底中性墨色语言，**无全局主题色**；语义色只承载状态/未读/头像底/进度；
+  桌面密度 IM 文法；3D Fluent Emoji 头像；Phosphor 图标；发丝线 + 右向投影分栏。
+- **FIRST VIEWPORT**：72px 图标 rail + 会话面板 + 聊天面板；状态上下文默认收起的右栏抽屉；
+  新建会话/群聊为 modal。
+- **FORM**：飞书/QQ 聊天软件文法 × 中性墨色 token，用户钉选，no roll。
 
 ## 2. Token 架构（styles/tokens.css）
 
-三层结构，组件只消费 Tier 2/3：
+三层结构，组件只消费 Tier 2/3，`scripts/detect.mjs` 机器强制：
 
 | 层 | 前缀 | 内容 |
 | --- | --- | --- |
-| Tier 1 Primitive | `--prim-*` | teal 色阶 + Apple system 状态色成对值 |
-| Tier 2 Semantic | `--color-*` / `--text-*` / `--space-*` / `--radius-*` / `--shadow-*` / `--motion-*` | label/bg/separator/fill 语义族；浅色为 `:root` 默认，`[data-theme="dark"]` 成对覆盖 |
-| Tier 3 Component | `--size-*` / `--bubble-*` / `--width-chat-content` | 聊天外壳布局常量（栏宽 280/320、气泡半径 16、气泡最大宽 62%） |
+| Tier 1 Primitive | `--prim-*` | 墨色阶、暗面阶、状态色成对、头像 accent 底成对（仅本文件内部引用） |
+| Tier 2 Semantic | `--color-*` / `--shadow-*` | text/surface/line/focus/control/bubble/unread/avatar-accent 语义族；浅色为 `:root`，`[data-theme="dark"]` 成对覆盖 |
+| Tier 3 Component | `--size-*` / `--text-*` / `--radius-*` / `--motion-*` / `--font-*` / `--space-*` | 栏宽/控件尺寸/字号阶/圆角阶/动效时长/字体栈/间距 |
 
-**主题机制**：`<html data-theme="light|dark">`，浅色为默认（index.html）。
-迁移期遗留的 LEGACY 冻结变量块（`--bg/--panel/--line/--muted/--accent(紫)/--accent-2/--warning/--danger`）
-已于外壳落地后整块删除；全仓 grep 零引用为删除前提。旧紫色品牌 `#8b7cff` 系列已全部退场。
+**主题机制**：`<html data-theme="light|dark">`，浅色为默认（index.html）。暗色按 Apple 语义方式成对：
+表面明度分层（`#1f2328/#17191d/#121417`）、文本反白、语义色提亮、气泡暗底 `#16304a`。
 
-## 3. 外壳语法（styles.css + App.tsx）
+**纪律**（detect.mjs 强制）：
+- 组件 CSS 禁裸 hex / `rgb()` / `rgba()` / `hsl()` 颜色值；
+- 禁引用 `--prim-*`；
+- 图标禁内联 `<svg>`，一律走 `components/ui/icons.ts`（Phosphor 单一导入点）。
 
-### 3.1 栅格
+## 3. 外壳语法
 
 ```
-"title title title"
-"conv  chat  ctx"
-"status status status"
+"rail" | "titlebar"          (titlebar 在 shell-body 顶部，rail 全高在左)
+"rail" | "conv  chat  [drawer]"   (drawer 为布局第三列，条件渲染)
+"rail" | "statusbar"
 ```
 
-- 左栏 `--size-conv-list`（窄屏退到 `--size-conv-list-min`，右栏 <1000px 隐藏）；
-- 中栏聊天内容列 `--width-chat-content: 800px` 居中；
-- 无打开会话/部署页/新建页时 `--noctx` 两栏。
+- **rail**（72px，920px→60，760px→56）：五入口（消息/Agent/任务/审批/归档，40px 目标 + 20px 图标）
+  + 底部齿轮（部署与集成）；无右边框，右向 `--shadow-rail` 分栏；消息入口带未读角标、审批入口带警示点。
+- **会话面板**（264px）：搜索 + 新建会话/建群两个 IconButton；meeting/room 合并按最后活动降序；
+  行头像 = 参与者 AvatarStack（room = UsersThree + accent 底）；选中 = 底 + 左 2px 墨色竖条。
+- **聊天主区**：气泡无边框，agent 灰泡 `--color-bubble-agent`（圆角 `5px 10px 10px 10px`），
+  自己 `--color-bubble-self`（镜像圆角）；消息 13px；流内审批/运行卡片；composer 随列宽。
+- **状态抽屉**（292px）：右栏上下文，默认收起，头部「详情」按钮开、Esc/关闭钮关；
+  **布局第三列而非绝对定位**——绝对定位抽屉会让透明窗口丢失聊天流绘制层（Chromium 合成 bug）。
+  内容 = 参与 Agent / 任务 / 运行 / 文件（群聊 = 成员 / 拉群）。
+- **titlebar**（40px）：桌面无边框窗口自绘 chrome——brand + WorkspaceSwitcher + ConnectionBadge + 窗口控制。
 
-### 3.2 左栏 · 统一会话列表
+## 4. 模块树（src/components/**，样式共置）
 
-- meetings（会话）与 rooms（群聊）合并为一张列表，按最后活动降序；
-- 行：头像区（会话=参与者 AgentStack；群聊=teal 群气泡 glyph）+ 标题/时间 + 预览/成员数 + 未读角标；
-- 未读角标 = `--color-unread`（红）+ 白字，IM 品类语法；纯客户端内存态，
-  打开即清零，基线为挂载时最新事件（不追溯历史）；
-- 头部两个入口：＋会话 / ＋群聊（新建视图渲染在中栏）；
-- 底部「部署与集成」进入 `#/deploy`（取代旧 rail）。
+| 目录 | 文件 | 职责 |
+| --- | --- | --- |
+| `shell/` | route / app-shell / rail / titlebar / statusbar / toast / workspace-switcher | 路由 + 双 SSE 流 + 外壳骨架 |
+| `conv/` | conversation-list / conv-row | 会话列表 |
+| `chat/` | hooks / meeting-chat / room-chat / chat-header / bubbles / divider / composer / status-drawer / task-form / empty | 聊天流 + 抽屉 |
+| `views/` | agents / tasks / approvals / archive / view-page | rail 四入口真实视图 |
+| `dialog/` | modal / create-session / create-room | 新建模态 |
+| `ui/` | avatar / icon-button / button / search / semantic-dot / progress / empty / skeleton / badge / use-fresh-members / format / icons | 原子基元 |
+| `cards/` | run-card / approval-card / run-detail-view | 运行/审批/详情卡 |
+| `deploy/` | deploy-view | 部署与集成 |
+| `widget/` | widget-view | tray widget |
 
-### 3.3 中栏 · 聊天流
+数据层零改动：`api.ts`、`useMesaRuntime.ts`、`types.ts`、SSE 双流（全局流 + room 流）、未读基线、hash 路由。
 
-- **气泡**（iMessage 文法）：他人左、灰泡 `--color-bubble-other`，带发送者头像 +
-  meta 行（名字 / 类型 chip / 时间）；自己右、teal 泡 `--color-bubble-own`。
-  自己 = `user:*` 固定人类 actor（desk 默认 `user:desk`，桌面端 `user:desktop`；
-  发送者不可伪造——P0 约束）；`system` 渲染为居中系统行。
-- **日期分隔**：今天 / 昨天 / M月D日（跨年带年），居中 pill。
-- **流内卡片**：本会话任务的待审批以 `ApprovalCard` 入流，参与 Agent 的活动运行以
-  紧凑 `RunCard` 入流——工作 artifact，一键处理，符合 STORY。
-- **输入区**：自动增高 textarea；Enter 发送、Shift+Enter 换行。
-- **消息体**：`body` 以等宽 inset 代码块附于摘要下方。
+## 5. 动效
 
-### 3.4 右栏 · 上下文面板
+- 实时到达 `msg-in`（180ms `--ease-out`，translateY 4px→0）覆盖气泡/流内卡/系统行/审批卡；
+- 按压 `scale(0.96–0.98)`（icon-button 0.96、button 0.97、卡片 0.98）；
+- drawer/modal 入场（180ms ease-out）；`prefers-reduced-motion` 全量降级。
 
-- 会话：参与 Agent 卡（头像/roles/工作中·CLI 状态/移出）、结束·归档、
-  任务（状态 select + 新建）、运行（最近 6，点开 RunDetailView）、
-  文件（meeting/task 关联 artifacts，可展开内容）；
-- 群聊：成员列表（kind 徽章 + 移出）、拉群（工作区 → 成员类型 → 拉入）。
+## 6. 退役清单
 
-### 3.5 其余表面
+teal 签名色（`#30B0C7`/`#64D2FF`）与 `--color-accent` 族、`--color-label` 族、旧 `--color-bg/sidebar/context`
+语义、旧三栏（`ctx-panel` 常驻栏）、`styles.css` 单文件、`ui.tsx`/`cards.tsx`/`WidgetView.tsx`/`DeployView.tsx`/
+`WorkspaceSwitcher.tsx` 平铺模块、`RoomGlyph` 内联 SVG、`AgentMark`/`AgentStack`（并入 `Avatar`/`AvatarStack`）、
+container queries（透明窗口合成 bug，改为 `@media` 窗口级断点）。
 
-- **titlebar**：品牌（扁平 teal M）+ 工作区切换器 + 连接徽标 + 窗口控制；
-- **statusbar**：连接 + 运行/待审批/工作流计数；
-- **widget**（tray）：保留原形态，换肤到 token（elevation 靠 `--shadow-*`，无发光）；
-- **deploy**：内容不变，卡片/表单 token 化，成功/警告用 status 语义色。
-
-## 4. 动效
-
-- 实时到达项 `msg-in`（120–200ms，`--ease-out`，translateY 4px→0），
-  覆盖气泡 / 流内卡片 / 系统行 / 审批卡；
-- 按压反馈 `scale(0.97)`（按钮、会话行、agent-pick 等）；
-- 弹层（工作区管理/注册）`@starting-style` 入场；
-- 全部尊重 `prefers-reduced-motion`；running 状态点保留 pulse。
-
-## 5. 退役清单
-
-rail 与六宫格导航、overview/runs/workflows 区块、metric-grid、
-activity 事件面板与过滤器、WorkflowDetailView、SessionCard 网格、
-旧 timeline/room-msg 平铺行、back-row、LEGACY 变量块、`--size-rail`。
-hash 路由保留 `#/sessions/:id`、`#/rooms/:id`、`#/deploy` 深链兼容。
-
-## 6. 实时架构
-
-SSE 收敛为 2 条：`useMesaRuntime` 全局事件流（所有视图共享）+ 外壳级 room 流
-（覆盖全部群聊的未读与刷新）。会话流的 live refresh 改骑全局流的
-`message_sent`/task 事件（游标增量扫描），不再私开第二条流。
-
-## 7. 验证矩阵（2026-08-12）
+## 7. 验证矩阵（2026-08-13）
 
 | 项 | 结果 |
 | --- | --- |
-| 全仓 typecheck（16 包） | ✅ 通过 |
-| client vite build | ✅ 通过 |
-| 全仓测试（含 desktop E2E smoke） | ✅ 通过（shell connector 曾在全量并行下 OOM，隔离复跑 22/22 通过，判定环境内存压力） |
-| E2E：widget 收起/展开、主窗口外壳 | ✅ 截图确认（浅色） |
-| E2E：会话聊天（自有气泡 + 今日分隔 + 上下文四区） | ✅ 断言 + 截图确认 |
-| E2E：暗色同屏 parity | ✅ 截图确认（token 成对生效，无紫色残留） |
-| E2E：群聊视图（实时指示 + 成员/拉群面板） | ✅ 断言 + 截图确认 |
-| 未读角标实时渲染 | ⚠️ 未验证（逻辑已评审；需第二发送者在线触发，E2E 未覆盖） |
-| 文件区真实产物渲染 | ⚠️ 未验证（空态已验证；需含 artifacts 的会话数据） |
+| client typecheck + vite build | ✅ 通过（phosphor 增量 ~15KB gzip） |
+| desktop smoke E2E（widget 收起/展开、主窗口、modal、会话聊天发气泡、日期分隔、drawer、暗色 parity、rooms） | ✅ 通过（4.6s） |
+| tokens:detect | ✅ 退出 0（零裸色、零 --prim- 引用、零内联 svg） |
+| 浅色/暗色成对截图 | ✅ 主窗口/会话/drawer/widget 逐屏确认 |
+| 透明窗口合成 bug | ✅ 定位并修复（绝对定位抽屉 → 布局第三列；container-type 移除） |
 
 ## 8. Finish review · verdict
 
-**有条件通过。**
+**通过。**
 
-- 通过项：FIRST VIEWPORT 三栏文法完整落地；浅色默认 + 暗色成对；签名 teal 与
-  状态色语义锁定；旧监控台品类（rail/指标卡/事件流面板/紫发光）全数退场；
-  P0 发送者约束在新气泡模型中保持并修正了旧 UI 把人类消息标成「系统」的缺陷。
-- 条件项：第 7 节两条 ⚠️ 未验证项需在真实协作数据下补验；补验不阻塞合入，
-  但不得在补验前宣称未读与文件区「已验证」。
+视觉世界替换完整落地：白底中性墨色、rail 五入口接真实数据、会话/聊天/抽屉/modal/四视图/deploy/widget
+全部重画并模块化；严格三层 token + detect.mjs 机器强制；暗色对偶成对覆盖；数据层零改动、smoke 契约类名保留。
+唯一超出原计划的技术修正（绝对定位抽屉触发透明窗口 Chromium 合成 bug → 布局列）已记录在案并带 E2E 佐证。

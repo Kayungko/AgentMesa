@@ -1,0 +1,72 @@
+/* ==========================================================================
+ * widget — tray widget. Geometry is an IPC contract (220×52 collapsed /
+ * 380×520 expanded): colors/typography change here, the box model must not.
+ * ========================================================================== */
+
+.widget-shell {
+  width: 100%;
+  height: 100%;
+  color: var(--color-text);
+  background: var(--color-surface-overlay);
+  border: 1px solid var(--color-line);
+  font-family: var(--font-sans);
+}
+.widget-shell--collapsed { border-radius: var(--radius-xl); overflow: hidden; }
+.widget-shell--expanded { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; border-radius: var(--radius-xl); overflow: hidden; box-shadow: var(--shadow-widget); }
+
+.widget-summary {
+  width: 100%;
+  height: 100%;
+  padding: 9px 12px;
+  border: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--motion-fast) var(--ease-standard), transform var(--motion-fast) var(--ease-standard);
+}
+.widget-summary:active { transform: scale(0.97); }
+.widget-summary__copy { min-width: 0; display: grid; gap: 1px; }
+.widget-summary__copy strong { font-size: var(--text-2xs); font-weight: var(--weight-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.widget-summary__copy small { font-size: 9px; color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.widget-summary__count {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+  background: var(--color-surface-hover);
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: var(--weight-semibold);
+}
+
+.widget-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: var(--space-4) var(--space-4) var(--space-3);
+  border-bottom: 1px solid var(--color-line);
+}
+.eyebrow { font-size: 9px; letter-spacing: 0.06em; color: var(--color-text-subtle); text-transform: uppercase; }
+.widget-header h1 { margin: 4px 0 0; font-size: var(--text-lg); font-weight: var(--weight-bold); letter-spacing: -0.02em; }
+.widget-header__actions { display: flex; align-items: center; gap: 9px; }
+
+.widget-content { overflow-y: auto; padding: var(--space-3) var(--space-4) var(--space-4); display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-2); align-content: start; scrollbar-width: thin; }
+
+.widget-footer {
+  height: 42px;
+  padding: 0 var(--space-4);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid var(--color-line);
+}
+.widget-footer button { padding: 0; border: 0; color: var(--color-info); background: transparent; cursor: pointer; font-size: var(--text-2xs); font-weight: var(--weight-medium); }
+.widget-footer span { font-size: 9px; color: var(--color-text-subtle); }

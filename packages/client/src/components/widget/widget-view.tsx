@@ -1,13 +1,14 @@
-// ---------------------------------------------------------------------------
-// WidgetView — the 380px tray widget (collapsed summary / expanded activity).
-// Extracted verbatim from App.tsx (S1 atomic move); no logic changes.
-// ---------------------------------------------------------------------------
-
 import { useState } from 'react';
-import { useMesaRuntime } from './useMesaRuntime.js';
-import type { RuntimeConfig } from './types.js';
-import { ConnectionBadge, EmptyState, SkeletonStack, connectionLabels, useFreshMembers } from './ui.js';
-import { ApprovalCard, RunCard } from './cards.js';
+import { useMesaRuntime } from '../../useMesaRuntime.js';
+import type { RuntimeConfig } from '../../types.js';
+import { ConnectionBadge, connectionLabels } from '../ui/badge.js';
+import { EmptyState } from '../ui/empty.js';
+import { IconButton } from '../ui/icon-button.js';
+import { SkeletonStack } from '../ui/skeleton.js';
+import { useFreshMembers } from '../ui/use-fresh-members.js';
+import { X } from '../ui/icons.js';
+import { ApprovalCard } from '../cards/approval-card.js';
+import { RunCard } from '../cards/run-card.js';
 
 export function WidgetView({ config }: { config: RuntimeConfig }) {
   const runtime = useMesaRuntime(config);
@@ -45,8 +46,8 @@ export function WidgetView({ config }: { config: RuntimeConfig }) {
         </div>
         <div className="widget-header__actions no-drag">
           <ConnectionBadge state={runtime.connection} />
-          <button className="icon-button" type="button" onClick={toggle} aria-label="收起">−</button>
-          <button className="icon-button" type="button" onClick={() => window.agentmesa?.hideWidget()} aria-label="隐藏">×</button>
+          <IconButton label="收起" onClick={toggle}>−</IconButton>
+          <IconButton label="隐藏" onClick={() => window.agentmesa?.hideWidget()}><X size={15} /></IconButton>
         </div>
       </header>
 

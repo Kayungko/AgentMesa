@@ -1,11 +1,6 @@
-// ---------------------------------------------------------------------------
-// DeployView — MCP registration, runner commands and agent identity setup.
-// Extracted verbatim from App.tsx (S1 atomic move); no logic changes.
-// ---------------------------------------------------------------------------
-
 import { useCallback, useEffect, useState } from 'react';
 import type { MesaAgent, MesaWorkspace } from '@agentmesa/protocol';
-import type { RuntimeConfig } from './types.js';
+import type { RuntimeConfig } from '../../types.js';
 import {
   installIntegration,
   loadAgents,
@@ -17,8 +12,9 @@ import {
   type IntegrationSide,
   type RunnerSource,
   type SetupStatus,
-} from './api.js';
-import { SkeletonStack } from './ui.js';
+} from '../../api.js';
+import { Button } from '../ui/button.js';
+import { SkeletonStack } from '../ui/skeleton.js';
 
 const runnerSourceLabels: Record<RunnerSource, string> = {
   env: '环境变量',
@@ -94,29 +90,24 @@ function DeployCard({
       </div>
       {error ? <p className="inline-error">{error}</p> : null}
       <div className="deploy-card__actions">
-        <button
-          className="button button--primary"
+        <Button
+          variant="primary"
           disabled={!s.cliAvailable || s.mcpInstalled || busyInstall || busyUninstall}
           title={s.cliAvailable ? '写入 CLI 的用户级 MCP 配置' : '请先在本机安装该 CLI'}
           onClick={() => onAct('install', side)}
         >
           {busyInstall ? '安装中…' : '注册 MCP'}
-        </button>
-        <button
-          className="button button--ghost"
-          disabled={!s.mcpInstalled || busyInstall || busyUninstall}
-          onClick={() => onAct('uninstall', side)}
-        >
+        </Button>
+        <Button disabled={!s.mcpInstalled || busyInstall || busyUninstall} onClick={() => onAct('uninstall', side)}>
           {busyUninstall ? '移除中…' : '移除'}
-        </button>
-        <button
-          className="button button--ghost"
+        </Button>
+        <Button
           disabled={registered || busyRegister || busyInstall || busyUninstall}
           title={registered ? '该 Agent 已登记到当前工作区' : '把 Agent 身份登记到当前工作区，会话/群聊即可直接邀请'}
           onClick={onRegister}
         >
           {busyRegister ? '登记中…' : registered ? '已登记' : '登记 Agent 身份'}
-        </button>
+        </Button>
       </div>
     </article>
   );
@@ -237,7 +228,7 @@ export function DeployView({ config }: { config: RuntimeConfig }) {
       <div className="error-state">
         <strong>无法加载部署状态</strong>
         <p>{error}</p>
-        <button className="button button--primary" onClick={() => { setLoading(true); void refresh(); }}>重试</button>
+        <Button variant="primary" onClick={() => { setLoading(true); void refresh(); }}>重试</Button>
       </div>
     );
   }
@@ -255,14 +246,14 @@ export function DeployView({ config }: { config: RuntimeConfig }) {
           {activeWs ? `（${activeWs.rootDir}）` : ''}
           <small>切换工作区后，未固定 AGENTMESA_WORKSPACE 的 Agent 会话会跟随新的激活工作区。</small>
         </p>
-        <button
-          className="button button--sm button--ghost deploy-reprobe"
+        <Button
+          small
           onClick={() => { setLoading(true); void refresh(); }}
           disabled={busy === 'reprobe'}
           title="重新探测 CLI 与 MCP 注册状态"
         >
           重新探测
-        </button>
+        </Button>
       </div>
 
       <section className="content-block">
@@ -337,9 +328,9 @@ export function DeployView({ config }: { config: RuntimeConfig }) {
           {error ? <p className="inline-error">{error}</p> : null}
           {saved ? <p className="deploy-saved">已保存到工作区配置</p> : null}
           <div>
-            <button className="button button--primary" disabled={busy === 'runners'} onClick={() => void saveRunners()}>
+            <Button variant="primary" disabled={busy === 'runners'} onClick={() => void saveRunners()}>
               {busy === 'runners' ? '保存中…' : '保存命令'}
-            </button>
+            </Button>
           </div>
         </div>
       </section>

@@ -1,11 +1,9 @@
-// ---------------------------------------------------------------------------
-// WorkspaceSwitcher — titlebar workspace picker (switch / register / manage).
-// Extracted verbatim from App.tsx (S1 atomic move); no logic changes.
-// ---------------------------------------------------------------------------
-
 import { useCallback, useEffect, useState } from 'react';
-import type { RuntimeConfig, WorkspaceList } from './types.js';
-import { activateWorkspace, loadWorkspaces, registerWorkspace, removeWorkspace } from './api.js';
+import type { RuntimeConfig, WorkspaceList } from '../../types.js';
+import { activateWorkspace, loadWorkspaces, registerWorkspace, removeWorkspace } from '../../api.js';
+import { Button } from '../ui/button.js';
+import { IconButton } from '../ui/icon-button.js';
+import { GearSix, Plus } from '../ui/icons.js';
 
 export function WorkspaceSwitcher({ config }: { config: RuntimeConfig }) {
   const [state, setState] = useState<WorkspaceList>();
@@ -115,21 +113,20 @@ export function WorkspaceSwitcher({ config }: { config: RuntimeConfig }) {
           />
           {error ? <p className="inline-error">{error}</p> : null}
           <div className="workspace-register__actions">
-            <button className="button button--sm button--ghost" onClick={() => { setRegisterOpen(false); setError(undefined); }}>取消</button>
-            <button className="button button--sm button--primary" onClick={() => void register()} disabled={busy || !newRoot.trim()}>
+            <Button small onClick={() => { setRegisterOpen(false); setError(undefined); }}>取消</Button>
+            <Button small variant="primary" onClick={() => void register()} disabled={busy || !newRoot.trim()}>
               注册
-            </button>
+            </Button>
           </div>
         </div>
       ) : (
         <div className="workspace-switcher__adds">
-          <button className="workspace-switcher__add" onClick={() => { setRegisterOpen(true); setError(undefined); }} title="注册工作区" aria-label="注册工作区">＋</button>
-          <button
-            className="workspace-switcher__manage"
-            onClick={() => setManageOpen((value) => !value)}
-            title="管理工作区"
-            aria-label="管理工作区"
-          >⚙</button>
+          <IconButton label="注册工作区" onClick={() => { setRegisterOpen(true); setError(undefined); }}>
+            <Plus size={15} weight="bold" />
+          </IconButton>
+          <IconButton label="管理工作区" pressed={manageOpen} onClick={() => setManageOpen((value) => !value)}>
+            <GearSix size={15} />
+          </IconButton>
         </div>
       )}
       {manageOpen ? (
