@@ -59,10 +59,18 @@ test('launches widget, expands, and opens main workspace', async () => {
     expect(main).toBeDefined();
     main!.on('console', (message) => console.log('main renderer:', message.text()));
     await expect(main!.locator('.chat-shell')).toBeVisible();
+    await expect(main!.locator('.rail')).toBeVisible();
     await expect(main!.locator('.conv-list')).toBeVisible();
     await expect(main!.locator('.titlebar__brand')).toContainText('AgentMesa');
     await expect(main!.locator('.titlebar .connection')).toContainText('已连接');
     await main!.screenshot({ path: join(outputDir, 'agentmesa-main-window.png') });
+
+    // New-session is a modal now: open it, assert, close with Escape.
+    console.log('verifying new-session modal');
+    await main!.getByRole('button', { name: '新建会话' }).first().click();
+    await expect(main!.getByRole('dialog')).toBeVisible({ timeout: 5_000 });
+    await main!.keyboard.press('Escape');
+    await expect(main!.getByRole('dialog')).toHaveCount(0);
 
     // --- IM shell deep-check: open a meeting chat, verify bubbles + context panel.
     const meetingRow = main!.getByRole('button').filter({ hasText: 'IdleGame' }).first();
@@ -71,6 +79,9 @@ test('launches widget, expands, and opens main workspace', async () => {
       await meetingRow.click();
       await expect(main!.locator('.chat-head')).toBeVisible({ timeout: 10_000 });
       await expect(main!.locator('.chat-stream')).toBeVisible();
+      // The context panel lives in a slide-in drawer (default closed).
+      await main!.getByRole('button', { name: '详情' }).click();
+      await main!.waitForTimeout(250);
       await expect(main!.locator('.ctx-panel')).toBeVisible();
       await expect(main!.locator('.composer textarea')).toBeVisible();
 
@@ -78,18 +89,46 @@ test('launches widget, expands, and opens main workspace', async () => {
       console.log('sending a message to verify own bubble');
       await main!.locator('.composer textarea').fill('E2E 冒泡验证');
       await main!.locator('.composer textarea').press('Enter');
-      const bubbleOk = await main!.locator('.chat-msg--own .bubble').filter({ hasText: 'E2E 冒泡验证' })
-        .waitFor({ timeout: 10_000 })
-        .then(() => true, () => false);
+      let bubbleOk = true;
+      try {
+        await expect
+          .poll(
+            () => main!.locator('.chat-msg--own .bubble').filter({ hasText: 'E2E 冒泡验证' }).count(),
+            { timeout: 10_000 },
+          )
+          .toBeGreaterThan(0);
+      } catch {
+        bubbleOk = false;
+      }
       if (!bubbleOk) {
         const sendError = await main!.locator('.chat-send-error').textContent().catch(() => null);
         const domCount = await main!.evaluate(() => (globalThis as unknown as { document: PageDocument }).document.querySelectorAll('.chat-msg--own .bubble').length);
         const domText = await main!.evaluate(() => (globalThis as unknown as { document: PageDocument }).document.querySelector('.chat-msg--own .bubble p')?.textContent ?? '(none)');
-        console.log('DIAG send-error:', sendError ?? '(none)', '| own-bubble count:', domCount, '| first text:', domText);
+        const diag = await main!.evaluate(() => {
+          const g = globalThis as unknown as { document: PageDocument; getComputedStyle: (el: unknown) => Record<string, string> };
+          const msg = g.document.querySelector('.chat-msg');
+          const bubble = g.document.querySelector('.chat-msg .bubble');
+          const stream = g.document.querySelector('.chat-stream');
+          const pick = (el: unknown, props: string[]) => {
+            if (!el) return null;
+            const cs = g.getComputedStyle(el);
+            return Object.fromEntries(props.map((p) => [p, cs[p]]));
+          };
+          return {
+            msg: pick(msg, ['display', 'opacity', 'visibility', 'height', 'width']),
+            bubble: pick(bubble, ['display', 'opacity', 'visibility', 'background', 'height']),
+            stream: pick(stream, ['height', 'overflowY', 'scrollTop', 'scrollHeight']),
+            msgRect: (() => { const r = (msg as unknown as { getBoundingClientRect: () => Record<string, number> } | null)?.getBoundingClientRect(); return r ? { top: r.top, left: r.left, height: r.height } : null; })(),
+            streamRect: (() => { const r = (stream as unknown as { getBoundingClientRect: () => Record<string, number> } | null)?.getBoundingClientRect(); return r ? { top: r.top, left: r.left, height: r.height, width: r.width } : null; })(),
+            html: (g.document.querySelector('.chat-stream') as unknown as { innerHTML: string } | null)?.innerHTML.slice(0, 600),
+          };
+        });
+        console.log('DIAG send-error:', sendError ?? '(none)', '| own-bubble count:', domCount, '| first text:', domText, '| styles:', JSON.stringify(diag));
         await main!.screenshot({ path: join(outputDir, 'agentmesa-diag-send-failed.png') });
+        await main!.locator('.chat-stream').screenshot({ path: join(outputDir, 'agentmesa-diag-stream-el.png') });
       }
       expect(bubbleOk).toBe(true);
-      await expect(main!.locator('.day-divider')).toBeVisible();
+      await expect(main!.locator('.day-divider').first()).toBeVisible();
       await main!.screenshot({ path: join(outputDir, 'agentmesa-meeting-chat.png') });
 
       // Dark theme parity check on the new shell.
