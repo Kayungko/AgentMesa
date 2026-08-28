@@ -41,6 +41,14 @@ test('launches widget, expands, and opens main workspace', async () => {
     const collapsedWidth = await widget.evaluate(() => (globalThis as unknown as { outerWidth: number }).outerWidth);
     expect(collapsedWidth).toBeGreaterThanOrEqual(220);
     expect(collapsedWidth).toBeLessThanOrEqual(224);
+    // Regression: transparent frameless windows can miss `ready-to-show`
+    // (Electron issue #7227), which left the widget un-placed at (0,0).
+    // Assert it actually got placed by one of the show paths.
+    const [screenX, screenY] = await widget.evaluate(() => {
+      const w = globalThis as unknown as { screenX: number; screenY: number };
+      return [w.screenX, w.screenY];
+    });
+    expect([screenX, screenY]).not.toEqual([0, 0]);
     await widget.screenshot({ path: join(outputDir, 'agentmesa-widget-collapsed.png') });
 
     console.log('expanding widget');

@@ -123,11 +123,20 @@ function createWidgetWindow() {
   });
   widgetWindow.setAlwaysOnTop(true, 'floating');
   widgetWindow.loadURL(rendererUrl('widget')).catch(console.error);
-  widgetWindow.once('ready-to-show', () => {
-    if (!widgetWindow) return;
+  // Transparent frameless windows may never emit `ready-to-show` (Electron
+  // issue #7227), which left the widget stuck at its default (0,0) bounds.
+  // `did-finish-load` fires on every real load, so it covers that gap; the
+  // shown flag keeps later reloads (workspace switches) from re-showing a
+  // widget the user has hidden.
+  let shown = false;
+  const placeAndShow = () => {
+    if (shown || !widgetWindow || widgetWindow.isDestroyed()) return;
+    shown = true;
     placeWidget(widgetWindow);
     widgetWindow.showInactive();
-  });
+  };
+  widgetWindow.once('ready-to-show', placeAndShow);
+  widgetWindow.webContents.once('did-finish-load', placeAndShow);
   widgetWindow.on('closed', () => {
     widgetWindow = undefined;
   });
@@ -213,7 +222,10 @@ function registerIpc() {
   ipcMain.handle('widget:toggle', () => {
     const window = createWidgetWindow();
     if (window.isVisible()) window.hide();
-    else window.showInactive();
+    else {
+      placeWidget(window);
+      window.showInactive();
+    }
   });
   ipcMain.handle('widget:hide', () => widgetWindow?.hide());
   ipcMain.handle('widget:expanded', (_event, expanded: boolean) => {
