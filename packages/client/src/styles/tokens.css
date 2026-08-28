@@ -1,103 +1,116 @@
+@import '@fontsource-variable/inter/index.css';
+@import '@fontsource-variable/source-serif-4/index.css';
+
 /* ============================================================================
- * AgentMesa Design Tokens — neutral-ink world (2026-08-13 redesign)
+ * AgentMesa Design Tokens — Notion warm-paper editorial (2026-08-28 re-skin)
  * ----------------------------------------------------------------------------
- * DIRECTION CONTRACT (locked 2026-08-13, user-pinned canon)
+ * DIRECTION CONTRACT (re-skin 2026-08-28, per Design Token/ warm-paper-light)
  *
- *   THESIS     AgentMesa 是「AI agents 像同事一样协作的群聊」。白底中性墨色语言，
- *              无全局主题色；语义色只承载状态/未读/头像底/进度，不承载品牌。
+ *   THESIS     AgentMesa 是「AI agents 像同事一样协作的群聊」。按 Notion
+ *              warm-paper editorial 重塑：整页暖纸画布 + 白卡片浮层 + Notion
+ *              蓝单一主色 + Inter 主字体（Source Serif 作衬线点缀）。保留 IM
+ *              三栏形态、类名、文案、窗口几何——桌面 smoke 测试与 token 检测不挂。
  *   FORM       桌面密度 IM：72px 图标 rail + 会话面板 + 聊天面板 + 滑入状态抽屉。
  *              3D Fluent Emoji 头像；Phosphor 图标；发丝线 + 右向投影分栏。
  *   三层纪律   组件只消费 Tier 2/3；Tier 1 (--prim-*) 仅本文件内部引用。
  *              scripts/detect.mjs 机器强制（禁裸 hex、禁 --prim- 引用）。
  *
- * 主题机制：<html data-theme="light|dark">。浅色为 :root 默认；暗色成对覆盖。
+ * 主题机制：<html data-theme="light|dark">。浅色为 :root 默认；暗色成对覆盖
+ * （Notion 官方 token 只有 light，暗色按浅色语义反相派生）。
  * ========================================================================== */
 
 :root {
   /* ---------- Tier 1 · Primitives（只读参照；组件禁引） ---------- */
 
-  /* 墨色阶（中性语言的灰阶真相） */
-  --prim-ink-950: #141619;
-  --prim-ink-900: #17191d;
-  --prim-ink-800: #1f2328;
-  --prim-ink-700: #24282e;
-  --prim-ink-600: #3a4048;
-  --prim-ink-500: #565d68;
-  --prim-ink-400: #6f7782;
-  --prim-ink-300: #9aa1aa;
-  --prim-ink-200: #c8cdd4;
-  --prim-ink-150: #d9dde2;
-  --prim-ink-100: #e6e8eb;
-  --prim-ink-075: #eef0f2;
-  --prim-ink-050: #f1f3f5;
-  --prim-ink-025: #f4f5f6;
-  --prim-ink-010: #fafafa;
+  /* Notion 原始色盘（warm-paper-light） */
+  --prim-notion-blue: #0075de;
+  --prim-notion-blue-hover: #097fe8;
+  --prim-paper-warmth: #f6f5f4;
+  --prim-pure-white: #ffffff;
+  --prim-ink-black: #000000;
+  --prim-charcoal: #111111;
+  --prim-stone: #757575;
+  --prim-graphite: #615d59;
+  --prim-slate: #696969;
+  --prim-sky-tint: #e6f3fe;
+  --prim-marigold: #ffb110;
+  --prim-coral: #f64932;
+  --prim-saffron: #e89d01;
+  --prim-vermillion: #e32d14;
+  --prim-mocha: #b18164;
+  --prim-signal-blue: #097fe8;
+  --prim-sky-wash: #62aef0;
+  --prim-midnight-ink: #02093a;
 
-  /* 暗色表面阶 */
-  --prim-night-900: #121417;
-  --prim-night-800: #17191d;
-  --prim-night-700: #1f2328;
-  --prim-night-600: #26292e;
-  --prim-night-500: #2e3238;
-  --prim-night-400: #363a41;
+  /* 暗色表面阶（warm-paper 反相派生） */
+  --prim-night-900: #161616;
+  --prim-night-800: #1d1d1d;
+  --prim-night-700: #242424;
+  --prim-night-600: #2a2a2a;
+  --prim-night-500: #333333;
+  --prim-night-400: #3b3b3b;
 
-  /* 状态色（浅/暗成对；语义锁定：red=错误 橙=等待 绿=成功 蓝=信息） */
-  --prim-red-500: #ef4444;   --prim-red-400: #f87171;
-  --prim-amber-500: #f59e0b; --prim-amber-400: #fbbf24;
-  --prim-green-500: #22a06b; --prim-green-400: #34b981;
-  --prim-blue-500: #4f7ee8;  --prim-blue-400: #6b95f0;
-  --prim-focus-light: #3b82f6;
-  --prim-focus-dark: #6aa5ff;
+  /* 状态色（语义锁定：red=错误 橙=等待 绿=成功 蓝=信息） */
+  --prim-red-500: #e32d14;
+  --prim-red-400: #f64932;
+  --prim-amber-500: #e89d01;
+  --prim-amber-400: #ffb110;
+  --prim-green-500: #22a06b;
+  --prim-green-400: #34b981;
+  --prim-blue-500: #0075de;
+  --prim-blue-400: #097fe8;
+  --prim-focus-light: #0075de;
+  --prim-focus-dark: #62aef0;
 
   /* 头像 accent 底（浅/暗成对） */
-  --prim-av-orange: #fff4ea;  --prim-av-orange-dark: #33261a;
-  --prim-av-blue: #edf3ff;    --prim-av-blue-dark: #1d2736;
-  --prim-av-green: #edf8f3;   --prim-av-green-dark: #1b2b23;
-  --prim-av-violet: #f4efff;  --prim-av-violet-dark: #272135;
-  --prim-av-slate: #f1f3f5;   --prim-av-slate-dark: #2a2e34;
+  --prim-av-orange: #fff3e8;  --prim-av-orange-dark: #3a2c1c;
+  --prim-av-blue: #e8f2fe;    --prim-av-blue-dark: #212f42;
+  --prim-av-green: #e9f6ef;   --prim-av-green-dark: #20352b;
+  --prim-av-violet: #f2eefe;  --prim-av-violet-dark: #2c2738;
+  --prim-av-slate: #f1f3f5;   --prim-av-slate-dark: #30343a;
 
   /* 自有气泡暗底 */
-  --prim-self-bubble-dark: #16304a;
+  --prim-self-bubble-dark: #dcecff;
 
   /* ---------- Tier 2 · Semantic（组件唯一可引用的色彩层） ---------- */
   color-scheme: light;
 
-  --color-text: #1f2328;
-  --color-text-muted: #6f7782;
-  --color-text-subtle: #9aa1aa;
+  --color-text: #191a1b;
+  --color-text-muted: #615d59;
+  --color-text-subtle: #757575;
   --color-text-inverse: #ffffff;
 
-  --color-surface: #ffffff;           /* 聊天主区 / 卡片 */
-  --color-surface-secondary: #fafafa; /* 会话面板底 */
-  --color-surface-tertiary: #f4f5f6;  /* inset 井 / 凹陷区 */
-  --color-surface-hover: #f2f3f5;     /* 控件 hover */
-  --color-surface-selected: #eceef0;  /* 会话行选中底 */
-  --color-surface-overlay: #ffffff;   /* modal / popover */
+  --color-surface: #f6f5f4;           /* 整页暖纸画布 */
+  --color-surface-secondary: #ffffff; /* 白卡片浮层 / 详情底 */
+  --color-surface-tertiary: #e6f3fe;  /* inset 井 / 凹陷区（sky-tint） */
+  --color-surface-hover: #eeedec;     /* 纸面控件 hover */
+  --color-surface-selected: #e6f3fe;  /* 会话行选中底（sky-tint 弱化） */
+  --color-surface-overlay: #ffffff;   /* modal / popover 白卡片 */
 
-  --color-line: #e6e8eb;
-  --color-line-strong: #d9dde2;
+  --color-line: rgba(0, 0, 0, 0.08);
+  --color-line-strong: rgba(0, 0, 0, 0.16);
 
   --color-focus-ring: var(--prim-focus-light);
 
-  --color-control-primary: #24282e;       /* 主按钮 / 发送钮（近黑） */
-  --color-control-primary-hover: #111318;
+  --color-control-primary: #0075de;       /* 主按钮 / 发送钮（Notion 蓝单主色） */
+  --color-control-primary-hover: #097fe8;
   --color-on-control-primary: #ffffff;
 
   --color-danger: var(--prim-red-500);
-  --color-danger-soft: rgba(239, 68, 68, 0.08);
+  --color-danger-soft: rgba(227, 45, 20, 0.08);
   --color-warning: var(--prim-amber-500);
-  --color-warning-soft: rgba(245, 158, 11, 0.10);
+  --color-warning-soft: rgba(232, 157, 1, 0.10);
   --color-success: var(--prim-green-500);
   --color-success-soft: rgba(34, 160, 107, 0.10);
   --color-info: var(--prim-blue-500);
-  --color-info-soft: rgba(79, 126, 232, 0.10);
+  --color-info-soft: rgba(0, 117, 222, 0.10);
 
   /* 气泡（无边框；身份靠底色区分） */
-  --color-bubble-agent: #f1f1f1;
-  --color-on-bubble-agent: #272c33;
-  --color-bubble-self: #eaf2ff;
-  --color-on-bubble-self: #1f2328;
-  --color-bubble-inset: rgba(0, 0, 0, 0.10); /* 气泡内嵌井 / 类型 chip 叠色 */
+  --color-bubble-agent: #ffffff;
+  --color-on-bubble-agent: #191a1b;
+  --color-bubble-self: #e6f3fe;
+  --color-on-bubble-self: #173b63;
+  --color-bubble-inset: rgba(0, 0, 0, 0.08); /* 气泡内嵌井 / 类型 chip 叠色 */
 
   /* 未读角标：语义红（IM 品类语法），独立变量可一处回滚 */
   --color-unread: var(--prim-red-500);
@@ -108,19 +121,20 @@
   --color-avatar-accent-green: var(--prim-av-green);
   --color-avatar-accent-violet: var(--prim-av-violet);
   --color-avatar-accent-slate: var(--prim-av-slate);
-  --color-avatar-ring: rgba(23, 25, 29, 0.08); /* 头像内描边（材质叠色） */
+  --color-avatar-ring: rgba(25, 26, 27, 0.08); /* 头像内描边（材质叠色） */
 
-  --shadow-rail: 6px 0 18px rgba(23, 25, 29, 0.065);   /* rail 右向投影，替代右边框 */
-  --shadow-pop: 0 1px 3px rgba(23, 25, 29, 0.08), 0 4px 16px rgba(23, 25, 29, 0.12);
-  --shadow-drawer: -12px 0 28px rgba(29, 34, 40, 0.07);
-  --shadow-widget: 0 18px 48px rgba(18, 22, 27, 0.14);
-  --color-scrim: rgba(25, 29, 34, 0.22); /* modal 遮罩 */
+  --shadow-rail: 6px 0 18px rgba(25, 26, 27, 0.05);   /* rail 右向投影，替代右边框 */
+  --shadow-pop: 0 1px 3px rgba(25, 26, 27, 0.06), 0 4px 16px rgba(25, 26, 27, 0.10);
+  --shadow-drawer: -12px 0 28px rgba(25, 26, 27, 0.06);
+  --shadow-widget: 0 18px 48px rgba(18, 18, 18, 0.16);
+  --color-scrim: rgba(17, 17, 17, 0.22); /* modal 遮罩 */
 
   /* ---------- Tier 3 · Layout / Type / Motion ---------- */
 
-  /* 字体：系统栈（Apple 方式）。Windows 落 Segoe UI，macOS 落 SF */
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text",
-               "Segoe UI", Inter, system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+  /* 字体：自托管 Inter（NotionInter 替代）优先栈；Source Serif 作衬线点缀 */
+  --font-sans: "Inter Variable", Inter, ui-sans-serif, system-ui, -apple-system,
+               BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-serif: "Source Serif 4 Variable", "Source Serif Pro", Georgia, serif;
   --font-mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, monospace;
 
   /* 栏宽 */
@@ -148,17 +162,17 @@
   --size-avatar-md: 28px;
   --size-avatar-lg: 32px;
 
-  /* 字号阶（桌面密度） */
-  --text-2xs: 11px;
-  --text-xs: 12px;
-  --text-sm: 13px;   /* 消息正文 */
-  --text-md: 14px;
-  --text-lg: 16px;   /* 面板标题 h1 */
+  /* 字号阶（桌面密度，适度放大贴 Notion body-sm 14px） */
+  --text-2xs: 12px;
+  --text-xs: 13px;
+  --text-sm: 14px;   /* 消息正文（Notion body-sm） */
+  --text-md: 15px;
+  --text-lg: 18px;   /* 面板标题 h1 */
 
   --weight-regular: 400;
-  --weight-medium: 550;
-  --weight-semibold: 620;
-  --weight-bold: 650;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
 
   --leading-tight: 1.35;
   --leading-body: 1.5;
@@ -189,59 +203,59 @@
   --bubble-max-width-md: 82%;
   --bubble-max-width-sm: 86%;
 
-  /* 动效 */
-  --motion-fast: 120ms;
-  --motion-base: 180ms;
-  --motion-slow: 240ms;
+  /* 动效（Notion 节奏：hover 200ms ease） */
+  --motion-fast: 160ms;
+  --motion-base: 200ms;
+  --motion-slow: 280ms;
   --ease-standard: cubic-bezier(0.25, 0.1, 0.25, 1);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 /* ============================================================================
- * 暗色主题覆盖（Apple 语义方式：表面明度分层，文本反白，语义色提亮）
+ * 暗色主题覆盖（warm-paper 反相派生：画布深暖纸，文本反白，主色蓝提亮）
  * ========================================================================== */
 
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --color-text: #f2f4f7;
-  --color-text-muted: #9aa3ae;
-  --color-text-subtle: #787f8a;
-  --color-text-inverse: #17191d;
+  --color-text: #f2f1ef;
+  --color-text-muted: #a8a29a;
+  --color-text-subtle: #7d776f;
+  --color-text-inverse: #20211f;
 
-  --color-surface: #1f2328;
-  --color-surface-secondary: #17191d;
-  --color-surface-tertiary: #121417;
-  --color-surface-hover: #26292e;
-  --color-surface-selected: #26292e;
-  --color-surface-overlay: #26292e;
+  --color-surface: #1f1f1f;
+  --color-surface-secondary: #2a2a2a;
+  --color-surface-tertiary: #333333;
+  --color-surface-hover: #2a2a2a;
+  --color-surface-selected: #2a2a2a;
+  --color-surface-overlay: #2a2a2a;
 
-  --color-line: rgba(235, 238, 242, 0.14);
-  --color-line-strong: rgba(235, 238, 242, 0.24);
+  --color-line: rgba(255, 255, 255, 0.10);
+  --color-line-strong: rgba(255, 255, 255, 0.20);
 
   --color-focus-ring: var(--prim-focus-dark);
 
-  --color-control-primary: #e6e8eb;
-  --color-control-primary-hover: #f2f3f5;
-  --color-on-control-primary: #17191d;
+  --color-control-primary: #097fe8;
+  --color-control-primary-hover: #62aef0;
+  --color-on-control-primary: #ffffff;
 
   --color-danger: var(--prim-red-400);
-  --color-danger-soft: rgba(248, 113, 113, 0.14);
+  --color-danger-soft: rgba(246, 73, 50, 0.16);
   --color-warning: var(--prim-amber-400);
-  --color-warning-soft: rgba(251, 191, 36, 0.14);
+  --color-warning-soft: rgba(255, 177, 16, 0.16);
   --color-success: var(--prim-green-400);
-  --color-success-soft: rgba(52, 185, 129, 0.14);
+  --color-success-soft: rgba(52, 185, 129, 0.16);
   --color-info: var(--prim-blue-400);
-  --color-info-soft: rgba(107, 149, 240, 0.16);
+  --color-info-soft: rgba(9, 127, 232, 0.18);
 
-  --color-bubble-agent: #26292e;
+  --color-bubble-agent: #2a2a2a;
   --color-on-bubble-agent: var(--color-text);
   --color-bubble-self: var(--prim-self-bubble-dark);
-  --color-on-bubble-self: #dbe7f5;
-  --color-bubble-inset: rgba(0, 0, 0, 0.24);
+  --color-on-bubble-self: #173b63;
+  --color-bubble-inset: rgba(0, 0, 0, 0.28);
 
   --color-unread: var(--prim-red-400);
-  --color-on-unread: #17191d;
+  --color-on-unread: #201c17;
 
   --color-avatar-accent-orange: var(--prim-av-orange-dark);
   --color-avatar-accent-blue: var(--prim-av-blue-dark);
@@ -250,9 +264,9 @@
   --color-avatar-accent-slate: var(--prim-av-slate-dark);
   --color-avatar-ring: rgba(255, 255, 255, 0.10);
 
-  --shadow-rail: 6px 0 18px rgba(0, 0, 0, 0.60);
+  --shadow-rail: 6px 0 18px rgba(0, 0, 0, 0.55);
   --shadow-pop: 0 1px 3px rgba(0, 0, 0, 0.5), 0 4px 16px rgba(0, 0, 0, 0.45);
   --shadow-drawer: -12px 0 28px rgba(0, 0, 0, 0.55);
-  --shadow-widget: 0 18px 48px rgba(0, 0, 0, 0.5);
-  --color-scrim: rgba(0, 0, 0, 0.50);
+  --shadow-widget: 0 18px 48px rgba(0, 0, 0, 0.55);
+  --color-scrim: rgba(0, 0, 0, 0.55);
 }
