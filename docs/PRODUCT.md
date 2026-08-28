@@ -43,7 +43,7 @@ Builder Agent implements
 - Mesa CLI: init, inspect, and debug workflows.
 - Mesa Runner: invokes Claude, Codex, or other agents.
 - Mesa Connectors: tool-specific adapters.
-- Mesa Desk: optional future visual monitor.
+- Mesa Desk: local API server embedded in the desktop client (IM-style agent monitor plus tray widget).
 
 ## MVP Outcome
 
