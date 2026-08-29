@@ -85,7 +85,7 @@ button, input, textarea, select { font: inherit; }
   border-radius: var(--radius-full);
   background: var(--color-unread);
   color: var(--color-on-unread);
-  font-size: 8px;
+  font-size: var(--text-4xs);
   font-weight: var(--weight-semibold);
   box-shadow: 0 0 0 2px var(--color-surface);
 }
@@ -126,12 +126,12 @@ button, input, textarea, select { font: inherit; }
 .brand-mark {
   width: 20px;
   height: 20px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   display: grid;
   place-items: center;
   background: var(--color-control-primary);
   color: var(--color-on-control-primary);
-  font-size: 11px;
+  font-size: var(--text-3xs);
   font-weight: var(--weight-bold);
 }
 
@@ -147,24 +147,13 @@ button, input, textarea, select { font: inherit; }
   border-radius: var(--radius-sm);
   color: var(--color-text-muted);
   cursor: pointer;
-  font-size: 11px;
+  font-size: var(--text-3xs);
 }
 .window-controls button:hover { background: var(--color-surface-hover); color: var(--color-text); }
 
 /* --- Workspace switcher -------------------------------------------------------- */
 
 .workspace-switcher { display: flex; align-items: center; gap: var(--space-1); position: relative; }
-.workspace-switcher__select {
-  height: 26px;
-  max-width: 220px;
-  border: 1px solid var(--color-line-strong);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  color: var(--color-text);
-  font-size: var(--text-2xs);
-  padding: 0 6px;
-  outline: 0;
-}
 .workspace-switcher__adds { display: flex; gap: 2px; }
 .workspace-switcher .icon-button { width: 26px; height: 26px; }
 
@@ -207,7 +196,7 @@ button, input, textarea, select { font: inherit; }
   background: none;
   color: var(--color-text-muted);
   cursor: pointer;
-  font-size: 14px;
+  font-size: var(--text-sm);
   line-height: 1;
   padding: 0 2px;
   border-radius: var(--radius-xs);

@@ -35,7 +35,7 @@
   padding: 0 10px 0 16px;
   border-bottom: 1px solid var(--color-line);
 }
-.dialog h2 { margin: 0; font-size: 15px; font-weight: var(--weight-bold); letter-spacing: -0.01em; }
+.dialog h2 { margin: 0; font-size: var(--text-md); font-weight: var(--weight-bold); letter-spacing: -0.01em; }
 
 .dialog form { display: grid; }
 .dialog-field { display: grid; gap: 6px; padding: 12px 16px 0; }
@@ -43,9 +43,9 @@
 .dialog-field input {
   height: 36px;
   border: 1px solid var(--color-line-strong);
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   padding: 0 10px;
-  font-size: 12.5px;
+  font-size: var(--text-2xs);
   color: var(--color-text);
   background: var(--color-surface);
   outline: 0;

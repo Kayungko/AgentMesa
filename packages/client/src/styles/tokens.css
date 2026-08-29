@@ -147,6 +147,7 @@
   --size-drawer: 292px;
   --size-titlebar: 40px;
   --size-chat-header: 52px;
+  --size-statusbar: 28px; /* 底部状态栏；shell.css grid 行引用（曾为影子变量） */
 
   /* 控件 */
   --size-rail-target: 40px;
@@ -162,7 +163,10 @@
   --size-avatar-md: 28px;
   --size-avatar-lg: 32px;
 
-  /* 字号阶（桌面密度，适度放大贴 Notion body-sm 14px） */
+  /* 字号阶（桌面密度，适度放大贴 Notion body-sm 14px）。
+     micro 档（--text-3xs/--text-4xs）闭合刻度：低于 --text-2xs 的小字号统一走这两档。 */
+  --text-4xs: 9px;
+  --text-3xs: 10px;
   --text-2xs: 12px;
   --text-xs: 13px;
   --text-sm: 14px;   /* 消息正文（Notion body-sm） */
@@ -189,6 +193,7 @@
   --space-12: 48px;
 
   /* 圆角 */
+  --radius-micro: 2px; /* inset / progress 微细节 */
   --radius-xs: 4px;
   --radius-sm: 6px;
   --radius-md: 8px;

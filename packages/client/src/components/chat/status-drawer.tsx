@@ -18,6 +18,7 @@ import { formatTime, memberKindLabels } from '../ui/format.js';
 import { Avatar } from '../ui/avatar.js';
 import { Button } from '../ui/button.js';
 import { IconButton } from '../ui/icon-button.js';
+import { Dropdown } from '../ui/dropdown.js';
 import { SkeletonStack } from '../ui/skeleton.js';
 import { X } from '../ui/icons.js';
 import { RunCard } from '../cards/run-card.js';
@@ -232,16 +233,13 @@ function MeetingDrawerContent({
               const assignee = task.assignedTo ? agentsById.get(task.assignedTo) : undefined;
               return (
                 <div key={task.id} className="task-row">
-                  <select
-                    className={`task-status-select ${statusClass(task.status)}`}
+                  <Dropdown
+                    options={TASK_STATUSES.map((status) => ({ value: status, label: status, kind: statusClass(status) }))}
                     value={task.status}
-                    onChange={(event) => void changeTaskStatus(task.id, event.target.value)}
-                    aria-label={`${task.title} 状态`}
-                  >
-                    {TASK_STATUSES.map((status) => (
-                      <option key={status} value={status}>{status}</option>
-                    ))}
-                  </select>
+                    onChange={(status) => void changeTaskStatus(task.id, status)}
+                    ariaLabel={`${task.title} 状态`}
+                    statusClass={statusClass(task.status)}
+                  />
                   <div className="task-row__body">
                     <strong>{task.title}</strong>
                     {assignee ? <small>指派给 {assignee.name}</small> : <small>未指派</small>}
@@ -416,17 +414,24 @@ function RoomDrawerContent({
         <div className="rooms-invite">
           <label className="rooms-invite__field">
             <span>选择工作区</span>
-            <select value={pickWs} onChange={(event) => { if (event.target.value) void loadPickItems(event.target.value); }}>
-              <option value="">选择…</option>
-              {workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
-            </select>
+            <Dropdown
+              fullWidth
+              options={[{ value: '', label: '选择…', disabled: true }, ...workspaces.map((workspace) => ({ value: workspace.id, label: workspace.name }))]}
+              value={pickWs}
+              onChange={(value) => { if (value) void loadPickItems(value); }}
+              ariaLabel="选择工作区"
+              placeholder="选择…"
+            />
           </label>
           <label className="rooms-invite__field">
             <span>成员类型</span>
-            <select value={pickKind} onChange={(event) => { void switchKind(event.target.value as 'session' | 'agent'); }}>
-              <option value="session">会话</option>
-              <option value="agent">Agent</option>
-            </select>
+            <Dropdown
+              fullWidth
+              options={[{ value: 'session', label: '会话' }, { value: 'agent', label: 'Agent' }]}
+              value={pickKind}
+              onChange={(value) => void switchKind(value as 'session' | 'agent')}
+              ariaLabel="成员类型"
+            />
           </label>
           {pickItems.length > 0 ? (
             <div className="agent-pick-row">

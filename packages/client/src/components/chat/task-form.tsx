@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { useMesaRuntime } from '../../useMesaRuntime.js';
 import { Button } from '../ui/button.js';
+import { Dropdown } from '../ui/dropdown.js';
 
 export function TaskForm({
   runtime,
@@ -45,10 +46,14 @@ export function TaskForm({
         spellCheck={false}
         autoFocus
       />
-      <select value={assignee} onChange={(event) => setAssignee(event.target.value)} aria-label="指派给">
-        <option value="">指派给…</option>
-        {runtime.agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
-      </select>
+      <Dropdown
+        fullWidth
+        options={[{ value: '', label: '指派给…', disabled: true }, ...runtime.agents.map((agent) => ({ value: agent.id, label: agent.name }))]}
+        value={assignee}
+        onChange={setAssignee}
+        ariaLabel="指派给"
+        placeholder="指派给…"
+      />
       <Button variant="primary" small type="submit" disabled={busy || !title.trim()}>
         {busy ? '创建中…' : '创建'}
       </Button>

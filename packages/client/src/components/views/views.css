@@ -36,7 +36,7 @@
 }
 .view-row__body { flex: 1; min-width: 0; display: grid; gap: 2px; }
 .view-row__body strong { font-size: var(--text-xs); font-weight: var(--weight-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.view-row__body small { color: var(--color-text-muted); font-size: 10px; }
+.view-row__body small { color: var(--color-text-muted); font-size: var(--text-3xs); }
 .view-row__open {
   flex: 1;
   min-width: 0;
@@ -50,5 +50,5 @@
   padding: 0;
 }
 .view-row__open strong { font-size: var(--text-xs); font-weight: var(--weight-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.view-row__open small { color: var(--color-text-muted); font-size: 10px; }
+.view-row__open small { color: var(--color-text-muted); font-size: var(--text-3xs); }
 .view-row__open:hover strong { color: var(--color-info); }

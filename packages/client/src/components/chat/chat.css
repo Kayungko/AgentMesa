@@ -34,16 +34,16 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 15px;
+  font-size: var(--text-md);
   line-height: 1.2;
   font-weight: var(--weight-bold);
   letter-spacing: -0.01em;
 }
 .chat-head__meta { display: flex; align-items: center; gap: 10px; }
-.chat-head__meta small { color: var(--color-text-muted); font-size: 10.5px; white-space: nowrap; }
+.chat-head__meta small { color: var(--color-text-muted); font-size: var(--text-3xs); white-space: nowrap; }
 .chat-head__bridge { color: var(--color-text-subtle); }
 
-.room-live { display: inline-flex; align-items: center; gap: 6px; font-size: 10px; color: var(--color-text-muted); }
+.room-live { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-3xs); color: var(--color-text-muted); }
 
 .chat-purpose {
   margin: 0;
@@ -91,12 +91,12 @@
   justify-content: center;
   margin-bottom: 5px;
   color: var(--color-text-subtle);
-  font-size: 10px;
+  font-size: var(--text-3xs);
 }
 .day-divider::before, .day-divider::after { content: ""; width: 56px; height: 1px; background: var(--color-line); }
 .day-divider span { margin: 0 9px; }
 
-.chat-system { display: flex; justify-content: center; align-items: baseline; gap: 7px; padding: var(--space-1) 0; color: var(--color-text-subtle); font-size: 10px; }
+.chat-system { display: flex; justify-content: center; align-items: baseline; gap: 7px; padding: var(--space-1) 0; color: var(--color-text-subtle); font-size: var(--text-3xs); }
 
 .chat-msg { width: 100%; display: flex; align-items: flex-start; gap: var(--space-2); margin: 10px 0; }
 .chat-msg--own { justify-content: flex-end; }
@@ -104,10 +104,10 @@
 .chat-msg--own .chat-msg__col { align-items: flex-end; }
 .chat-msg__meta { height: 18px; display: flex; align-items: center; gap: 7px; padding: 0 3px; }
 .chat-msg__meta strong { font-size: var(--text-2xs); font-weight: var(--weight-semibold); }
-.chat-msg__meta small { color: var(--color-text-subtle); font-size: 10px; }
+.chat-msg__meta small { color: var(--color-text-subtle); font-size: var(--text-3xs); }
 .chat-msg__type, .chat-msg__kind {
   font-style: normal;
-  font-size: 9px;
+  font-size: var(--text-4xs);
   padding: 1px 6px;
   border-radius: var(--radius-full);
   background: var(--color-surface-hover);
@@ -115,8 +115,8 @@
 }
 
 .bubble {
-  padding: 8px 10px;
-  border: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--color-line-strong); /* 白气泡发丝线分离暖纸（原 #fff 贴 #f6f5f4 仅 1.1:1） */
   border-radius: var(--radius-bubble-agent);
   background: var(--color-bubble-agent);
   color: var(--color-on-bubble-agent);
@@ -198,7 +198,7 @@
   padding: 3px 7px;
   color: var(--color-text);
   background: transparent;
-  font-size: 12.5px;
+  font-size: var(--text-2xs);
   line-height: 1.4;
   overflow: hidden;
 }
@@ -219,7 +219,7 @@
 .send-button:hover:not(:disabled) { background: var(--color-control-primary-hover); }
 .send-button:active:not(:disabled) { transform: scale(0.96); }
 .send-button:disabled { background: var(--color-line); color: var(--color-text-subtle); cursor: default; }
-.composer-wrap > small { display: block; margin: 4px 0 0; color: var(--color-text-subtle); text-align: right; font-size: 9px; }
+.composer-wrap > small { display: block; margin: 4px 0 0; color: var(--color-text-subtle); text-align: right; font-size: var(--text-4xs); }
 
 /* --- Status drawer (third layout column) --------------------------------------
  * Rendered in-layout (not an absolute overlay): an overlay drawer made the
@@ -252,7 +252,7 @@
 }
 .status-drawer > header > div { display: grid; gap: 2px; }
 .status-drawer > header strong { font-size: var(--text-sm); font-weight: var(--weight-semibold); }
-.status-drawer > header span { color: var(--color-text-muted); font-size: 10px; }
+.status-drawer > header span { color: var(--color-text-muted); font-size: var(--text-3xs); }
 .status-drawer .ctx-panel { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
 
 /* --- Context sections (drawer content) ---------------------------------------------- */
@@ -260,14 +260,14 @@
 .ctx-section { padding: 13px 15px; border-bottom: 1px solid var(--color-line); }
 .section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); margin-bottom: 10px; }
 .section-heading span, .section-heading > h3 { font-size: var(--text-2xs); font-weight: var(--weight-semibold); color: var(--color-text-muted); letter-spacing: 0.04em; margin: 0; }
-.section-heading small { color: var(--color-text-subtle); font-size: 10px; }
-.ctx-hint { margin: 0; color: var(--color-text-subtle); font-size: 10.5px; line-height: 1.5; }
+.section-heading small { color: var(--color-text-subtle); font-size: var(--text-3xs); }
+.ctx-hint { margin: 0; color: var(--color-text-subtle); font-size: var(--text-3xs); line-height: 1.5; }
 
 .ctx-members { display: grid; gap: var(--space-2); }
 .ctx-member { display: grid; grid-template-columns: var(--size-avatar-md) minmax(0, 1fr) auto; gap: var(--space-2); align-items: center; }
 .ctx-member__body { display: grid; gap: 1px; min-width: 0; }
 .ctx-member__body strong { font-size: var(--text-2xs); font-weight: var(--weight-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ctx-member__roles { color: var(--color-text-muted); font-size: 9.5px; }
+.ctx-member__roles { color: var(--color-text-muted); font-size: var(--text-4xs); }
 .ctx-member__remove {
   width: 22px;
   height: 22px;
@@ -277,7 +277,7 @@
   color: var(--color-text-muted);
   background: transparent;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--text-xs);
   line-height: 1;
 }
 .ctx-member__remove:hover { color: var(--color-danger); background: var(--color-danger-soft); }
@@ -306,22 +306,8 @@
 .task-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--space-2); align-items: center; }
 .task-row__body { display: grid; gap: 1px; min-width: 0; }
 .task-row__body strong { font-size: var(--text-2xs); font-weight: var(--weight-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.task-row__body small { color: var(--color-text-muted); font-size: 9.5px; }
-.task-row__time { color: var(--color-text-subtle); font-size: 9.5px; }
-
-.task-status-select {
-  height: 24px;
-  border: 1px solid var(--color-line-strong);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  color: var(--color-text-muted);
-  font-size: 10px;
-  padding: 0 4px;
-  outline: 0;
-}
-.task-status-select.status--running { color: var(--color-success); }
-.task-status-select.status--completed { color: var(--color-info); }
-.task-status-select.status--failed { color: var(--color-danger); }
+.task-row__body small { color: var(--color-text-muted); font-size: var(--text-4xs); }
+.task-row__time { color: var(--color-text-subtle); font-size: var(--text-4xs); }
 
 .task-create { display: grid; gap: var(--space-2); margin-bottom: var(--space-2); }
 .task-create input, .task-create select {
@@ -348,9 +334,9 @@
 }
 .artifact-row:hover { background: var(--color-surface-hover); }
 .artifact-row__head { display: grid; gap: 2px; }
-.artifact-row__kind { font-style: normal; font-size: 9px; color: var(--color-text-subtle); text-transform: uppercase; letter-spacing: 0.04em; }
+.artifact-row__kind { font-style: normal; font-size: var(--text-4xs); color: var(--color-text-subtle); text-transform: uppercase; letter-spacing: 0.04em; }
 .artifact-row__head strong { font-size: var(--text-2xs); }
-.artifact-row__head small { color: var(--color-text-muted); font-size: 9.5px; }
+.artifact-row__head small { color: var(--color-text-muted); font-size: var(--text-4xs); }
 .artifact-row__content {
   margin: 0;
   padding: 6px 8px;
@@ -358,7 +344,7 @@
   background: var(--color-surface-tertiary);
   color: var(--color-text-muted);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-3xs);
   white-space: pre-wrap;
   max-height: 220px;
   overflow: auto;
@@ -366,7 +352,7 @@
 
 .rooms-invite { display: grid; gap: var(--space-2); }
 .rooms-invite__field { display: grid; gap: 4px; }
-.rooms-invite__field span { font-size: 10px; color: var(--color-text-muted); }
+.rooms-invite__field span { font-size: var(--text-3xs); color: var(--color-text-muted); }
 .rooms-invite__field select {
   height: 28px;
   border: 1px solid var(--color-line-strong);
@@ -377,4 +363,4 @@
   padding: 0 6px;
   outline: 0;
 }
-.rooms-invite__hint { margin: 0; color: var(--color-text-subtle); font-size: 10px; }
+.rooms-invite__hint { margin: 0; color: var(--color-text-subtle); font-size: var(--text-3xs); }

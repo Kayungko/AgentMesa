@@ -4,6 +4,7 @@ import type { RuntimeConfig } from '../../types.js';
 import type { useMesaRuntime } from '../../useMesaRuntime.js';
 import { TASK_STATUSES, statusClass } from '../ui/badge.js';
 import { Button } from '../ui/button.js';
+import { Dropdown } from '../ui/dropdown.js';
 import { EmptyState } from '../ui/empty.js';
 import { formatTime } from '../ui/format.js';
 import { TaskForm } from '../chat/task-form.js';
@@ -47,16 +48,13 @@ export function TasksView({
         <div className="view-list">
           {tasks.map((task) => (
             <div key={task.id} className="view-row">
-              <select
-                className={`task-status-select ${statusClass(task.status)}`}
+              <Dropdown
+                options={TASK_STATUSES.map((status) => ({ value: status, label: status, kind: statusClass(status) }))}
                 value={task.status}
-                onChange={(event) => void changeStatus(task.id, event.target.value)}
-                aria-label={`${task.title} 状态`}
-              >
-                {TASK_STATUSES.map((status) => (
-                  <option key={status} value={status}>{status}</option>
-                ))}
-              </select>
+                onChange={(status) => void changeStatus(task.id, status)}
+                ariaLabel={`${task.title} 状态`}
+                statusClass={statusClass(task.status)}
+              />
               <div className="view-row__body">
                 <strong>{task.title}</strong>
                 <small>{formatTime(task.updatedAt)}</small>

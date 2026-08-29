@@ -3,6 +3,7 @@ import type { RuntimeConfig, WorkspaceList } from '../../types.js';
 import { activateWorkspace, loadWorkspaces, registerWorkspace, removeWorkspace } from '../../api.js';
 import { Button } from '../ui/button.js';
 import { IconButton } from '../ui/icon-button.js';
+import { Dropdown } from '../ui/dropdown.js';
 import { GearSix, Plus } from '../ui/icons.js';
 
 export function WorkspaceSwitcher({ config }: { config: RuntimeConfig }) {
@@ -76,27 +77,18 @@ export function WorkspaceSwitcher({ config }: { config: RuntimeConfig }) {
 
   return (
     <div className="workspace-switcher no-drag">
-      <select
-        className="workspace-switcher__select"
+      <Dropdown
         value={state?.activeWorkspaceId ?? ''}
-        onChange={(event) => {
-          if (event.target.value === '__register__') {
-            setRegisterOpen(true);
-            setError(undefined);
-            return;
-          }
-          if (event.target.value) void switchTo(event.target.value);
-        }}
-        disabled={busy}
-        aria-label="切换工作区"
-        title="切换工作区"
-      >
-        <option value="" disabled>{activeName ?? '工作区'}</option>
-        {state?.workspaces.map((workspace) => (
-          <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
-        ))}
-        <option value="__register__">＋ 注册工作区…</option>
-      </select>
+        onChange={(workspaceId) => { if (workspaceId) void switchTo(workspaceId); }}
+        ariaLabel="切换工作区"
+        placeholder={activeName ?? '工作区'}
+        statusClass=""
+        options={[
+          { value: '', label: activeName ?? '工作区', disabled: true },
+          ...(state?.workspaces ?? []).map((workspace) => ({ value: workspace.id, label: workspace.name })),
+          { value: '__register__', label: '＋ 注册工作区…', onSelect: () => { setRegisterOpen(true); setError(undefined); } },
+        ]}
+      />
       {registerOpen ? (
         <div className="workspace-register">
           <input
