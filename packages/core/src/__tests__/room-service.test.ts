@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createRoomStore, roomStoreDir, RoomNotFoundError } from '../services/room-service.js';
@@ -307,5 +307,90 @@ describe('room service', () => {
     expect(message.origin).toBe('agent');
     expect(message.body).toBe('完整正文');
     expect(message.taskId).toBe('task_1');
+  });
+
+  // --- M1: 全局 Room 事件日志 ---
+
+  it('appends room lifecycle events in order with snapshots', () => {
+    const store = createRoomStore();
+    const room = store.createRoom({ name: '事件群', purpose: '审计回放' });
+    store.invite(room.id, { workspaceId: wsA, kind: 'agent', ref: 'codex', label: 'Codex' });
+    store.sendMessage(room.id, {
+      workspaceId: wsA,
+      from: { workspaceId: wsA, kind: 'agent', ref: 'codex', label: 'Codex' },
+      summary: '第一条消息',
+    });
+    store.leave(room.id, { workspaceId: wsA, kind: 'agent', ref: 'codex' });
+
+    const events = store.listRoomEvents(room.id);
+    expect(events.map((event) => event.type)).toEqual([
+      'room_created',
+      'member_invited',
+      'message_sent',
+      'member_left',
+    ]);
+    // sequence 即行序号，从 0 连续递增。
+    expect(events.map((event) => event.sequence)).toEqual([0, 1, 2, 3]);
+    // payload 携带对应快照。
+    expect(events[0]!.payload['room']).toMatchObject({ id: room.id, name: '事件群' });
+    expect(events[1]!.payload['member']).toMatchObject({ ref: 'codex', kind: 'agent' });
+    expect(events[2]!.payload['message']).toMatchObject({ summary: '第一条消息', roomId: room.id });
+    expect(events[3]!.payload['member']).toMatchObject({ ref: 'codex' });
+  });
+
+  it('stores the event log under <global>/rooms/events/<roomId>.jsonl', () => {
+    const store = createRoomStore();
+    const room = store.createRoom({ name: '路径群' });
+    const eventsFile = join(getGlobalMesaDir(), 'rooms', 'events', `${room.id}.jsonl`);
+    expect(existsSync(eventsFile)).toBe(true);
+    // JSONL：第一行即 room_created 事件。
+    const lines = readFileSync(eventsFile, 'utf-8').trim().split('\n');
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0]!).type).toBe('room_created');
+  });
+
+  it('supports event-id and numeric-sequence cursors', () => {
+    const store = createRoomStore();
+    const room = store.createRoom({ name: '游标事件群' });
+    store.invite(room.id, { workspaceId: wsA, kind: 'agent', ref: 'codex' });
+    store.invite(room.id, { workspaceId: wsB, kind: 'agent', ref: 'claude' });
+    store.sendMessage(room.id, {
+      workspaceId: wsA,
+      from: { workspaceId: wsA, kind: 'agent', ref: 'codex' },
+      summary: '说话',
+    });
+
+    const events = store.listRoomEvents(room.id);
+    expect(events).toHaveLength(4);
+
+    // 事件 id 游标：返回该事件之后的全部事件。
+    const afterFirst = store.listRoomEvents(room.id, events[0]!.id);
+    expect(afterFirst.map((event) => event.sequence)).toEqual([1, 2, 3]);
+    // 游标 = 最后一条：空。
+    expect(store.listRoomEvents(room.id, events[3]!.id)).toEqual([]);
+    // 数字游标按行序号解释（after 行 0 → 从行 1 起）。
+    expect(store.listRoomEvents(room.id, '0').map((event) => event.sequence)).toEqual([1, 2, 3]);
+    expect(store.listRoomEvents(room.id, '2').map((event) => event.sequence)).toEqual([3]);
+    // 未知游标报错——静默忽略会漏读。
+    expect(() => store.listRoomEvents(room.id, 'not-a-cursor')).toThrow(/Unknown room event cursor/);
+  });
+
+  it('returns no events for unknown rooms and skips member_left no-ops', () => {
+    const store = createRoomStore();
+    expect(store.listRoomEvents('room_never_created')).toEqual([]);
+
+    const room = store.createRoom({ name: '空退群' });
+    // leave 一个不在房间里的成员：不追加 member_left 事件。
+    store.leave(room.id, { workspaceId: wsA, kind: 'agent', ref: 'ghost' });
+    expect(store.listRoomEvents(room.id).map((event) => event.type)).toEqual(['room_created']);
+  });
+
+  it('keeps the event log across deleteRoom (append-only audit trail)', () => {
+    const store = createRoomStore();
+    const room = store.createRoom({ name: '删除群' });
+    store.deleteRoom(room.id);
+    expect(() => store.getRoom(room.id)).toThrow(RoomNotFoundError);
+    // 房间投影删除后事件日志保留——审计历史不随实体消失。
+    expect(store.listRoomEvents(room.id).map((event) => event.type)).toEqual(['room_created']);
   });
 });

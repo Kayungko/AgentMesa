@@ -18,7 +18,12 @@ export type PolicyAction =
   | 'read_projections'
   | 'rebuild_projections'
   | 'inspect_transports'
-  | 'manage_runs';
+  | 'manage_runs'
+  // 与 core 包 ACTION_CAPABILITY（packages/core/src/runtime/policy.ts）的
+  // capability 词汇对齐：manage_workflows 对应 workflow.decide，
+  // manage_rooms 对应 room.create / room.invite / room.leave（M1）。
+  | 'manage_workflows'
+  | 'manage_rooms';
 
 export type RoleCapability = Record<AgentRole, PolicyAction[]>;
 

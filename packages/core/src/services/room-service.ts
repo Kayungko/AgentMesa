@@ -1,8 +1,10 @@
+import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   currentProtocolVersion,
   generateRoomId,
   generateMessageId,
+  generateEventId,
   MesaRoomSchema,
   RoomMessageSchema,
   CreateRoomInputSchema,
@@ -100,6 +102,89 @@ function hasMemberRef(room: MesaRoom, ref: string): boolean {
   return room.members.some((member) => member.ref === ref);
 }
 
+// --- Room 事件日志（全局，跨工作区） ---
+//
+// Room 是跨工作区实体，事件归属全局 mesa home 而不是任何 per-workspace 的
+// `.agentmesa/events/`（见 DOMAIN_MODEL.md「Room 住全局目录」）。每个房间一份
+// append-only 的 JSONL 日志：<global>/rooms/events/<roomId>.jsonl。事件与房间
+// 投影 JSON 在同一把 room 锁内同步写：事件先追加、投影后写 —— 事件是审计事实，
+// 投影写失败可由事件重建；反过来则可能出现"投影存在但历史缺失"。
+
+/** Room 事件类型（M1 起冻结，append-only 日志不可改名）。 */
+export type RoomEventType =
+  | 'room_created'
+  | 'member_invited'
+  | 'member_left'
+  | 'message_sent';
+
+export interface RoomEvent {
+  /** 事件 id（`event_*`），增量读取的主游标。 */
+  id: string;
+  /** 0 起始的行序号，可作数值游标使用。 */
+  sequence: number;
+  roomId: string;
+  type: RoomEventType;
+  /** 事件快照：房间 / 成员 / 消息。 */
+  payload: Record<string, unknown>;
+  timestamp: string;
+}
+
+function roomEventsDir(baseDir: string): string {
+  return join(roomStoreDir(baseDir), 'events');
+}
+
+function roomEventsFilePath(baseDir: string, roomId: string): string {
+  return join(roomEventsDir(baseDir), `${roomId}.jsonl`);
+}
+
+function readRoomEvents(storage: MesaStorageAdapter, baseDir: string, roomId: string): RoomEvent[] {
+  const raw = storage.readText(roomEventsFilePath(baseDir, roomId));
+  if (raw === null) {
+    return [];
+  }
+  return raw
+    .split('\n')
+    .filter((line) => line !== '')
+    .map((line) => {
+      try {
+        return JSON.parse(line) as RoomEvent;
+      } catch {
+        throw new MesaError(
+          'STORAGE_ERROR',
+          `Corrupted room event line in ${roomEventsFilePath(baseDir, roomId)}: ${line.slice(0, 120)}`,
+        );
+      }
+    });
+}
+
+/**
+ * 追加一条 room 事件。必须在 room 锁内调用（或针对新建房间——新 id 无争用）：
+ * sequence 由当前日志长度推导，锁保证并发下不重复。
+ *
+ * 追加走 node:fs 而非 storage adapter——adapter 只有整文件原子写，没有 append
+ * 语义（与 FileEventStore 的做法一致）；读取仍走 adapter 以便测试注入。
+ */
+function appendRoomEvent(
+  storage: MesaStorageAdapter,
+  baseDir: string,
+  roomId: string,
+  type: RoomEventType,
+  payload: Record<string, unknown>,
+): RoomEvent {
+  const events = readRoomEvents(storage, baseDir, roomId);
+  const event: RoomEvent = {
+    id: generateEventId(),
+    sequence: events.length,
+    roomId,
+    type,
+    payload,
+    timestamp: new Date().toISOString(),
+  };
+  mkdirSync(roomEventsDir(baseDir), { recursive: true });
+  appendFileSync(roomEventsFilePath(baseDir, roomId), `${JSON.stringify(event)}\n`, 'utf8');
+  return event;
+}
+
 export function createRoomStore(
   baseDir: string = getGlobalMesaDir(),
   storage: MesaStorageAdapter = new FileStorageAdapter(),
@@ -125,6 +210,8 @@ export function createRoomStore(
         createdAt: now,
         updatedAt: now,
       });
+      // 事件先追加、投影后写（新房间 id 无锁争用，事件与投影天然顺序一致）。
+      appendRoomEvent(storage, baseDir, room.id, 'room_created', { room });
       storage.writeText(roomFilePath(baseDir, room.id), `${JSON.stringify(room, null, 2)}\n`);
       return room;
     },
@@ -168,6 +255,10 @@ export function createRoomStore(
               updatedAt: now,
             };
         const result = MesaRoomSchema.parse(updated);
+        // 事件先追加、投影后写（锁内）。幂等 invite 也会记录——成员快照刷新
+        // 同样是一次事实性的成员变更。
+        const invitedMember = result.members.find((candidate) => memberKey(candidate) === key);
+        appendRoomEvent(storage, baseDir, roomId, 'member_invited', { member: invitedMember });
         storage.writeText(roomFilePath(baseDir, roomId), `${JSON.stringify(result, null, 2)}\n`);
         return result;
       });
@@ -178,6 +269,7 @@ export function createRoomStore(
       return withLock(lockCtx as unknown as MesaRuntimeContext, `room:${roomId}`, () => {
         const room = readRoom(storage, baseDir, roomId);
         const key = memberKey(member);
+        const removed = room.members.find((existing) => memberKey(existing) === key);
         const next = room.members.filter((existing) => memberKey(existing) !== key);
         const updated: MesaRoom = {
           ...room,
@@ -185,6 +277,10 @@ export function createRoomStore(
           updatedAt: new Date().toISOString(),
         };
         const result = MesaRoomSchema.parse(updated);
+        // 成员确实离开才记事件——对不在房间里的成员调 leave 不产生历史噪音。
+        if (removed) {
+          appendRoomEvent(storage, baseDir, roomId, 'member_left', { member: removed });
+        }
         storage.writeText(roomFilePath(baseDir, roomId), `${JSON.stringify(result, null, 2)}\n`);
         return result;
       });
@@ -242,6 +338,8 @@ export function createRoomStore(
           ),
           updatedAt: now,
         });
+        // 事件先追加、投影后写（锁内）。
+        appendRoomEvent(storage, baseDir, roomId, 'message_sent', { message });
         storage.writeText(roomFilePath(baseDir, roomId), `${JSON.stringify(updatedRoom, null, 2)}\n`);
         const dir = roomMessagesDir(baseDir, roomId);
         storage.ensureDirectory(dir);
@@ -271,6 +369,26 @@ export function createRoomStore(
         return messages.slice(index + 1);
       }
       return messages.filter((message) => message.createdAt.localeCompare(after) > 0);
+    },
+
+    /**
+     * 读取 room 事件日志，支持游标增量读取。游标优先匹配事件 id；纯数字游标
+     * 按行序号（sequence）解释；其余游标抛错——静默忽略会漏读，宁可报错。
+     * 房间不存在或尚无事件时返回空数组。
+     */
+    listRoomEvents(roomId: string, after?: string): RoomEvent[] {
+      const events = readRoomEvents(storage, baseDir, roomId);
+      if (after === undefined) {
+        return events;
+      }
+      const index = events.findIndex((event) => event.id === after);
+      if (index !== -1) {
+        return events.slice(index + 1);
+      }
+      if (/^\d+$/.test(after)) {
+        return events.filter((event) => event.sequence > Number(after));
+      }
+      throw new MesaError('VALIDATION_ERROR', `Unknown room event cursor: ${after}`);
     },
 
     /**

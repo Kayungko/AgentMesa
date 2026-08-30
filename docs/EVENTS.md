@@ -326,3 +326,55 @@ For very long-lived streams (thousands of events), introduce periodic snapshots:
 ```
 
 Rebuild then reads the latest snapshot (event #50), reads only events 51+, and applies the tail. This keeps rebuild time bounded without sacrificing the append-only event log.
+
+## 9. Room Events
+
+Rooms are **cross-workspace entities**: a room gathers sessions and agents from
+different workspaces, so it lives in the global mesa home (`~/.agentmesa/rooms/`,
+see DOMAIN_MODEL.md) rather than inside any single project's `.agentmesa/`.
+Consequently, room events do **not** enter the per-workspace event stream
+described above. Each room has its own append-only JSONL log in the global home:
+
+```
+<global mesa home>/rooms/events/<roomId>.jsonl
+```
+
+The log is written inside the same per-room file lock as the room projection
+JSON, with the event appended **before** the projection is written — the event is
+the audit fact; a failed projection write can always be replayed from history,
+never the other way around. Deleting a room removes its projection but keeps the
+event log (append-only audit trail).
+
+Event types (frozen as underscore literals, same discipline as `eventTypeSchema`):
+
+| Type | Payload | Meaning |
+|---|---|---|
+| `room_created` | `{ room }` | A room is created (room snapshot) |
+| `member_invited` | `{ member }` | A member joins (member snapshot; idempotent re-invites also record) |
+| `member_left` | `{ member }` | A member leaves (only recorded when a member actually left) |
+| `message_sent` | `{ message }` | A room message is posted (full message snapshot) |
+
+Each line is a single JSON object:
+
+```ts
+interface RoomEvent {
+  id: string;        // event id (`event_*`) — the primary cursor
+  sequence: number;  // 0-based line number — numeric cursor alternative
+  roomId: string;
+  type: 'room_created' | 'member_invited' | 'member_left' | 'message_sent';
+  payload: Record<string, unknown>;
+  timestamp: string; // ISO 8601
+}
+```
+
+Incremental reads go through `listRoomEvents(roomId, after?)` on the room store
+(`createRoomStore` in `packages/core/src/services/room-service.ts`). The cursor
+first matches an event `id`; an all-digits cursor is interpreted as a line
+`sequence`. Any other cursor value throws — silently ignoring an unknown cursor
+would skip events. A room with no events (or a room that never existed) returns
+an empty array.
+
+Room events are intentionally **not** subject to `MesaEventSchema` validation or
+the per-workspace `EventStore` interface: rooms have no `meetingId`/`streamId`
+shape and no per-workspace runtime context. They are a separate, simpler log
+with the same append-only discipline.
