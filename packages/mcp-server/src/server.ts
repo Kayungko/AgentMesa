@@ -46,12 +46,14 @@ import {
   leaveRoomInputSchema,
   sendRoomMessageInputSchema,
   listRoomMessagesInputSchema,
+  pollRoomsInputSchema,
   handleCreateRoom,
   handleListRooms,
   handleInviteToRoom,
   handleLeaveRoom,
   handleSendRoomMessage,
   handleListRoomMessages,
+  handlePollRooms,
   handleCreateTask,
   handleListTasks,
   handleReadTask,
@@ -403,9 +405,14 @@ export function createMcpServer(rootDir: string): McpServer {
   }, wrapRuntimeHandler(makeCtx, handleSendRoomMessage));
 
   server.registerTool('mesa_list_room_messages', {
-    description: 'List messages in a Room',
+    description: 'List messages in a Room (optionally only those after a message-id cursor)',
     inputSchema: listRoomMessagesInputSchema,
   }, wrapRuntimeHandler(makeCtx, handleListRoomMessages));
+
+  server.registerTool('mesa_poll_rooms', {
+    description: 'Poll all Rooms the calling member belongs to: new messages per room since a cursor (message id), plus each room\'s current cursor. Pass cursors per roomId to read incrementally; omit for a summary plus the latest message.',
+    inputSchema: pollRoomsInputSchema,
+  }, wrapRuntimeHandler(makeCtx, handlePollRooms));
 
   return server;
 }

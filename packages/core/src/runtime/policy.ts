@@ -38,7 +38,8 @@ type Capability =
   | 'rebuild_projections'
   | 'inspect_transports'
   | 'manage_runs'
-  | 'manage_workflows';
+  | 'manage_workflows'
+  | 'manage_rooms';
 
 /**
  * Maps core service action keys to the least-privilege capability required.
@@ -65,6 +66,12 @@ const ACTION_CAPABILITY: Record<string, Capability> = {
   'run.updateStatus': 'manage_runs',
   'run.read': 'manage_runs',
   'workflow.decide': 'manage_workflows',
+  // Room 操作（M1）：建群/拉人/退群需要 manage_rooms；发言复用 post_message，
+  // 因此 builder 默认可以在群里说话。
+  'room.create': 'manage_rooms',
+  'room.invite': 'manage_rooms',
+  'room.leave': 'manage_rooms',
+  'room.message.append': 'post_message',
   'handoff.write': 'manage_runs',
   'handoff.read': 'manage_runs',
   'check.create': 'manage_runs',
@@ -88,6 +95,7 @@ const ROLE_CAPABILITIES: Record<string, Capability[]> = {
     'inspect_transports',
     'manage_runs',
     'manage_workflows',
+    'manage_rooms',
   ],
   admin: [
     'read_task',
@@ -105,6 +113,7 @@ const ROLE_CAPABILITIES: Record<string, Capability[]> = {
     'inspect_transports',
     'manage_runs',
     'manage_workflows',
+    'manage_rooms',
   ],
   builder: [
     'read_task',
@@ -117,6 +126,7 @@ const ROLE_CAPABILITIES: Record<string, Capability[]> = {
     'manage_runs',
     'manage_meetings',
     'manage_agents',
+    'manage_rooms',
   ],
   reviewer: [
     'read_task',
@@ -175,6 +185,7 @@ const ROLE_CAPABILITIES: Record<string, Capability[]> = {
     'inspect_transports',
     'manage_runs',
     'manage_workflows',
+    'manage_rooms',
   ],
   planner: [
     'read_task',
@@ -216,6 +227,7 @@ const ROLE_CAPABILITIES: Record<string, Capability[]> = {
     'inspect_transports',
     'manage_runs',
     'manage_workflows',
+    'manage_rooms',
   ],
   researcher: [
     'read_task',

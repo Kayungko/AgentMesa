@@ -34,6 +34,8 @@ import {
   createRoomStore,
   getWorkspace,
   getMeeting,
+  assertPolicy,
+  MesaError,
 } from '@agentmesa/core';
 import { executeRun, activateSessionAgent } from '@agentmesa/runner';
 import {
@@ -161,10 +163,21 @@ export const sendRoomMessageInputSchema = {
   fromLabel: z.string().optional(),
   summary: z.string().min(1),
   type: z.string().optional(),
+  mentions: z.array(z.string()).optional(),
+  senderRole: z.string().optional(),
+  origin: z.enum(['human', 'agent']).optional(),
+  body: z.string().optional(),
+  taskId: z.string().optional(),
 };
 
 export const listRoomMessagesInputSchema = {
   roomId: z.string().min(1),
+  after: z.string().optional(),
+};
+
+export const pollRoomsInputSchema = {
+  ref: z.string().min(1),
+  cursors: z.record(z.string(), z.string()).optional(),
 };
 
 export const registerAgentInputSchema = {
@@ -370,6 +383,16 @@ function roomStore() {
   return createRoomStore();
 }
 
+/**
+ * 从 ctx.actor.id 归一化出成员 ref：actor id 形如 "agent:codex"，而房间成员
+ * ref 是 "codex"。取第一个冒号后的部分；不含冒号的裸 id（如 "user"）原样返回。
+ */
+function actorRefFor(ctx: MesaRuntimeContext): string {
+  const id = ctx.actor.id;
+  const idx = id.indexOf(':');
+  return idx === -1 ? id : id.slice(idx + 1);
+}
+
 function resolveMemberLabel(
   ctx: MesaRuntimeContext,
   workspaceId: string,
@@ -402,9 +425,10 @@ function resolveMemberLabel(
 }
 
 export function handleCreateRoom(
-  _ctx: MesaRuntimeContext,
+  ctx: MesaRuntimeContext,
   args: { name: string },
 ): string {
+  assertPolicy(ctx, 'room.create', 'room');
   const room = roomStore().createRoom({ name: args.name });
   return JSON.stringify(room);
 }
@@ -424,6 +448,7 @@ export function handleInviteToRoom(
   },
 ): string {
   const label = args.label ?? resolveMemberLabel(ctx, args.workspaceId, args.kind, args.ref);
+  assertPolicy(ctx, 'room.invite', `room:${args.roomId}`);
   const room = roomStore().invite(args.roomId, {
     workspaceId: args.workspaceId,
     kind: args.kind,
@@ -434,9 +459,10 @@ export function handleInviteToRoom(
 }
 
 export function handleLeaveRoom(
-  _ctx: MesaRuntimeContext,
+  ctx: MesaRuntimeContext,
   args: { roomId: string; workspaceId: string; kind: 'session' | 'agent' | 'human'; ref: string },
 ): string {
+  assertPolicy(ctx, 'room.leave', `room:${args.roomId}`);
   const room = roomStore().leave(args.roomId, {
     workspaceId: args.workspaceId,
     kind: args.kind,
@@ -446,7 +472,7 @@ export function handleLeaveRoom(
 }
 
 export function handleSendRoomMessage(
-  _ctx: MesaRuntimeContext,
+  ctx: MesaRuntimeContext,
   args: {
     roomId: string;
     workspaceId: string;
@@ -455,27 +481,85 @@ export function handleSendRoomMessage(
     fromLabel?: string;
     summary: string;
     type?: string;
+    mentions?: string[];
+    senderRole?: string;
+    origin?: 'human' | 'agent';
+    body?: string;
+    taskId?: string;
   },
 ): string {
-  const message = roomStore().sendMessage(args.roomId, {
-    workspaceId: args.workspaceId,
-    from: {
+  assertPolicy(ctx, 'room.message.append', `room:${args.roomId}`);
+  // 防冒充：fromRef 必须与 MCP actor 一致（"agent:codex" → "codex"），
+  // 由 room store 的 actorRef 校验兜底拒绝。
+  const actorRef = actorRefFor(ctx);
+  const message = roomStore().sendMessage(
+    args.roomId,
+    {
       workspaceId: args.workspaceId,
-      kind: args.fromKind,
-      ref: args.fromRef,
-      ...(args.fromLabel ? { label: args.fromLabel } : {}),
+      from: {
+        workspaceId: args.workspaceId,
+        kind: args.fromKind,
+        ref: args.fromRef,
+        ...(args.fromLabel ? { label: args.fromLabel } : {}),
+      },
+      summary: args.summary,
+      ...(args.type ? { type: args.type } : {}),
+      ...(args.mentions ? { mentions: args.mentions } : {}),
+      ...(args.senderRole ? { senderRole: args.senderRole } : {}),
+      ...(args.origin ? { origin: args.origin } : {}),
+      ...(args.body ? { body: args.body } : {}),
+      ...(args.taskId ? { taskId: args.taskId } : {}),
     },
-    summary: args.summary,
-    ...(args.type ? { type: args.type } : {}),
-  });
+    { actorRef },
+  );
   return JSON.stringify(message);
 }
 
 export function handleListRoomMessages(
   _ctx: MesaRuntimeContext,
-  args: { roomId: string },
+  args: { roomId: string; after?: string },
 ): string {
-  return JSON.stringify(roomStore().listMessages(args.roomId));
+  // 只读：list 免策略检查。
+  return JSON.stringify(roomStore().listMessages(args.roomId, args.after));
+}
+
+/**
+ * mesa_poll_rooms：按成员 ref 反查其所有房间，返回增量新消息与最新游标。
+ * - cursors[roomId] 传入时：返回该房间游标之后的新消息；
+ * - 未传游标：只返回房间摘要 + 最新一条消息。
+ * cursor 恒为该房间最后一条消息 id，调用方下次带上即可续读。
+ */
+export function handlePollRooms(
+  ctx: MesaRuntimeContext,
+  args: { ref: string; cursors?: Record<string, string> },
+): string {
+  // 只读，但只能轮询自己：ref 必须与 actor 匹配（归一化或全等），防止窥探他人房间。
+  const actorRef = actorRefFor(ctx);
+  if (args.ref !== actorRef && args.ref !== ctx.actor.id) {
+    throw new MesaError(
+      'VALIDATION_ERROR',
+      `ref "${args.ref}" does not match actor "${ctx.actor.id}" — polling another member's rooms is not allowed.`,
+    );
+  }
+  const store = roomStore();
+  const rooms = store
+    .listRoomsForMember(args.ref)
+    .map(({ room, lastMessageAt }) => {
+      const after = args.cursors?.[room.id];
+      const all = store.listMessages(room.id);
+      const latest = all.at(-1) ?? null;
+      const messages = after === undefined ? (latest ? [latest] : []) : store.listMessages(room.id, after);
+      return {
+        roomId: room.id,
+        name: room.name,
+        purpose: room.purpose,
+        memberCount: room.members.length,
+        lastMessageAt,
+        cursor: latest?.id ?? null,
+        messages,
+      };
+    });
+  return JSON.stringify({ ref: args.ref, rooms });
 }
 
 export function handleRegisterAgent(

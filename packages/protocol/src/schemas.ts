@@ -355,6 +355,12 @@ export const RoomMemberSchema = z.object({
   ref: z.string().min(1),
   label: z.string().optional(),
   joinedAt: z.string().min(1),
+  // M1: 成员增强字段（全部可选，旧数据可解析）。
+  // roles: 角色徽章（如 reviewer/builder）；sessionRef: 外部运行会话身份，
+  // 区别于 meeting ref；lastSeenAt: 最后活跃时间（服务端在 invite/send 时刷新）。
+  roles: z.array(z.string()).optional(),
+  sessionRef: z.string().optional(),
+  lastSeenAt: z.string().optional(),
 });
 
 export const RoomMemberInputSchema = z.object({
@@ -362,6 +368,8 @@ export const RoomMemberInputSchema = z.object({
   kind: RoomMemberKindSchema,
   ref: z.string().min(1),
   label: z.string().optional(),
+  roles: z.array(z.string()).optional(),
+  sessionRef: z.string().optional(),
 });
 
 export const MesaRoomSchema = z.object({
@@ -383,6 +391,12 @@ export const RoomMessageSchema = z.object({
   type: z.string().default('general'),
   summary: z.string().min(1),
   createdAt: z.string().min(1),
+  // M1: 消息增强字段（全部可选，旧数据可解析）。
+  mentions: z.array(z.string()).optional(),
+  senderRole: z.string().optional(),
+  origin: z.enum(['human', 'agent']).optional(),
+  body: z.string().optional(),
+  taskId: z.string().optional(),
 });
 
 export const CreateRoomInputSchema = z.object({
@@ -395,6 +409,11 @@ export const SendRoomMessageInputSchema = z.object({
   from: RoomMemberInputSchema,
   summary: z.string().min(1),
   type: z.string().optional(),
+  mentions: z.array(z.string()).optional(),
+  senderRole: z.string().optional(),
+  origin: z.enum(['human', 'agent']).optional(),
+  body: z.string().optional(),
+  taskId: z.string().optional(),
 });
 
 // --- Event ---

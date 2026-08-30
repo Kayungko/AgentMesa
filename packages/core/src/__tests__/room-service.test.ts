@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -14,6 +14,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   if (prevHome === undefined) delete process.env['AGENTMESA_HOME'];
   else process.env['AGENTMESA_HOME'] = prevHome;
   rmSync(homeDir, { recursive: true, force: true });
@@ -138,5 +139,173 @@ describe('room service', () => {
     store.deleteRoom(room.id);
     expect(store.listRooms()).toHaveLength(0);
     expect(() => store.getRoom(room.id)).toThrow(RoomNotFoundError);
+  });
+
+  // --- M1: after 游标 / actorRef 校验 / 成员反查 ---
+
+  it('filters messages by message-id cursor (after)', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+    const store = createRoomStore();
+    const room = store.createRoom({ name: '游标群' });
+    store.invite(room.id, { workspaceId: wsA, kind: 'session', ref: 'meeting_1' });
+
+    const m1 = store.sendMessage(room.id, {
+      workspaceId: wsA,
+      from: { workspaceId: wsA, kind: 'session', ref: 'meeting_1' },
+      summary: '第一条',
+    });
+    vi.setSystemTime(new Date('2026-01-01T00:00:01.000Z'));
+    const m2 = store.sendMessage(room.id, {
+      workspaceId: wsA,
+      from: { workspaceId: wsA, kind: 'session', ref: 'meeting_1' },
+      summary: '第二条',
+    });
+    vi.setSystemTime(new Date('2026-01-01T00:00:02.000Z'));
+    const m3 = store.sendMessage(room.id, {
+      workspaceId: wsA,
+      from: { workspaceId: wsA, kind: 'session', ref: 'meeting_1' },
+      summary: '第三条',
+    });
+
+    // 不带游标：全量。
+    expect(store.listMessages(room.id)).toHaveLength(3);
+    // 游标 = m2：只返回 m2 之后的消息。
+    const afterM2 = store.listMessages(room.id, m2.id);
+    expect(afterM2.map((m) => m.id)).toEqual([m3.id]);
+    // 游标 = 最后一条：空。
+    expect(store.listMessages(room.id, m3.id)).toEqual([]);
+    // 游标 = m1：返回 m2、m3。
+    expect(store.listMessages(room.id, m1.id).map((m) => m.id)).toEqual([m2.id, m3.id]);
+  });
+
+  it('falls back to createdAt comparison when the cursor is not a known message id', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+    const store = createRoomStore();
+    const room = store.createRoom({ name: '时间游标群' });
+    store.invite(room.id, { workspaceId: wsA, kind: 'session', ref: 'meeting_1' });
+
+    store.sendMessage(room.id, {
+      workspaceId: wsA,
+      from: { workspaceId: wsA, kind: 'session', ref: 'meeting_1' },
+      summary: '第一条',
+    });
+    vi.setSystemTime(new Date('2026-01-01T00:00:01.000Z'));
+    const m2 = store.sendMessage(room.id, {
+      workspaceId: wsA,
+      from: { workspaceId: wsA, kind: 'session', ref: 'meeting_1' },
+      summary: '第二条',
+    });
+
+    // ISO 时间游标：返回严格晚于该时间的消息。
+    const after = store.listMessages(room.id, '2026-01-01T00:00:00.000Z');
+    expect(after.map((m) => m.id)).toEqual([m2.id]);
+  });
+
+  it('rejects a sender whose ref does not match actorRef (impersonation)', () => {
+    const store = createRoomStore();
+    const room = store.createRoom({ name: '防冒充群' });
+    store.invite(room.id, { workspaceId: wsA, kind: 'agent', ref: 'codex' });
+    store.invite(room.id, { workspaceId: wsB, kind: 'agent', ref: 'claude' });
+
+    // actorRef 传入时，from.ref 必须相等——即便 from 本身是合法成员。
+    expect(() => store.sendMessage(room.id, {
+      workspaceId: wsB,
+      from: { workspaceId: wsB, kind: 'agent', ref: 'claude' },
+      summary: '冒充别人发言',
+    }, { actorRef: 'codex' })).toThrow(/impersonation rejected/);
+
+    // 匹配时正常发送。
+    const sent = store.sendMessage(room.id, {
+      workspaceId: wsA,
+      from: { workspaceId: wsA, kind: 'agent', ref: 'codex' },
+      summary: '本人发言',
+    }, { actorRef: 'codex' });
+    expect(sent.summary).toBe('本人发言');
+  });
+
+  it('refreshes lastSeenAt on invite (idempotent) and on send', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+    const store = createRoomStore();
+    const room = store.createRoom({ name: '活跃群' });
+    store.invite(room.id, { workspaceId: wsA, kind: 'agent', ref: 'codex' });
+    expect(store.getRoom(room.id).members[0]!.lastSeenAt).toBe('2026-01-01T00:00:00.000Z');
+
+    // 重复 invite：幂等，但刷新 lastSeenAt。
+    vi.setSystemTime(new Date('2026-01-01T00:00:05.000Z'));
+    store.invite(room.id, { workspaceId: wsA, kind: 'agent', ref: 'codex' });
+    expect(store.getRoom(room.id).members).toHaveLength(1);
+    expect(store.getRoom(room.id).members[0]!.lastSeenAt).toBe('2026-01-01T00:00:05.000Z');
+
+    // 发言也刷新发送者的 lastSeenAt。
+    vi.setSystemTime(new Date('2026-01-01T00:00:10.000Z'));
+    store.sendMessage(room.id, {
+      workspaceId: wsA,
+      from: { workspaceId: wsA, kind: 'agent', ref: 'codex' },
+      summary: '说话',
+    });
+    expect(store.getRoom(room.id).members[0]!.lastSeenAt).toBe('2026-01-01T00:00:10.000Z');
+  });
+
+  it('lists rooms for a member with lastMessageAt', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+    const store = createRoomStore();
+    const roomA = store.createRoom({ name: '群 A' });
+    const roomB = store.createRoom({ name: '群 B' });
+    store.invite(roomA.id, { workspaceId: wsA, kind: 'agent', ref: 'codex' });
+    store.invite(roomB.id, { workspaceId: wsB, kind: 'agent', ref: 'codex' });
+    store.invite(roomA.id, { workspaceId: wsA, kind: 'agent', ref: 'claude' });
+
+    vi.setSystemTime(new Date('2026-01-01T00:00:03.000Z'));
+    store.sendMessage(roomA.id, {
+      workspaceId: wsA,
+      from: { workspaceId: wsA, kind: 'agent', ref: 'claude' },
+      summary: 'A 群的一条',
+    });
+
+    const mine = store.listRoomsForMember('codex');
+    expect(mine.map((entry) => entry.room.id).sort()).toEqual([roomA.id, roomB.id].sort());
+    const entryA = mine.find((entry) => entry.room.id === roomA.id)!;
+    const entryB = mine.find((entry) => entry.room.id === roomB.id)!;
+    expect(entryA.lastMessageAt).toBe('2026-01-01T00:00:03.000Z');
+    expect(entryB.lastMessageAt).toBeNull(); // 无消息的房间
+
+    // 非成员反查为空。
+    expect(store.listRoomsForMember('unknown')).toEqual([]);
+  });
+
+  it('persists optional member and message enrichment fields', () => {
+    const store = createRoomStore();
+    const room = store.createRoom({ name: '增强字段群' });
+    store.invite(room.id, {
+      workspaceId: wsA,
+      kind: 'agent',
+      ref: 'codex',
+      roles: ['reviewer'],
+      sessionRef: 'sess_123',
+    });
+    expect(store.getRoom(room.id).members[0]).toMatchObject({
+      roles: ['reviewer'],
+      sessionRef: 'sess_123',
+    });
+
+    const message = store.sendMessage(room.id, {
+      workspaceId: wsA,
+      from: { workspaceId: wsA, kind: 'agent', ref: 'codex' },
+      summary: '带增强字段的消息',
+      mentions: ['claude'],
+      senderRole: 'reviewer',
+      origin: 'agent',
+      body: '完整正文',
+      taskId: 'task_1',
+    });
+    expect(message.mentions).toEqual(['claude']);
+    expect(message.senderRole).toBe('reviewer');
+    expect(message.origin).toBe('agent');
+    expect(message.body).toBe('完整正文');
+    expect(message.taskId).toBe('task_1');
   });
 });
