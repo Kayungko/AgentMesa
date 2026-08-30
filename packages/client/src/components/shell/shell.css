@@ -95,7 +95,7 @@ button, input, textarea, select { font: inherit; }
   right: 6px;
   width: 6px;
   height: 6px;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   background: var(--color-warning);
   box-shadow: 0 0 0 2px var(--color-surface);
 }
