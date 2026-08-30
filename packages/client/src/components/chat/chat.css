@@ -205,6 +205,80 @@
 .fold__body { margin: 4px 0 0; padding: 0; list-style: none; }
 .fold--system .fold__toggle { border-style: solid; border-color: var(--color-line); color: var(--color-text-subtle); }
 
+/* --- M2 协作语义：@mention 高亮 / 角色徽章 / 提及选择器 ------------------------ */
+
+.mention {
+  padding: 0 3px;
+  border-radius: var(--radius-xs);
+  background: var(--color-info-soft);
+  color: var(--color-info);
+  font-weight: var(--weight-medium);
+}
+/* 自己气泡是蓝底，高亮改用气泡内嵌色保持对比度（与 chat-msg__type--own 同法）。 */
+.chat-msg--own .bubble .mention { background: var(--color-bubble-inset); color: inherit; opacity: 0.9; }
+
+.chat-msg__role {
+  font-style: normal;
+  font-size: var(--text-4xs);
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-info-soft);
+  color: var(--color-info);
+}
+.chip__role { font-style: normal; font-size: var(--text-4xs); color: var(--color-text-subtle); }
+.chip--active .chip__role { color: inherit; opacity: 0.75; }
+
+.composer-wrap { position: relative; }
+.mention-menu {
+  position: absolute;
+  bottom: 100%;
+  left: 78px;
+  min-width: 200px;
+  max-width: 300px;
+  max-height: 208px;
+  overflow-y: auto;
+  display: grid;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-overlay);
+  box-shadow: var(--shadow-pop);
+  z-index: 5; /* 高于 chat-head（z-index 4） */
+}
+.mention-menu__option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--color-text);
+  font-size: var(--text-2xs);
+  text-align: left;
+  cursor: pointer;
+}
+.mention-menu__option.is-active, .mention-menu__option:hover { background: var(--color-surface-hover); }
+.mention-menu__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--weight-medium);
+}
+.mention-menu__role {
+  font-style: normal;
+  font-size: var(--text-4xs);
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-info-soft);
+  color: var(--color-info);
+  flex: 0 0 auto;
+}
+.mention-menu__ref { color: var(--color-text-subtle); font-size: var(--text-4xs); flex: 0 0 auto; }
+.mention-menu__empty { padding: 8px 10px; color: var(--color-text-subtle); font-size: var(--text-2xs); }
+
 @media (max-width: 900px) {
   .chat-stream, .composer-wrap { padding-inline: 14px; }
   .chat-msg__col { max-width: var(--bubble-max-width-md); }

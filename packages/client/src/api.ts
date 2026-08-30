@@ -221,6 +221,12 @@ export function sendRoomMessage(
     from: { workspaceId: string; kind: 'session' | 'agent' | 'human'; ref: string; label?: string };
     summary: string;
     type?: string;
+    /** M2 协作语义：被 @ 成员的 ref 列表。 */
+    mentions?: string[];
+    /** M2 协作语义：发送者角色（如 planner/builder）。 */
+    senderRole?: string;
+    /** M2 协作语义：人类操作者发送时为 'human'。 */
+    origin?: 'human' | 'agent';
   },
 ): Promise<import('@agentmesa/protocol').RoomMessage> {
   return postJson<import('@agentmesa/protocol').RoomMessage>(

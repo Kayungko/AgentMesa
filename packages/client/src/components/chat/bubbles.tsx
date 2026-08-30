@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { MesaAgent, MesaMessage, RoomMessage } from '@agentmesa/protocol';
+import type { MesaAgent, MesaMessage, RoomMember, RoomMessage } from '@agentmesa/protocol';
 import { Avatar } from '../ui/avatar.js';
 import { memberKindLabels } from '../ui/format.js';
 import { DayDivider, dayLabel } from './divider.js';
-import { agentRunSummary, groupRoomMessages, SYSTEM_MESSAGE_TYPES } from './room-grouping.js';
+import { splitMentionSegments } from './mention.js';
+import { agentRunSummary, groupRoomMessages, memberKey, SYSTEM_MESSAGE_TYPES } from './room-grouping.js';
 
 export const typeLabels: Record<string, string> = {
   task_created: '创建了任务',
@@ -94,14 +95,30 @@ export function MeetingBubbles({
 
 export function RoomBubbles({
   messages,
+  members,
   freshIds,
 }: {
   messages: RoomMessage[];
+  /** 房间成员（用于 @mention 高亮匹配与角色徽章回退）。 */
+  members: RoomMember[];
   freshIds: Set<string>;
 }) {
   // 折叠状态组件内部维护，不持久化（roomId 切换时组件随 ChatLoading 重挂载自然重置）。
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const items = useMemo(() => groupRoomMessages(messages), [messages]);
+  const memberByKey = useMemo(() => {
+    const map = new Map<string, RoomMember>();
+    for (const member of members) map.set(memberKey(member), member);
+    return map;
+  }, [members]);
+
+  /** summary 按 @mention 切段渲染：命中的成员名高亮为 mention 胶囊。 */
+  const renderSummary = (text: string): ReactNode =>
+    splitMentionSegments(text, members).map((segment, index) =>
+      segment.kind === 'mention'
+        ? <span key={index} className="mention">{segment.text}</span>
+        : segment.text,
+    );
 
   const toggle = (key: string) => {
     setExpanded((prev) => {
@@ -126,6 +143,8 @@ export function RoomBubbles({
     const mine = message.from.kind === 'human' && message.from.ref === 'user';
     const label = message.from.label ?? message.from.ref;
     const typeLabel = message.type !== 'general' ? typeLabels[message.type] ?? message.type : undefined;
+    // 角色徽章：优先消息自带 senderRole，缺省回退成员 roles[0]，都没有则不渲染。
+    const role = message.senderRole ?? memberByKey.get(memberKey(message.from))?.roles?.[0];
     return (
       <li
         key={message.id}
@@ -143,13 +162,14 @@ export function RoomBubbles({
           {!mine ? (
             <span className="chat-msg__meta">
               <strong>{label}</strong>
+              {role ? <em className="chat-msg__role">{role}</em> : null}
               <em className="chat-msg__kind">{memberKindLabels[message.from.kind]}</em>
               {typeLabel ? <em className="chat-msg__type">{typeLabel}</em> : null}
               <small>{new Date(message.createdAt).toLocaleTimeString()}</small>
             </span>
           ) : null}
           <div className="bubble" title={mine ? new Date(message.createdAt).toLocaleTimeString() : undefined}>
-            <p>{message.summary}</p>
+            <p>{renderSummary(message.summary)}</p>
           </div>
         </div>
       </li>

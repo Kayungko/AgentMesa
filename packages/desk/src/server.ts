@@ -622,6 +622,9 @@ export class DeskServer {
         from?: unknown;
         summary?: unknown;
         type?: unknown;
+        mentions?: unknown;
+        senderRole?: unknown;
+        origin?: unknown;
       };
       const store = createRoomStore();
       const message = store.sendMessage(roomMessageMatch[1]!, {
@@ -629,6 +632,12 @@ export class DeskServer {
         from: body.from,
         summary: body.summary,
         ...(typeof body.type === 'string' ? { type: body.type } : {}),
+        // M2 协作语义字段透传（core 的 SendRoomMessageInputSchema 已支持）。
+        ...(Array.isArray(body.mentions) && body.mentions.every((m) => typeof m === 'string')
+          ? { mentions: body.mentions as string[] }
+          : {}),
+        ...(typeof body.senderRole === 'string' ? { senderRole: body.senderRole } : {}),
+        ...(body.origin === 'human' || body.origin === 'agent' ? { origin: body.origin } : {}),
       });
       this.sendJson(res, message, 201);
       return;

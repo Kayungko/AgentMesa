@@ -103,6 +103,55 @@ describe('DeskServer rooms', () => {
     expect(body.members).toHaveLength(1);
   });
 
+  it('forwards M2 semantics fields (mentions / senderRole / origin) on messages', async () => {
+    const base = await startServer();
+    const room = (await (await fetch(`${base}/api/rooms`, {
+      method: 'POST',
+      headers: auth,
+      body: JSON.stringify({ name: 'M2 语义群' }),
+    })).json()) as { id: string };
+    await fetch(`${base}/api/rooms/${room.id}/members`, {
+      method: 'POST',
+      headers: auth,
+      body: JSON.stringify({ workspaceId: 'ws_1', kind: 'human', ref: 'user', label: '我' }),
+    });
+
+    const msg = await fetch(`${base}/api/rooms/${room.id}/messages`, {
+      method: 'POST',
+      headers: auth,
+      body: JSON.stringify({
+        workspaceId: 'ws_1',
+        from: { workspaceId: 'ws_1', kind: 'human', ref: 'user', label: '我' },
+        summary: '@Claude 看下这个方案',
+        mentions: ['claude'],
+        senderRole: 'owner',
+        origin: 'human',
+      }),
+    });
+    expect(msg.status).toBe(201);
+    const sent = (await msg.json()) as { mentions?: string[]; senderRole?: string; origin?: string };
+    expect(sent.mentions).toEqual(['claude']);
+    expect(sent.senderRole).toBe('owner');
+    expect(sent.origin).toBe('human');
+
+    // 非法值（origin 非 human/agent、mentions 混入非字符串）不透传，消息仍创建成功。
+    const bad = await fetch(`${base}/api/rooms/${room.id}/messages`, {
+      method: 'POST',
+      headers: auth,
+      body: JSON.stringify({
+        workspaceId: 'ws_1',
+        from: { workspaceId: 'ws_1', kind: 'human', ref: 'user', label: '我' },
+        summary: '非法语义字段应被丢弃',
+        origin: 'robot',
+        mentions: ['ok', 42],
+      }),
+    });
+    expect(bad.status).toBe(201);
+    const dropped = (await bad.json()) as { mentions?: string[]; origin?: string };
+    expect(dropped.origin).toBeUndefined();
+    expect(dropped.mentions).toBeUndefined();
+  });
+
   it('rejects creating a room without a name', async () => {
     const base = await startServer();
     const res = await fetch(`${base}/api/rooms`, {

@@ -7,6 +7,7 @@ import { ChatHeader } from './chat-header.js';
 import { Composer } from './composer.js';
 import { RoomBubbles } from './bubbles.js';
 import { ChatEmpty, ChatLoading } from './empty.js';
+import { collectMentionRefs, mentionableMembers } from './mention.js';
 import { memberKey } from './room-grouping.js';
 
 export function RoomChat({
@@ -32,13 +33,18 @@ export function RoomChat({
   const [sendError, setSendError] = useState<string>();
   // 按成员过滤（可多选；全不选 = 不过滤）。组件内部状态，切换群聊时重置。
   const [selectedMembers, setSelectedMembers] = useState<ReadonlySet<string>>(() => new Set());
+  // @ 提及选中的成员 ref（M2 协作语义）。发送时随消息提交 mentions。
+  const [selectedMentions, setSelectedMentions] = useState<ReadonlySet<string>>(() => new Set());
   const streamRef = useRef<HTMLOListElement>(null);
 
   const messages = detail?.messages ?? [];
   const freshIds = useFreshMembers(roomId, messages.map((message) => message.id));
+  // 可 @ 的成员（排除操作者自己），供提及选择器与发送时提取使用。
+  const mentionCandidates = useMemo(() => mentionableMembers(detail?.members ?? []), [detail]);
 
   useEffect(() => {
     setSelectedMembers(new Set());
+    setSelectedMentions(new Set());
   }, [roomId]);
 
   const visibleMessages = useMemo(() => {
@@ -72,12 +78,19 @@ export function RoomChat({
       if (!detail.members.some((member) => member.kind === 'human' && member.ref === 'user')) {
         await inviteRoomMember(config, detail.id, humanMember);
       }
+      // mentions 从草稿文本提取（选择器插入与手打的 @名字 都能命中）；
+      // selectedMentions 只是选择器状态，最终以文本为准。
+      const mentions = collectMentionRefs(summary, mentionCandidates);
       await sendRoomMessage(config, detail.id, {
         workspaceId: activeWorkspaceId,
         from: humanMember,
         summary,
+        // 人类发送者是一等公民（M2）：显式声明 origin。
+        origin: 'human',
+        ...(mentions.length > 0 ? { mentions } : {}),
       });
       setDraft('');
+      setSelectedMentions(new Set());
       reload();
     } catch (reason) {
       setSendError(reason instanceof Error ? reason.message : String(reason));
@@ -128,6 +141,7 @@ export function RoomChat({
                   size="sm"
                 />
                 <span>{label}</span>
+                {member.roles?.[0] ? <em className="chip__role">{member.roles[0]}</em> : null}
               </button>
             );
           })}
@@ -147,7 +161,7 @@ export function RoomChat({
             <span>没有所选成员的消息</span>
           </li>
         ) : (
-          <RoomBubbles messages={visibleMessages} freshIds={freshIds} />
+          <RoomBubbles messages={visibleMessages} members={detail.members} freshIds={freshIds} />
         )}
       </ol>
 
@@ -158,6 +172,10 @@ export function RoomChat({
         onChange={(value) => { setDraft(value); setSendError(undefined); }}
         onSend={send}
         onStub={onStub}
+        mentionMembers={mentionCandidates}
+        onMentionPick={(member) =>
+          setSelectedMentions((prev) => new Set(prev).add(member.ref))
+        }
       />
     </section>
   );
