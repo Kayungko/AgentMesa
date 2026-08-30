@@ -203,6 +203,46 @@ describe('room service', () => {
     expect(after.map((m) => m.id)).toEqual([m2.id]);
   });
 
+  it('throws on an unrecognized cursor instead of silently returning empty', () => {
+    const store = createRoomStore();
+    const room = store.createRoom({ name: '垃圾游标群' });
+    store.invite(room.id, { workspaceId: wsA, kind: 'session', ref: 'meeting_1' });
+    store.sendMessage(room.id, {
+      workspaceId: wsA,
+      from: { workspaceId: wsA, kind: 'session', ref: 'meeting_1' },
+      summary: '第一条',
+    });
+
+    // 非 id、非 ISO 时间戳的游标必须报错——静默返回空会让调用方以为读完了，
+    // 且把游标重置到最新后永久丢失未读消息（与 listRoomEvents 策略一致）。
+    expect(() => store.listMessages(room.id, 'msg_does_not_exist')).toThrow(
+      /Unknown room message cursor/,
+    );
+  });
+
+  it('rejects a senderRole outside the agent-role enum', () => {
+    const store = createRoomStore();
+    const room = store.createRoom({ name: '角色白名单群' });
+    store.invite(room.id, { workspaceId: wsA, kind: 'session', ref: 'meeting_1' });
+
+    // 非注册角色的 senderRole 不得入库（防止伪造 reviewer/admin 徽章）。
+    expect(() => store.sendMessage(room.id, {
+      workspaceId: wsA,
+      from: { workspaceId: wsA, kind: 'session', ref: 'meeting_1' },
+      summary: '伪造角色',
+      senderRole: 'hacker',
+    })).toThrow();
+
+    // 枚举内角色正常入库。
+    const sent = store.sendMessage(room.id, {
+      workspaceId: wsA,
+      from: { workspaceId: wsA, kind: 'session', ref: 'meeting_1' },
+      summary: '合法角色',
+      senderRole: 'reviewer',
+    });
+    expect(sent.senderRole).toBe('reviewer');
+  });
+
   it('rejects a sender whose ref does not match actorRef (impersonation)', () => {
     const store = createRoomStore();
     const room = store.createRoom({ name: '防冒充群' });

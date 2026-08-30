@@ -78,6 +78,9 @@ function readMessage(storage: MesaStorageAdapter, dir: string, name: string): Ro
   }
 }
 
+/** ISO 8601 UTC 时间戳（如 2026-01-01T00:00:00.000Z），listMessages 的合法时间游标。 */
+const ISO_CURSOR_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
+
 /** 按成员三元组生成去重 key。 */
 function memberKey(member: Pick<RoomMember, 'workspaceId' | 'kind' | 'ref'>): string {
   return `${member.workspaceId}|${member.kind}|${member.ref}`;
@@ -362,13 +365,18 @@ export function createRoomStore(
       if (after === undefined) {
         return messages;
       }
-      // 首选按消息 id 游标（精确、稳定）；游标不是已知消息 id 时退化为
-      // ISO 时间比较（至少一次语义，同毫秒消息可能重复投递）。
+      // 首选按消息 id 游标（精确、稳定）；游标为 ISO 时间戳时按时间比较
+      // （至少一次语义，同毫秒消息可能重复投递）。其余游标抛错——静默
+      // 忽略会漏读（调用方拿到空结果还以为读完了），与 listRoomEvents
+      // 的"宁可报错"策略保持一致。
       const index = messages.findIndex((message) => message.id === after);
       if (index !== -1) {
         return messages.slice(index + 1);
       }
-      return messages.filter((message) => message.createdAt.localeCompare(after) > 0);
+      if (ISO_CURSOR_RE.test(after)) {
+        return messages.filter((message) => message.createdAt.localeCompare(after) > 0);
+      }
+      throw new MesaError('VALIDATION_ERROR', `Unknown room message cursor: ${after}`);
     },
 
     /**

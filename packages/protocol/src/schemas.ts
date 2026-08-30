@@ -9,7 +9,7 @@ const protocolVersionSchema = z
   .enum(['0.1.0', '0.2.0'] as const)
   .default(currentProtocolVersion);
 
-const agentRoleSchema = z.enum([
+export const agentRoleSchema = z.enum([
   'owner',
   'chair',
   'planner',
@@ -393,6 +393,8 @@ export const RoomMessageSchema = z.object({
   createdAt: z.string().min(1),
   // M1: 消息增强字段（全部可选，旧数据可解析）。
   mentions: z.array(z.string()).optional(),
+  // 存量消息保持宽松解析（入口 SendRoomMessageInputSchema 已收白名单，
+  // 收紧此处会让历史脏数据在读取时被整条静默丢弃）。
   senderRole: z.string().optional(),
   origin: z.enum(['human', 'agent']).optional(),
   body: z.string().optional(),
@@ -410,7 +412,8 @@ export const SendRoomMessageInputSchema = z.object({
   summary: z.string().min(1),
   type: z.string().optional(),
   mentions: z.array(z.string()).optional(),
-  senderRole: z.string().optional(),
+  // 角色徽章只允许注册角色枚举，防止伪造 reviewer/admin 等徽章。
+  senderRole: agentRoleSchema.optional(),
   origin: z.enum(['human', 'agent']).optional(),
   body: z.string().optional(),
   taskId: z.string().optional(),

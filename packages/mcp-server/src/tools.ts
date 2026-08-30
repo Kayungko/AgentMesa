@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { MesaRuntimeContext } from '@agentmesa/core';
+import { agentRoleSchema } from '@agentmesa/protocol';
 import {
   createTask,
   createRuntimeContext,
@@ -164,7 +165,7 @@ export const sendRoomMessageInputSchema = {
   summary: z.string().min(1),
   type: z.string().optional(),
   mentions: z.array(z.string()).optional(),
-  senderRole: z.string().optional(),
+  senderRole: agentRoleSchema.optional(),
   origin: z.enum(['human', 'agent']).optional(),
   body: z.string().optional(),
   taskId: z.string().optional(),
