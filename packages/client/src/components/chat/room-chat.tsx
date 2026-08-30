@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { inviteRoomMember, sendRoomMessage } from '../../api.js';
 import type { RoomDetail, RuntimeConfig } from '../../types.js';
+import { Avatar } from '../ui/avatar.js';
 import { useFreshMembers } from '../ui/use-fresh-members.js';
 import { ChatHeader } from './chat-header.js';
 import { Composer } from './composer.js';
 import { RoomBubbles } from './bubbles.js';
 import { ChatEmpty, ChatLoading } from './empty.js';
+import { memberKey } from './room-grouping.js';
 
 export function RoomChat({
   config,
@@ -28,10 +30,30 @@ export function RoomChat({
 }) {
   const [draft, setDraft] = useState('');
   const [sendError, setSendError] = useState<string>();
+  // 按成员过滤（可多选；全不选 = 不过滤）。组件内部状态，切换群聊时重置。
+  const [selectedMembers, setSelectedMembers] = useState<ReadonlySet<string>>(() => new Set());
   const streamRef = useRef<HTMLOListElement>(null);
 
   const messages = detail?.messages ?? [];
   const freshIds = useFreshMembers(roomId, messages.map((message) => message.id));
+
+  useEffect(() => {
+    setSelectedMembers(new Set());
+  }, [roomId]);
+
+  const visibleMessages = useMemo(() => {
+    if (selectedMembers.size === 0) return messages;
+    return messages.filter((message) => selectedMembers.has(memberKey(message.from)));
+  }, [messages, selectedMembers]);
+
+  const toggleMember = (key: string) => {
+    setSelectedMembers((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   useEffect(() => {
     const el = streamRef.current;
@@ -77,6 +99,41 @@ export function RoomChat({
       {detail.purpose ? <p className="chat-purpose">{detail.purpose}</p> : null}
       {sendError ? <p className="inline-error chat-send-error">{sendError}</p> : null}
 
+      {detail.members.length > 1 ? (
+        <div className="chat-filter" role="group" aria-label="按成员过滤消息">
+          <button
+            type="button"
+            className={`chip ${selectedMembers.size === 0 ? 'chip--active' : ''}`}
+            aria-pressed={selectedMembers.size === 0}
+            onClick={() => setSelectedMembers(new Set())}
+          >
+            全部
+          </button>
+          {detail.members.map((member) => {
+            const key = memberKey(member);
+            const label = member.label ?? member.ref;
+            const active = selectedMembers.has(key);
+            return (
+              <button
+                key={key}
+                type="button"
+                className={`chip ${active ? 'chip--active' : ''}`}
+                aria-pressed={active}
+                onClick={() => toggleMember(key)}
+              >
+                <Avatar
+                  name={label}
+                  agentId={`${member.workspaceId}:${member.ref}`}
+                  kind={member.kind === 'human' ? 'human' : 'agent'}
+                  size="sm"
+                />
+                <span>{label}</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+
       <ol className="chat-stream" ref={streamRef}>
         {typeof detail.totalMessages === 'number' && detail.totalMessages > detail.messages.length ? (
           <li className="chat-system">
@@ -85,8 +142,12 @@ export function RoomChat({
         ) : null}
         {messages.length === 0 ? (
           <ChatEmpty title="还没有消息" detail="把不同项目的会话/Agent 拉进群，开始跨项目协作。" />
+        ) : visibleMessages.length === 0 ? (
+          <li className="chat-system">
+            <span>没有所选成员的消息</span>
+          </li>
         ) : (
-          <RoomBubbles messages={messages} freshIds={freshIds} />
+          <RoomBubbles messages={visibleMessages} freshIds={freshIds} />
         )}
       </ol>
 

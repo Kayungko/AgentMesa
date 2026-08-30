@@ -1,9 +1,10 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { MesaAgent, MesaMessage, RoomMessage } from '@agentmesa/protocol';
 import { Avatar } from '../ui/avatar.js';
 import { memberKindLabels } from '../ui/format.js';
 import { DayDivider, dayLabel } from './divider.js';
+import { agentRunSummary, groupRoomMessages, SYSTEM_MESSAGE_TYPES } from './room-grouping.js';
 
 export const typeLabels: Record<string, string> = {
   task_created: '创建了任务',
@@ -98,19 +99,34 @@ export function RoomBubbles({
   messages: RoomMessage[];
   freshIds: Set<string>;
 }) {
-  const items: ReactNode[] = [];
-  let lastDay = '';
-  for (const message of messages) {
-    const day = dayLabel(message.createdAt);
-    if (day !== lastDay) {
-      items.push(<DayDivider key={`day-${message.id}`} label={day} />);
-      lastDay = day;
-    }
+  // 折叠状态组件内部维护，不持久化（roomId 切换时组件随 ChatLoading 重挂载自然重置）。
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const items = useMemo(() => groupRoomMessages(messages), [messages]);
+
+  const toggle = (key: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  // 系统类消息走居中的 system 时间线样式（与 MeetingBubbles 的系统行一致）。
+  const renderSystemLine = (message: RoomMessage) => (
+    <li key={message.id} className={`chat-system ${freshIds.has(message.id) ? 'msg-enter' : ''}`}>
+      <span>{message.type !== 'general' ? `${typeLabels[message.type] ?? message.type} · ` : ''}{message.summary}</span>
+      <small>{new Date(message.createdAt).toLocaleTimeString()}</small>
+    </li>
+  );
+
+  const renderMessage = (message: RoomMessage): ReactNode => {
+    if (SYSTEM_MESSAGE_TYPES.has(message.type)) return renderSystemLine(message);
     // The human operator speaks as themselves (auto-joined as kind 'human').
     const mine = message.from.kind === 'human' && message.from.ref === 'user';
     const label = message.from.label ?? message.from.ref;
     const typeLabel = message.type !== 'general' ? typeLabels[message.type] ?? message.type : undefined;
-    items.push(
+    return (
       <li
         key={message.id}
         className={`chat-msg ${mine ? 'chat-msg--own' : ''} ${freshIds.has(message.id) ? 'msg-enter' : ''}`}
@@ -136,8 +152,45 @@ export function RoomBubbles({
             <p>{message.summary}</p>
           </div>
         </div>
-      </li>,
+      </li>
     );
+  };
+
+  // 可折叠块（agent 互答 / 系统事件）：header 一行摘要 + 展开后的原始消息。
+  const renderFold = (item: { messages: RoomMessage[] } & ({ kind: 'agent-run' } | { kind: 'system-events' })) => {
+    const key = item.messages[0]!.id;
+    const open = expanded.has(key);
+    const summary = item.kind === 'agent-run'
+      ? agentRunSummary(item.messages)
+      : `${item.messages.length} 条系统事件`;
+    return (
+      <li key={`fold-${key}`} className={`fold ${item.kind === 'system-events' ? 'fold--system' : ''}`}>
+        <button type="button" className="fold__toggle" aria-expanded={open} onClick={() => toggle(key)}>
+          <span className="fold__summary">{summary}</span>
+          <small className="fold__action">{open ? '收起' : '展开'}</small>
+        </button>
+        {open ? (
+          <ul className="fold__body">
+            {item.messages.map((message) =>
+              item.kind === 'system-events' ? renderSystemLine(message) : renderMessage(message),
+            )}
+          </ul>
+        ) : null}
+      </li>
+    );
+  };
+
+  const nodes: ReactNode[] = [];
+  let lastDay = '';
+  for (const item of items) {
+    const first = item.kind === 'single' ? item.message : item.messages[0]!;
+    const day = dayLabel(first.createdAt);
+    if (day !== lastDay) {
+      nodes.push(<DayDivider key={`day-${first.id}`} label={day} />);
+      lastDay = day;
+    }
+    if (item.kind === 'single') nodes.push(renderMessage(item.message));
+    else nodes.push(renderFold(item));
   }
-  return <>{items}</>;
+  return <>{nodes}</>;
 }
