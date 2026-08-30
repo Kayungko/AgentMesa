@@ -228,6 +228,19 @@ describe('http server transport', () => {
     expect(envelope.error.message).toContain('Task not found');
   });
 
+  it('maps an invalid actor-roles header to HTTP 400, not an internal error', async () => {
+    server = await startHttpServer(testDir, { port: 0 });
+
+    const res = await post(server.url, initializeRequest(1), {
+      [ACTOR_ROLES_HEADER]: 'builder,not-a-role',
+    });
+    expect(res.status).toBe(400);
+    expect(res.json?.error?.code).toBe(-32602);
+    expect(res.json?.error?.message).toContain('Unknown agent role');
+    // The rejected connection must not leave a session behind.
+    expect(server.sessionCount).toBe(0);
+  });
+
   it('rejects requests for unknown sessions and non-initialize POSTs without a session', async () => {
     server = await startHttpServer(testDir, { port: 0 });
 

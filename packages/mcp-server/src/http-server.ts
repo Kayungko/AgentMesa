@@ -244,10 +244,20 @@ export async function startHttpServer(
       // New connection: an initialize request without a session id mints a
       // session and binds the connection's actor for its whole lifetime.
       if (isInitializeMessage(body) && sessionHeader === undefined) {
-        const { session, sessionId } = createSession(req);
-        await session.server.connect(session.transport);
-        sessions.set(sessionId, session);
-        await session.transport.handleRequest(req, res, body);
+        try {
+          const { session, sessionId } = createSession(req);
+          await session.server.connect(session.transport);
+          sessions.set(sessionId, session);
+          await session.transport.handleRequest(req, res, body);
+        } catch (error) {
+          // A rejected actor header (unknown role, malformed id) is the
+          // client's mistake — surface it as a 400, not an internal error.
+          if (error instanceof MesaError) {
+            jsonRpcError(res, 400, -32602, error.message);
+            return;
+          }
+          throw error;
+        }
         return;
       }
 
