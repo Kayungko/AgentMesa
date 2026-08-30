@@ -344,6 +344,8 @@ interface PendingRequest {
  */
 export class JsonRpcConnection {
   private readonly child: ChildProcess;
+  /** True when spawned through a cmd.exe shim (bare .cmd names on Windows). */
+  private spawnedViaShell = false;
   /** Hook object is shared by reference: the driver rebinds its fields once the session exists. */
   private readonly hooks: JsonRpcConnectionHooks;
   private readonly pending = new Map<number, PendingRequest>();
@@ -375,6 +377,9 @@ export class JsonRpcConnection {
       windowsHide: true,
       ...(useShell ? { shell: true } : {}),
     });
+    // Remember the shell-shim path: killing must then take the whole process
+    // tree, or the real server process (a grandchild of cmd.exe) is orphaned.
+    this.spawnedViaShell = useShell;
     this.requestTimeoutMs = options.requestTimeoutMs ?? 30_000;
 
     this.child.once('error', (err) => this.handleFatal(new Error(`codex app-server spawn failed: ${err.message}`)));
@@ -467,18 +472,10 @@ export class JsonRpcConnection {
     }
     const exited = await this.waitForExit(graceMs);
     if (!exited) {
-      try {
-        this.child.kill('SIGTERM');
-      } catch {
-        // Already gone.
-      }
+      this.killChild();
       const termOk = await this.waitForExit(2000);
       if (!termOk) {
-        try {
-          this.child.kill('SIGKILL');
-        } catch {
-          // Already gone.
-        }
+        this.killChild();
         await this.waitForExit(2000);
       }
     }
@@ -561,13 +558,32 @@ export class JsonRpcConnection {
     this.fatalFired = true;
     this.failPending(error);
     if (!this.closed) {
-      try {
-        this.child.kill('SIGTERM');
-      } catch {
-        // Already gone.
-      }
+      this.killChild();
     }
     this.hooks.onFatal(error);
+  }
+
+  /**
+   * Kill the spawned child. Under the Windows shell-shim path the direct
+   * child is cmd.exe wrapping the real server process; a plain kill() would
+   * orphan the grandchild — a stray `codex app-server` keeps competing for
+   * ~/.codex locks (models cache, sessions dir) and leaves every later spawn
+   * wedgier (observed live: repeated `thread/start` timeouts). `taskkill /T`
+   * takes down the whole tree.
+   */
+  private killChild(): void {
+    try {
+      if (process.platform === 'win32' && this.spawnedViaShell && this.child.pid) {
+        spawn('taskkill', ['/pid', String(this.child.pid), '/T', '/F'], {
+          stdio: 'ignore',
+          windowsHide: true,
+        });
+      } else {
+        this.child.kill('SIGTERM');
+      }
+    } catch {
+      // Already gone.
+    }
   }
 
   private failPending(error: Error): void {

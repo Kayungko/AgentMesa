@@ -268,11 +268,26 @@ type DriverPermissionResponder =
   `mesa_exec_run`, orchestrator `run_agent` steps) assemble the responder via
   `attachPermissionResponder`, evaluating gated actions under the run's agent
   identity (the agent's registered roles), not the calling actor.
-- **Human approval gate not yet configured anywhere.** The bridge supports an
-  `askHuman` callback for "allowed but requires approval" operations; no call
-  site passes one today, so such operations are denied with
-  `approval.required … no human approval gate is configured` — still
-  fail-closed. Wiring the gate over Desk is future work.
+- **Human approval gate (`askHuman`)** — wired as of Phase 2 (2026-08-30):
+  - Desk session runs pass `createDeskAskHuman(...)` backed by
+    `PermissionApprovalQueue` (`packages/desk/src/permission-approvals.ts`) —
+    pending approvals surface in the client Approvals view
+    (`GET /api/permissions/pending`, `POST /api/permissions/:id/decide`),
+    300s auto-deny timeout. With the session speech guard active this never
+    fires (mutative actions are denied before the approval gate); the wiring
+    is ready for when the guard is relaxed per role/config.
+  - CLI `mesa runs exec` asks in the terminal (`y/N`); non-interactive stdin
+    denies (fail-closed, same as having no gate).
+  - MCP task runs still pass no gate — the MCP caller is an agent with no
+    human waiting; approval-required operations deny fail-closed.
+- **Session speech guard (`speechGuard: true`)** — both session-run call sites
+  (MCP `mesa_activate_session_agent`, Desk invite) enable it: meeting-speech
+  turns are read-only for every role (owner included). Patches deny
+  (`speech.patch_denied`); commands narrow to a readonly allowlist
+  (`SPEECH_READONLY_COMMANDS`); tools mapping to `modify_source` /
+  `push_code` / `merge_pr` / `run_command` deny (`speech.tool_denied`).
+  State changes go through task → run → approval (COLLAB_VISION routing
+  rule 1, extended to the tool layer).
 
 ## Implementation Status
 
@@ -287,4 +302,33 @@ type DriverPermissionResponder =
 | Permission bridging (`drivers/permission-bridge.ts`) | **Done.** Policy-engine responder (`createPolicyPermissionResponder` / `attachPermissionResponder`) wired at all three `executeRun` call sites. The `askHuman` human approval gate is not configured at any call site yet — approval-required operations fail closed. |
 | Real driver assembly (`drivers/index.ts`) | **Done.** `createDefaultDriverRegistry()` builds the real Claude SDK + Codex app-server drivers. |
 | Env switch + call-site wiring (`drivers/env.ts`) | **Done.** `AGENTMESA_DRIVER` gates the registry at the MCP server / orchestrator / CLI call sites; `cli` disables deep drivers. |
-| Session-run deep-driver opt-in (`AGENTMESA_SESSION_DRIVER`) | **In progress** (parallel work; this section documents the frozen contract). `resolveSessionDriverPreference` / `shouldUseSessionDriver`, default `cli`, Phase 1 claude-family only. |
+| Session-run deep-driver opt-in (`AGENTMESA_SESSION_DRIVER`) | **Done.** Default `cli`; `auto` claude-family only; explicit kinds full; unregistered agent ids fall back to CLI. Speech guard on; Desk askHuman bridge wired. |
+| Speech guard (`permission-bridge.ts`) | **Done.** `speechGuard` option: read-only meeting-speech turns for every role. |
+| askHuman bridges | **Done.** Desk `PermissionApprovalQueue` + client approval cards; CLI terminal gate on `mesa runs exec`. |
+
+## Live codex integration notes (2026-08-30, codex-cli 0.131.0 on Windows)
+
+Verified against a real `codex app-server` binary:
+
+- **Wire protocol compatible.** `initialize` / `initialized` /
+  `thread/start` (with `approvalPolicy: 'on-request'`) / `thread/started` all
+  round-trip in the shapes the driver expects; the real `thread/start`
+  response echoes `approvalPolicy: "on-request"`, `approvalsReviewer: "user"`,
+  sandbox info, and a UUID thread id. Full handshake completed successfully
+  through the driver twice (session created, handle persisted, clean close).
+- **`thread/start` intermittently wedges on this machine.** The dev box runs
+  two resident IDE `codex app-server` instances plus 8+ configured MCP
+  servers (some failing: missing `GITHUB_PAT_TOKEN`, a broken
+  `models_cache.json` carrying post-0.131.0 `max` effort values). Under that
+  load the driver's `thread/start` frequently times out (even at 180s), while
+  a hand-rolled byte-identical client succeeds within ~5s in the same
+  minute — reproduced side-by-side. Every variable was bisected (spawn form,
+  `env`, readline, wire bytes, timing, locks, cache, process-tree kills,
+  cooldown): none reproduces it. Root cause is open — likely below the JS
+  layer (node/libuv/cmd shim interaction). Mock-based tests stay green; a
+  clean environment (no resident instances, fewer MCP servers) is expected
+  to behave.
+- **Windows orphan fix.** Killing the cmd.exe shim leaves the real
+  `codex.exe` grandchild orphaned; each stray app-server competes for
+  `~/.codex` state. The connection now kills the whole tree
+  (`taskkill /pid <pid> /T /F`) on the shell-shim path.
