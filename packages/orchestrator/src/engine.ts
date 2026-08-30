@@ -7,11 +7,17 @@ import {
   getTask,
   updateTaskStatus,
   createAgentRun,
+  getAgent,
+  type MesaActor,
   type MesaRuntimeContext,
   type MesaWorkspacePaths,
 } from '@agentmesa/core';
 import { canTransitionTaskStatus, type RunAction, type WorkflowDecisionCommand } from '@agentmesa/protocol';
-import { executeRun } from '@agentmesa/runner';
+import {
+  executeRun,
+  resolveDriverRegistryFromEnv,
+  attachPermissionResponder,
+} from '@agentmesa/runner';
 import type {
   WorkflowDefinition,
   WorkflowState,
@@ -145,6 +151,16 @@ export class WorkflowEngine {
     this.completeStep(exec, step.onSuccess, state);
   }
 
+  /** Actor identity for a run's gated (deep-driver) actions: the run's agent and its roles; falls back to the engine context actor. */
+  private runAgentActor(agentId: string): MesaActor {
+    try {
+      const agent = getAgent(this.ctx, agentId);
+      return { id: agentId, type: 'agent', roles: agent.roles, client: agent.client };
+    } catch {
+      return this.ctx.actor;
+    }
+  }
+
   private async runAgentStep(
     state: WorkflowState,
     step: WorkflowStep,
@@ -160,7 +176,16 @@ export class WorkflowEngine {
 
     let succeeded: boolean;
     try {
-      const { run: final } = await executeRun(this.ctx, run.id, {});
+      const { run: final } = await executeRun(this.ctx, run.id, attachPermissionResponder({
+        // Deep drivers are enabled via the AGENTMESA_DRIVER env switch
+        // (unset/auto → registry with CLI fallback; cli → empty registry).
+        // Workflow definitions gain no new fields — the env is the only source.
+        driverRegistry: resolveDriverRegistryFromEnv(),
+      }, {
+        ctx: this.ctx,
+        // Gated actions are judged under the run's agent identity.
+        actor: this.runAgentActor(run.agentId),
+      }));
       succeeded = final.status === 'completed';
       exec.result = { runId: final.id, status: final.status };
       if (!succeeded) {

@@ -86,6 +86,31 @@ env value).
 
 Dry runs always take the CLI path (they execute nothing by design).
 
+## Enabling (call-site wiring)
+
+`AGENTMESA_DRIVER` is the single switch that turns deep drivers on at the
+`executeRun` call sites — the MCP server (`mesa_exec_run`), orchestrator
+workflow `run_agent` steps, and the CLI (`mesa runs exec`). All three build
+their registry through `resolveDriverRegistryFromEnv()`
+(`packages/runner/src/drivers/env.ts`):
+
+| `AGENTMESA_DRIVER` | Registry handed to `executeRun` | Effect |
+|---|---|---|
+| unset / `auto` / unknown value | `createDefaultDriverRegistry()` (fresh instances) | Per-run selection by the agent's `client` (above). Unmapped client, missing or unavailable driver → CLI fallback, so default-on is behavior-preserving. |
+| `cli` | `[]` (empty) | Deep drivers explicitly off — legacy CLI runners only. |
+| `claude-agent-sdk` / `codex-app-server` | `createDefaultDriverRegistry()` | The executor resolves the same env var and targets that specific driver (client field ignored); unavailable → CLI fallback. |
+
+Notes:
+
+- Call sites never hardcode a `driverPreference` — the env var is the single
+  source, so the switch semantics stay identical everywhere.
+- The MCP tool schema is unchanged (the switch is environmental, not a tool
+  argument), and workflow definitions gain no new fields.
+- Every call constructs fresh driver instances: drivers own child processes /
+  SDK handles, so a registry is never shared across executors.
+- Permission bridging is still deny-all at these call sites until the policy
+  responder is wired in (see below) — deep-driver turns fail closed.
+
 ## Run-Executor Integration
 
 `executeRun` (packages/runner/src/run-executor.ts) keeps the run state machine
@@ -173,4 +198,5 @@ type DriverPermissionResponder =
 | run-executor integration | **Done.** Driver turn path, event→progress mapping, timeout/interrupt, artifact persistence; CLI path byte-identical. |
 | Handle persistence + resume | **Done.** Sidecar store under `.agentmesa/driver-sessions/`, per agent+scope resume, resume-failure fallback. |
 | Permission bridging | **Injection point done** (deny-all default). Policy-engine / human-approval bridge is future work. |
-| Real driver assembly (`drivers/index.ts`) | **Pending** — owner session wires the concrete drivers from the parallel backend work. |
+| Real driver assembly (`drivers/index.ts`) | **Done.** `createDefaultDriverRegistry()` builds the real Claude SDK + Codex app-server drivers. |
+| Env switch + call-site wiring (`drivers/env.ts`) | **Done.** `AGENTMESA_DRIVER` gates the registry at the MCP server / orchestrator / CLI call sites; `cli` disables deep drivers. The permission responder at the call sites is pending the policy bridge. |

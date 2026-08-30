@@ -44,7 +44,13 @@ import {
   REMOTE_WORKSPACE_ID,
 } from '@agentmesa/core';
 import { toolError, invalidValueError } from './tool-errors.js';
-import { executeRun, activateSessionAgent } from '@agentmesa/runner';
+import {
+  executeRun,
+  activateSessionAgent,
+  resolveDriverRegistryFromEnv,
+  attachPermissionResponder,
+} from '@agentmesa/runner';
+import type { MesaActor } from '@agentmesa/core';
 import {
   WorkflowEngine,
   getWorkflowDefinition,
@@ -1001,6 +1007,26 @@ export function handleUpdateRunStatus(
   return JSON.stringify(run);
 }
 
+/**
+ * Resolve the actor identity under which a run's gated (deep-driver) actions
+ * are judged: the run's registered agent and its roles. Falls back to the
+ * connection actor when the agent is not registered (fail-closed either way —
+ * the policy bridge denies everything without roles).
+ */
+function runAgentActor(ctx: MesaRuntimeContext, agentId: string): MesaActor {
+  try {
+    const agent = getAgent(ctx, agentId);
+    return {
+      id: agentId,
+      type: 'agent',
+      roles: agent.roles,
+      client: agent.client,
+    };
+  } catch {
+    return ctx.actor;
+  }
+}
+
 export async function handleExecRun(
   ctx: MesaRuntimeContext,
   args: { runId: string; dryRun?: boolean; createArtifacts?: boolean; timeout?: number }
@@ -1015,11 +1041,20 @@ export async function handleExecRun(
       'Create a new run with mesa_create_run, or inspect this one with mesa_read_run.',
     );
   }
-  const result = await executeRun(ctx, args.runId, {
+  const result = await executeRun(ctx, args.runId, attachPermissionResponder({
     dryRun: args.dryRun,
     createArtifacts: args.createArtifacts,
     timeout: args.timeout,
-  });
+    // Deep drivers are enabled via the AGENTMESA_DRIVER env switch (unset/auto
+    // → registry with CLI fallback; cli → empty registry). The MCP tool schema
+    // stays stable — the switch is environmental, not a tool argument.
+    driverRegistry: resolveDriverRegistryFromEnv(),
+  }, {
+    ctx,
+    // The gated actions run under the *run's* agent identity, not the MCP
+    // connection's actor — the deep driver works for that agent.
+    actor: runAgentActor(ctx, run.agentId),
+  }));
   return JSON.stringify(result);
 }
 

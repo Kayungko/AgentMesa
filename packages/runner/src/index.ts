@@ -82,3 +82,18 @@ export type {
   DriverTurnParams,
 } from './run-executor.js';
 
+export { resolveDriverRegistryFromEnv } from './drivers/env.js';
+export type { DriverEnvSource } from './drivers/env.js';
+
+export {
+  attachPermissionResponder,
+  createPolicyPermissionResponder,
+  DEFAULT_COMMAND_ALLOWLIST,
+} from './drivers/permission-bridge.js';
+export type {
+  AttachPermissionResponderOptions,
+  PermissionDecisionRecord,
+  PolicyPermissionResponderOptions,
+  ToolPolicyMap,
+} from './drivers/permission-bridge.js';
+

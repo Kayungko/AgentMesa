@@ -14,6 +14,17 @@ mesa agent add codex "Codex" reviewer         # Register an agent in the registr
 mesa agent list
 ```
 
+### Agent runs
+
+```bash
+mesa runs create "Implement feature"          # Create a pending agent run
+mesa runs exec <runId> [--dry-run]            # Execute a pending run
+```
+
+`mesa runs exec` honors the `AGENTMESA_DRIVER` environment switch: unset/`auto`
+enables deep drivers with a safe CLI fallback, `cli` keeps the legacy CLI
+runners (see `docs/DRIVERS.md`).
+
 ### Inspection
 
 ```bash

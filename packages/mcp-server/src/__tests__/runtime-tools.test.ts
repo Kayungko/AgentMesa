@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createRuntimeContext, initWorkspace, createTask } from '@agentmesa/core';
+import { createRuntimeContext, initWorkspace, createTask, registerAgent } from '@agentmesa/core';
 import type { MesaRuntimeContext } from '@agentmesa/core';
 import type { MesaAgentRun, TransportEnvelope, MesaEvent, MesaCheckResult, MesaArtifact } from '@agentmesa/protocol';
 import {
@@ -109,6 +109,34 @@ describe('agent run tools', () => {
     );
     expect(result.run.status).toBe('completed');
     expect(result.run.producedArtifactIds.length).toBeGreaterThan(0);
+  });
+
+  it('keeps the CLI path when AGENTMESA_DRIVER=cli, even for a claude-client agent', async () => {
+    // `cli` explicitly disables deep drivers: the call site passes an empty
+    // registry, so even a registered claude-code agent runs on the legacy
+    // (stub) CLI runner — byte-for-byte the pre-M4 behavior.
+    const prevDriverEnv = process.env.AGENTMESA_DRIVER;
+    process.env.AGENTMESA_DRIVER = 'cli';
+    try {
+      registerAgent(ctx, {
+        id: 'agent:claude',
+        name: 'Claude',
+        client: 'claude-code',
+        status: 'available',
+        roles: ['builder'],
+      });
+      const run = parse<MesaAgentRun>(
+        handleCreateRun(ctx, { agentId: 'agent:claude', input: 'Implement X', taskId })
+      );
+      const result = parse<{ run: MesaAgentRun }>(
+        await handleExecRun(ctx, { runId: run.id })
+      );
+      expect(result.run.status).toBe('completed');
+      expect(result.run.producedArtifactIds.length).toBeGreaterThan(0);
+    } finally {
+      if (prevDriverEnv === undefined) delete process.env.AGENTMESA_DRIVER;
+      else process.env.AGENTMESA_DRIVER = prevDriverEnv;
+    }
   });
 });
 

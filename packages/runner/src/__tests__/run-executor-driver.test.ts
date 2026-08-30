@@ -14,6 +14,7 @@ import {
 } from '@agentmesa/core';
 import type { MesaRuntimeContext } from '@agentmesa/core';
 import { executeDriverTurn, executeRun } from '../run-executor.js';
+import { attachPermissionResponder } from '../drivers/permission-bridge.js';
 import type {
   AgentDriver,
   AgentDriverSession,
@@ -558,5 +559,107 @@ describe('executeDriverTurn (direct export)', () => {
 
     const after = getAgentRun(ctx, run.id);
     expect(after.status).toBe('pending'); // direct calls do not touch the run state machine
+  });
+});
+
+describe('executeRun permission bridge integration', () => {
+  it('judges gated actions through the policy bridge instead of deny-all', async () => {
+    // DEFAULT_EVENTS yields a tool-kind permission_request with an empty
+    // detail; the real SDK driver carries the tool name — mirror that here.
+    const events: EventFactory = (session, prompt) => [
+      { type: 'text', text: 'Working on it.' },
+      {
+        type: 'permission_request',
+        request: {
+          requestId: 'perm-1',
+          kind: 'tool',
+          title: 'bash: ls -la',
+          detail: { toolName: 'bash', input: { command: 'ls -la' } },
+        },
+      },
+      { type: 'text', text: 'Done: implemented the feature.' },
+      { type: 'turn_complete', success: true, summary: 'Implemented the feature' },
+    ];
+    const driver = new FakeAgentDriver('claude-agent-sdk', events);
+    const decisions: Array<{ kind: string; decision: string; rule: string }> = [];
+    const task = createTask(ctx, { title: 'Bridge test', createdBy: 'user:test' });
+    const run = createAgentRun(ctx, {
+      agentId: 'agent:claude',
+      input: 'Implement X',
+      taskId: task.id,
+      action: 'implement',
+    });
+
+    const { run: final } = await executeRun(ctx, run.id, attachPermissionResponder(
+      { driverRegistry: [driver] },
+      {
+        ctx,
+        // agent:claude is registered with roles: ['builder'] — the bridge
+        // must resolve its identity from the run's agent, judging `bash`
+        // (mapped to run_command) under builder capabilities.
+        actor: {
+          id: 'agent:claude',
+          type: 'agent',
+          roles: ['builder'],
+          client: 'claude-code',
+        },
+        onDecision: (record) => {
+          decisions.push({ kind: record.kind, decision: record.decision, rule: record.rule });
+        },
+      },
+    ));
+
+    expect(final.status).toBe('completed');
+    // The permission_request from DEFAULT_EVENTS (bash tool) went through the
+    // bridge: a decision was recorded and the turn was allowed to complete.
+    expect(decisions.length).toBeGreaterThan(0);
+    expect(decisions.every((d) => d.decision === 'allow' || d.decision === 'deny')).toBe(true);
+    // run_command is within builder capabilities → allow.
+    expect(decisions[0]).toMatchObject({ decision: 'allow', kind: 'tool' });
+  });
+
+  it('denies gated commands for actors without run_command capability', async () => {
+    const driver = new FakeAgentDriver('claude-agent-sdk', () => [
+      { type: 'text', text: 'Trying something' },
+      {
+        type: 'permission_request',
+        request: {
+          requestId: 'perm-1',
+          kind: 'command',
+          title: 'bash: git push origin main',
+          detail: { command: 'git push origin main' },
+        },
+      },
+      { type: 'turn_complete', success: true, summary: 'done' },
+    ]);
+    const decisions: Array<{ decision: string; rule: string }> = [];
+    const task = createTask(ctx, { title: 'Deny test', createdBy: 'user:test' });
+    const run = createAgentRun(ctx, {
+      agentId: 'agent:claude',
+      input: 'Push it',
+      taskId: task.id,
+      action: 'implement',
+    });
+
+    const { run: final } = await executeRun(ctx, run.id, attachPermissionResponder(
+      { driverRegistry: [driver] },
+      {
+        ctx,
+        // documenter lacks run_command → the git push command must be denied.
+        actor: {
+          id: 'agent:doc',
+          type: 'agent',
+          roles: ['documenter'],
+          client: 'claude-code',
+        },
+        onDecision: (record) => {
+          decisions.push({ decision: record.decision, rule: record.rule });
+        },
+      },
+    ));
+
+    expect(decisions.length).toBe(1);
+    expect(decisions[0]).toMatchObject({ decision: 'deny' });
+    expect(final.status).toBe('completed');
   });
 });

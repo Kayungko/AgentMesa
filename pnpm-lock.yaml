@@ -329,6 +329,9 @@ importers:
       '@agentmesa/core':
         specifier: workspace:*
         version: link:../core
+      '@agentmesa/policy':
+        specifier: workspace:*
+        version: link:../policy
       '@agentmesa/protocol':
         specifier: workspace:*
         version: link:../protocol

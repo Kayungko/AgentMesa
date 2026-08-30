@@ -3,9 +3,15 @@ import {
   createAgentRun,
   updateAgentRunStatus,
   getAgentRun,
+  getAgent,
   listAgentRuns,
+  type MesaActor,
 } from '@agentmesa/core';
-import { executeRun } from '@agentmesa/runner';
+import {
+  executeRun,
+  resolveDriverRegistryFromEnv,
+  attachPermissionResponder,
+} from '@agentmesa/runner';
 import type { RunStatus, RunAction } from '@agentmesa/protocol';
 import type { ParsedArgs } from '../parse-args.js';
 import { printSuccess, printError, outputResult } from '../output.js';
@@ -126,7 +132,25 @@ export async function runRuns(args: ParsedArgs): Promise<void> {
           return;
         }
         const dryRun = !!args.flags['dry-run'];
-        const { run } = await executeRun(ctx, runId, { dryRun });
+        // Gated actions are judged under the run's agent identity (its
+        // registered roles), falling back to the local owner actor.
+        let runActor: MesaActor = ctx.actor;
+        try {
+          const pendingRun = getAgentRun(ctx, runId);
+          const agent = getAgent(ctx, pendingRun.agentId);
+          runActor = { id: pendingRun.agentId, type: 'agent', roles: agent.roles, client: agent.client };
+        } catch {
+          // Unregistered agent or unknown run — executeRun surfaces the error.
+        }
+        const { run } = await executeRun(ctx, runId, attachPermissionResponder({
+          dryRun,
+          // Deep drivers are enabled via the AGENTMESA_DRIVER env switch
+          // (unset/auto → registry with CLI fallback; cli → empty registry).
+          driverRegistry: resolveDriverRegistryFromEnv(),
+        }, {
+          ctx,
+          actor: runActor,
+        }));
         outputResult(run, json, () => {
           if (run.status === 'completed') {
             printSuccess(`Run ${run.id} completed (${run.duration}ms)`);
