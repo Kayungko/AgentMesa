@@ -206,6 +206,28 @@ describe('http server transport', () => {
     expect(toolPayload(other.json).content[0]!.text).toContain('does not match actor');
   });
 
+  it('returns the what/why/fix error envelope over the wire', async () => {
+    server = await startHttpServer(testDir, { port: 0 });
+    const sessionId = await openSession(server.url);
+
+    const res = await post(
+      server.url,
+      toolCallRequest(2, 'mesa_read_task', { taskId: 'T-9999' }),
+      { 'mcp-session-id': sessionId },
+    );
+    const payload = toolPayload(res.json);
+    expect(payload.isError).toBe(true);
+    const envelope = JSON.parse(payload.content[0]!.text) as {
+      error: { tool: string; code: string; what: string; why: string; fix: string; message: string };
+    };
+    expect(envelope.error.tool).toBe('mesa_read_task');
+    expect(envelope.error.code).toBe('unknown_id');
+    expect(envelope.error.what).toContain('T-9999');
+    expect(envelope.error.why.length).toBeGreaterThan(0);
+    expect(envelope.error.fix).toContain('mesa_list_tasks');
+    expect(envelope.error.message).toContain('Task not found');
+  });
+
   it('rejects requests for unknown sessions and non-initialize POSTs without a session', async () => {
     server = await startHttpServer(testDir, { port: 0 });
 

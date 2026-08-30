@@ -36,4 +36,5 @@ export {
 } from './services/projection-read-service.js';
 export type { ReadProjectionOptions, TaskProjection, MeetingProjection, AgentProjection } from './services/projection-read-service.js';
 export * from './services/read-model-service.js';
+export * from './services/why-service.js';
 export * from './services/diagnostics.js';

@@ -35,10 +35,15 @@ import {
   createRoomStore,
   getWorkspace,
   getMeeting,
+  getAgent,
+  getArtifact,
+  explainTask,
+  explainMeeting,
   assertPolicy,
   MesaError,
   REMOTE_WORKSPACE_ID,
 } from '@agentmesa/core';
+import { toolError, invalidValueError } from './tool-errors.js';
 import { executeRun, activateSessionAgent } from '@agentmesa/runner';
 import {
   WorkflowEngine,
@@ -202,6 +207,72 @@ export const registerRemoteMemberInputSchema = {
 
 export const listAgentsInputSchema = {};
 
+// --- Closed value sets (error guidance) ---
+//
+// The protocol package does not export the individual enum schemas, so the
+// legal values are mirrored here to give failing calls actionable guidance
+// ("Use one of: …") instead of a deep Zod parse error. Keep in sync with
+// packages/protocol/src/schemas.ts.
+
+const TASK_STATUSES = [
+  'backlog', 'ready', 'todo', 'in_progress', 'in_review', 'needs_fix',
+  'approved', 'completed', 'done', 'blocked', 'failed', 'cancelled',
+  'conflict', 'needs_user_decision', 'reviewing', 'changes_requested',
+  'ready_for_review',
+] as const;
+
+const MESSAGE_TYPES = [
+  'task_created', 'handoff', 'review_request', 'review_result',
+  'fix_request', 'fix_done', 'test_result', 'decision', 'status_changed',
+  'task_assignment', 'status_update', 'review_feedback',
+  'implementation_summary', 'question', 'answer', 'general',
+] as const;
+
+const ARTIFACT_KINDS = [
+  'implementation_summary', 'review_report', 'fix_summary', 'test_result',
+  'test_results', 'git_diff', 'patch', 'decision_record', 'pr_summary',
+  'agent_run_log', 'custom',
+] as const;
+
+const ARTIFACT_FORMATS = ['markdown', 'json', 'diff', 'text'] as const;
+
+const REVIEW_VERDICTS = ['approved', 'changes_requested', 'rejected'] as const;
+
+const RUN_ACTIONS = [
+  'implement', 'review', 'fix', 'test', 'document', 'plan', 'custom',
+] as const;
+
+const RUN_STATUSES = ['pending', 'running', 'completed', 'failed', 'cancelled'] as const;
+
+const CHECK_KINDS = ['test', 'lint', 'typecheck', 'security', 'custom'] as const;
+
+const CHECK_STATUSES = ['passed', 'failed', 'error', 'skipped'] as const;
+
+const EVENT_TYPES = [
+  'task_created', 'task_status_changed', 'task_assigned', 'task_deleted',
+  'task_archived', 'meeting_created', 'meeting_status_changed',
+  'meeting_task_added', 'meeting_agent_added', 'meeting_agent_removed',
+  'agent_joined', 'agent_left', 'agent_registered', 'message_sent',
+  'artifact_created', 'decision_made', 'agent_run_created',
+  'agent_run_status_changed', 'agent_run_progress', 'agent_run_completed',
+  'agent_run_failed', 'agent_run_cancelled', 'workflow_waiting_approval',
+  'workflow_approved', 'workflow_rejected', 'check_completed',
+  'thread_created', 'thread_resolved',
+] as const;
+
+const AGENT_ROLE_VALUES = agentRoleSchema.options;
+
+/**
+ * Guard for enum-cast parameters: rejects values outside the closed set with
+ * the full legal list, instead of letting them fail (or silently filter to
+ * nothing) deep inside core services.
+ */
+function assertEnumParam(param: string, value: string, allowed: readonly string[]): void {
+  if (!allowed.includes(value)) {
+    throw invalidValueError(param, value, allowed);
+  }
+}
+
 // --- Handler functions ---
 
 export function handleCreateTask(
@@ -253,6 +324,7 @@ export function handleUpdateStatus(
   ctx: MesaRuntimeContext,
   args: { taskId: string; status: string; updatedBy?: string }
 ): string {
+  assertEnumParam('status', args.status, TASK_STATUSES);
   const task = updateTaskStatus(ctx, args.taskId, args.status as TaskStatus);
   return JSON.stringify(task);
 }
@@ -268,6 +340,7 @@ export function handlePostMessage(
     artifactIds?: string[];
   }
 ): string {
+  assertEnumParam('type', args.type, MESSAGE_TYPES);
   const message = appendMessage(ctx, {
     taskId: args.taskId,
     to: args.to,
@@ -313,6 +386,7 @@ export function handleSubmitReview(
     artifactIds?: string[];
   }
 ): string {
+  assertEnumParam('verdict', args.verdict, REVIEW_VERDICTS);
   // Post a review_result message
   const message = appendMessage(ctx, {
     taskId: args.taskId,
@@ -341,6 +415,10 @@ export function handleAttachArtifact(
     metadata?: Record<string, unknown>;
   }
 ): string {
+  assertEnumParam('kind', args.kind, ARTIFACT_KINDS);
+  if (args.format !== undefined) {
+    assertEnumParam('format', args.format, ARTIFACT_FORMATS);
+  }
   const artifact = createArtifact(ctx, {
     kind: args.kind as ArtifactKind,
     taskId: args.taskId,
@@ -355,6 +433,9 @@ export function handleListArtifacts(
   ctx: MesaRuntimeContext,
   args: { taskId?: string; kind?: string }
 ): string {
+  if (args.kind !== undefined) {
+    assertEnumParam('kind', args.kind, ARTIFACT_KINDS);
+  }
   const artifacts = listArtifacts(
     ctx,
     args.taskId,
@@ -367,6 +448,11 @@ export function handleListMessages(
   ctx: MesaRuntimeContext,
   args: { taskId?: string }
 ): string {
+  // Reject unknown task ids up front: an empty result for a non-existent task
+  // is indistinguishable from "no messages yet" and silently misleads callers.
+  if (args.taskId !== undefined) {
+    getTask(ctx, args.taskId);
+  }
   const messages = args.taskId
     ? getMessagesByTask(ctx, args.taskId)
     : listMessages(ctx);
@@ -377,6 +463,14 @@ export function handleCreateMeeting(
   ctx: MesaRuntimeContext,
   args: { title: string; tasks?: string[]; agents?: string[] }
 ): string {
+  // Ghost references would be stored silently (the same failure class as
+  // ghost mentions): validate every task/agent id before creating the meeting.
+  for (const taskId of args.tasks ?? []) {
+    getTask(ctx, taskId);
+  }
+  for (const agentId of args.agents ?? []) {
+    getAgent(ctx, agentId);
+  }
   const meeting = createMeeting(ctx, {
     title: args.title,
     tasks: args.tasks,
@@ -505,7 +599,40 @@ export function handleSendRoomMessage(
   // 防冒充：fromRef 必须与 MCP actor 一致（"agent:codex" → "codex"），
   // 由 room store 的 actorRef 校验兜底拒绝。
   const actorRef = actorRefFor(ctx);
-  const message = roomStore().sendMessage(
+  const store = roomStore();
+  // Pre-check the room and the sender so failures carry the actual values and
+  // a concrete fix (the store's own checks remain as the authoritative guard).
+  const room = store.getRoom(args.roomId);
+  if (args.fromRef !== actorRef) {
+    throw toolError(
+      'permission_denied',
+      `fromRef "${args.fromRef}" does not match the connected actor "${ctx.actor.id}" — impersonation rejected.`,
+      `Speak as yourself: set fromRef to "${actorRef}" (the ref part of your actor id). You cannot post on behalf of another room member.`,
+    );
+  }
+  const fromKey = `${args.workspaceId}|${args.fromKind}|${args.fromRef}`;
+  const senderIsMember = room.members.some(
+    (member) => `${member.workspaceId}|${member.kind}|${member.ref}` === fromKey,
+  );
+  if (!senderIsMember) {
+    throw toolError(
+      'precondition_not_met',
+      `Sender (${fromKey}) is not a member of room "${args.roomId}".`,
+      `Call mesa_invite_to_room with { roomId: "${args.roomId}", workspaceId: "${args.workspaceId}", kind: "${args.fromKind}", ref: "${args.fromRef}" } first, then retry mesa_send_room_message.`,
+    );
+  }
+  if (args.mentions !== undefined && args.mentions.length > 0) {
+    const memberRefs = new Set(room.members.map((member) => member.ref));
+    const unknown = args.mentions.filter((ref) => !memberRefs.has(ref));
+    if (unknown.length > 0) {
+      throw toolError(
+        'precondition_not_met',
+        `mentions reference non-members of room "${args.roomId}": ${unknown.join(', ')}.`,
+        'Mention only refs of current members (see mesa_list_rooms). Invite missing members via mesa_invite_to_room, or drop the unknown mentions.',
+      );
+    }
+  }
+  const message = store.sendMessage(
     args.roomId,
     {
       workspaceId: args.workspaceId,
@@ -533,7 +660,11 @@ export function handleListRoomMessages(
   args: { roomId: string; after?: string },
 ): string {
   // 只读：list 免策略检查。
-  return JSON.stringify(roomStore().listMessages(args.roomId, args.after));
+  // An unknown roomId must not silently yield [] — it is indistinguishable
+  // from an empty room and hides the real problem from the caller.
+  const store = roomStore();
+  store.getRoom(args.roomId);
+  return JSON.stringify(store.listMessages(args.roomId, args.after));
 }
 
 /**
@@ -549,9 +680,10 @@ export function handlePollRooms(
   // 只读，但只能轮询自己：ref 必须与 actor 匹配（归一化或全等），防止窥探他人房间。
   const actorRef = actorRefFor(ctx);
   if (args.ref !== actorRef && args.ref !== ctx.actor.id) {
-    throw new MesaError(
-      'VALIDATION_ERROR',
+    throw toolError(
+      'permission_denied',
       `ref "${args.ref}" does not match actor "${ctx.actor.id}" — polling another member's rooms is not allowed.`,
+      `Poll your own rooms with ref "${actorRef}" (or "${ctx.actor.id}"). Use mesa_list_rooms to discover rooms and their members.`,
     );
   }
   const store = roomStore();
@@ -579,6 +711,9 @@ export function handleRegisterAgent(
   ctx: MesaRuntimeContext,
   args: { id: string; name: string; client: string; roles: string[] }
 ): string {
+  for (const role of args.roles) {
+    assertEnumParam('roles', role, AGENT_ROLE_VALUES);
+  }
   const agent = registerAgent(ctx, {
     id: args.id,
     name: args.name,
@@ -742,6 +877,16 @@ export const getMeetingProjectionInputSchema = {
   meetingId: z.string().min(1),
 };
 
+// --- Why (causal explanation) schemas ---
+
+export const whyTaskInputSchema = {
+  taskId: z.string().min(1),
+};
+
+export const whyMeetingInputSchema = {
+  meetingId: z.string().min(1),
+};
+
 // --- Check result schemas ---
 
 export const createCheckInputSchema = {
@@ -794,6 +939,17 @@ export function handleCreateRun(
     runnerType?: string;
   }
 ): string {
+  // Ghost task/meeting references would produce an orphaned run; an unknown
+  // action would fall through to a deep schema parse error.
+  if (args.taskId !== undefined) {
+    getTask(ctx, args.taskId);
+  }
+  if (args.meetingId !== undefined) {
+    getMeeting(ctx, args.meetingId);
+  }
+  if (args.action !== undefined) {
+    assertEnumParam('action', args.action, RUN_ACTIONS);
+  }
   const run = createAgentRun(ctx, {
     agentId: args.agentId,
     input: args.input,
@@ -809,6 +965,10 @@ export function handleListRuns(
   ctx: MesaRuntimeContext,
   args: { taskId?: string; agentId?: string; status?: string }
 ): string {
+  // A typo'd status would otherwise filter to a silent empty list.
+  if (args.status !== undefined) {
+    assertEnumParam('status', args.status, RUN_STATUSES);
+  }
   const runs = listAgentRuns(ctx, {
     taskId: args.taskId,
     agentId: args.agentId,
@@ -832,6 +992,7 @@ export function handleUpdateRunStatus(
     error?: string;
   }
 ): string {
+  assertEnumParam('status', args.status, RUN_STATUSES);
   const run = updateAgentRunStatus(ctx, args.runId, args.status as RunStatus, {
     output: args.output,
     outputSummary: args.outputSummary,
@@ -844,6 +1005,16 @@ export async function handleExecRun(
   ctx: MesaRuntimeContext,
   args: { runId: string; dryRun?: boolean; createArtifacts?: boolean; timeout?: number }
 ): Promise<string> {
+  // Surface the pending-only precondition with the run's actual status and a
+  // concrete next step, instead of a bare deep-layer rejection.
+  const run = getAgentRun(ctx, args.runId);
+  if (run.status !== 'pending') {
+    throw toolError(
+      'precondition_not_met',
+      `Run "${args.runId}" has status "${run.status}"; only pending runs can be executed.`,
+      'Create a new run with mesa_create_run, or inspect this one with mesa_read_run.',
+    );
+  }
   const result = await executeRun(ctx, args.runId, {
     dryRun: args.dryRun,
     createArtifacts: args.createArtifacts,
@@ -870,6 +1041,16 @@ export async function handleActivateSessionAgent(
 
 // --- Workflow handlers ---
 
+function assertWorkflowExists(workflowId: string): void {
+  if (!listWorkflowDefinitionIds().includes(workflowId)) {
+    throw toolError(
+      'unknown_id',
+      `Unknown workflow definition "${workflowId}".`,
+      'Call mesa_list_workflows to list registered workflow IDs, then retry with a valid workflowId.',
+    );
+  }
+}
+
 export function handleListWorkflows(): string {
   return JSON.stringify(listWorkflowDefinitionIds());
 }
@@ -878,6 +1059,7 @@ export function handleReadWorkflow(
   _ctx: MesaRuntimeContext,
   args: { workflowId: string }
 ): string {
+  assertWorkflowExists(args.workflowId);
   const def = getWorkflowDefinition(args.workflowId);
   return JSON.stringify({
     id: def.id,
@@ -892,6 +1074,7 @@ export async function handleRunWorkflow(
   ctx: MesaRuntimeContext,
   args: { workflowId: string; taskId: string; maxSteps?: number }
 ): Promise<string> {
+  assertWorkflowExists(args.workflowId);
   const def = getWorkflowDefinition(args.workflowId);
   const engine = new WorkflowEngine(ctx);
   const initial = engine.startWorkflow(def, args.taskId);
@@ -914,6 +1097,11 @@ export function handleRequestHandoff(
     summary: string;
   }
 ): string {
+  // Ghost references would write an envelope that routes to nothing — the
+  // same failure class as ghost mentions. Validate all three ids up front.
+  getTask(ctx, args.taskId);
+  getAgentRun(ctx, args.runId);
+  getArtifact(ctx, args.artifactId);
   const envelope = writeReviewRequest(ctx, {
     taskId: args.taskId,
     runId: args.runId,
@@ -936,6 +1124,10 @@ export function handleSubmitHandoffResult(
     detail?: string;
   }
 ): string {
+  assertEnumParam('verdict', args.verdict, REVIEW_VERDICTS);
+  getTask(ctx, args.taskId);
+  getAgentRun(ctx, args.runId);
+  getArtifact(ctx, args.artifactId);
   const envelope = writeReviewResult(ctx, {
     taskId: args.taskId,
     runId: args.runId,
@@ -961,6 +1153,10 @@ export function handleListEvents(
   ctx: MesaRuntimeContext,
   args: { streamId?: string; meetingId?: string; type?: string }
 ): string {
+  // A typo'd type would otherwise filter to a silent empty list.
+  if (args.type !== undefined) {
+    assertEnumParam('type', args.type, EVENT_TYPES);
+  }
   const events = listEvents(ctx, {
     streamId: args.streamId,
     meetingId: args.meetingId,
@@ -973,6 +1169,9 @@ export function handleGetTaskEvents(
   ctx: MesaRuntimeContext,
   args: { taskId: string }
 ): string {
+  // Unknown ids must not silently yield [] — that is indistinguishable from
+  // "no events yet" and hides the real problem from the caller.
+  getTask(ctx, args.taskId);
   return JSON.stringify(getTaskEvents(ctx, args.taskId));
 }
 
@@ -980,13 +1179,35 @@ export function handleGetMeetingEvents(
   ctx: MesaRuntimeContext,
   args: { meetingId: string }
 ): string {
+  getMeeting(ctx, args.meetingId);
   return JSON.stringify(getMeetingEvents(ctx, args.meetingId));
+}
+
+export function handleWhyTask(
+  ctx: MesaRuntimeContext,
+  args: { taskId: string }
+): string {
+  // Unknown ids must fail loudly — a causal explanation of a phantom task
+  // would fabricate a "deleted/unknown" blocker out of thin air.
+  getTask(ctx, args.taskId);
+  return JSON.stringify(explainTask(ctx, args.taskId));
+}
+
+export function handleWhyMeeting(
+  ctx: MesaRuntimeContext,
+  args: { meetingId: string }
+): string {
+  getMeeting(ctx, args.meetingId);
+  return JSON.stringify(explainMeeting(ctx, args.meetingId));
 }
 
 export function handleGetTaskProjection(
   ctx: MesaRuntimeContext,
   args: { taskId: string }
 ): string {
+  // Distinguish "projection not built yet" (legitimately null for an existing
+  // task) from a non-existent task id, which used to return a silent null.
+  getTask(ctx, args.taskId);
   return JSON.stringify(getTaskProjection(ctx, args.taskId, { strict: false }));
 }
 
@@ -994,6 +1215,7 @@ export function handleGetMeetingProjection(
   ctx: MesaRuntimeContext,
   args: { meetingId: string }
 ): string {
+  getMeeting(ctx, args.meetingId);
   return JSON.stringify(getMeetingProjection(ctx, args.meetingId, { strict: false }));
 }
 
@@ -1016,6 +1238,12 @@ export function handleCreateCheck(
     detail?: string;
   }
 ): string {
+  // A ghost taskId would silently record a check that belongs to no task.
+  getTask(ctx, args.taskId);
+  assertEnumParam('status', args.status, CHECK_STATUSES);
+  if (args.kind !== undefined) {
+    assertEnumParam('kind', args.kind, CHECK_KINDS);
+  }
   const check = createCheckResult(ctx, {
     taskId: args.taskId,
     runId: args.runId,
@@ -1037,6 +1265,13 @@ export function handleListChecks(
   ctx: MesaRuntimeContext,
   args: { taskId?: string; kind?: string; status?: string }
 ): string {
+  // Typo'd filter values would otherwise silently filter to an empty list.
+  if (args.kind !== undefined) {
+    assertEnumParam('kind', args.kind, CHECK_KINDS);
+  }
+  if (args.status !== undefined) {
+    assertEnumParam('status', args.status, CHECK_STATUSES);
+  }
   const checks = listCheckResults(ctx, {
     taskId: args.taskId,
     kind: args.kind as CheckKind | undefined,
@@ -1051,11 +1286,32 @@ export function handleGetCheck(ctx: MesaRuntimeContext, args: { checkId: string 
 
 // --- GitHub connector handlers ---
 
+/**
+ * Wrap `gh` CLI failures: the connector throws plain Errors whose message
+ * alone gives an agent no repair path. Typed MesaErrors pass through so they
+ * keep their code-specific translation.
+ */
+function rethrowConnectorError(tool: string, error: unknown): never {
+  if (error instanceof MesaError) {
+    throw error;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  throw toolError(
+    'precondition_not_met',
+    `${tool} failed: ${message}`,
+    'Ensure the `gh` CLI is installed and authenticated (`gh auth status`), and that the current working directory is a Git repository with a GitHub remote, then retry.',
+  );
+}
+
 export async function handleLinkPr(
   ctx: MesaRuntimeContext,
   args: { taskId: string; prNumber: number }
 ): Promise<string> {
-  await linkPrToTask(ctx.paths, args.taskId, args.prNumber);
+  try {
+    await linkPrToTask(ctx.paths, args.taskId, args.prNumber);
+  } catch (error) {
+    rethrowConnectorError('mesa_link_pr', error);
+  }
   return JSON.stringify({ linked: true, taskId: args.taskId, prNumber: args.prNumber });
 }
 
@@ -1063,6 +1319,11 @@ export async function handleImportCiResults(
   ctx: MesaRuntimeContext,
   args: { taskId: string; agentId: string }
 ): Promise<string> {
-  const result = await importCIResults(ctx.paths, args.taskId, args.agentId, ctx.paths.rootDir);
+  let result: Awaited<ReturnType<typeof importCIResults>>;
+  try {
+    result = await importCIResults(ctx.paths, args.taskId, args.agentId, ctx.paths.rootDir);
+  } catch (error) {
+    rethrowConnectorError('mesa_import_ci_results', error);
+  }
   return JSON.stringify(result);
 }

@@ -338,15 +338,29 @@ describe('handleCreateMeeting', () => {
   });
 
   it('creates a meeting with tasks and agents', () => {
+    const task = parse<MesaTask>(
+      handleCreateTask(ctx, { title: 'Reviewed feature', createdBy: 'user' })
+    );
+    handleRegisterAgent(ctx, { id: 'agent-1', name: 'Agent 1', client: 'c1', roles: ['builder'] });
+    handleRegisterAgent(ctx, { id: 'agent-2', name: 'Agent 2', client: 'c2', roles: ['reviewer'] });
     const result = parse<MesaMeeting>(
       handleCreateMeeting(ctx, {
         title: 'Feature Review',
-        tasks: ['T-0001'],
+        tasks: [task.id],
         agents: ['agent-1', 'agent-2'],
       })
     );
-    expect(result.tasks).toEqual(['T-0001']);
+    expect(result.tasks).toEqual([task.id]);
     expect(result.agents).toEqual(['agent-1', 'agent-2']);
+  });
+
+  it('rejects a meeting referencing a non-existent task or agent', () => {
+    expect(() =>
+      handleCreateMeeting(ctx, { title: 'Ghost task', tasks: ['T-9999'] })
+    ).toThrow(/Task not found/);
+    expect(() =>
+      handleCreateMeeting(ctx, { title: 'Ghost agent', agents: ['ghost-agent'] })
+    ).toThrow(/Agent not found/);
   });
 });
 

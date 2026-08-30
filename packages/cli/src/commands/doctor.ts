@@ -18,6 +18,8 @@ import { getSetupStatus } from '@agentmesa/setup';
 import { existsSync } from 'node:fs';
 import type { ParsedArgs } from '../parse-args.js';
 import { printSuccess, printWarning, printError, printInfo, outputResult } from '../output.js';
+import { runDoctorAsAgent } from './doctor-agent.js';
+import type { DoctorAgentOptions } from './doctor-agent.js';
 
 function isProjectionFresh(ctx: MesaRuntimeContext, streamId: string, proj: Record<string, unknown>): boolean {
   const events = ctx.eventStore.list({ streamId });
@@ -27,7 +29,14 @@ function isProjectionFresh(ctx: MesaRuntimeContext, streamId: string, proj: Reco
   return lastSeq !== undefined && lastSeq >= maxSeq;
 }
 
-export function runDoctor(args: ParsedArgs): void {
+export function runDoctor(args: ParsedArgs, options?: DoctorAgentOptions): void {
+  // Agent-perspective self-check: strictly read-only, independent of the host
+  // environment checks below (which remain the default `mesa doctor` output).
+  if (args.flags['as-agent']) {
+    runDoctorAsAgent(args, options);
+    return;
+  }
+
   const rootDir = process.cwd();
   const json = !!args.flags['json'];
   let issues = 0;

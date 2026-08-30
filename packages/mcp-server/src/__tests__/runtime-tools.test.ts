@@ -4,13 +4,14 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createRuntimeContext, initWorkspace, createTask } from '@agentmesa/core';
 import type { MesaRuntimeContext } from '@agentmesa/core';
-import type { MesaAgentRun, TransportEnvelope, MesaEvent, MesaCheckResult } from '@agentmesa/protocol';
+import type { MesaAgentRun, TransportEnvelope, MesaEvent, MesaCheckResult, MesaArtifact } from '@agentmesa/protocol';
 import {
   handleCreateRun,
   handleListRuns,
   handleReadRun,
   handleUpdateRunStatus,
   handleExecRun,
+  handleAttachArtifact,
   handleListWorkflows,
   handleReadWorkflow,
   handleRunWorkflow,
@@ -20,6 +21,8 @@ import {
   handleListEvents,
   handleGetTaskEvents,
   handleGetTaskProjection,
+  handleWhyTask,
+  handleWhyMeeting,
   handleCreateCheck,
   handleListChecks,
   handleGetCheck,
@@ -132,11 +135,24 @@ describe('workflow tools', () => {
 
 describe('handoff tools', () => {
   it('writes and lists request/result envelopes', () => {
+    // Handoffs must reference real entities — ghost ids are rejected.
+    const run = parse<MesaAgentRun>(
+      handleCreateRun(ctx, { agentId: 'builder-1', input: 'Implement X', taskId })
+    );
+    const artifact = parse<MesaArtifact>(
+      handleAttachArtifact(ctx, {
+        kind: 'implementation_summary',
+        taskId,
+        createdBy: 'agent:mcp',
+        content: 'Implementation complete',
+      })
+    );
+
     const req = parse<TransportEnvelope>(
       handleRequestHandoff(ctx, {
         taskId,
-        runId: 'run_abc',
-        artifactId: 'artifact_1',
+        runId: run.id,
+        artifactId: artifact.id,
         requestedReviewer: 'codex',
         summary: 'Please review',
       })
@@ -146,8 +162,8 @@ describe('handoff tools', () => {
     const res = parse<TransportEnvelope>(
       handleSubmitHandoffResult(ctx, {
         taskId,
-        runId: 'run_abc',
-        artifactId: 'artifact_1',
+        runId: run.id,
+        artifactId: artifact.id,
         reviewer: 'codex',
         summary: 'LGTM',
         verdict: 'approved',
@@ -160,6 +176,31 @@ describe('handoff tools', () => {
     );
     expect(lists.outbound).toHaveLength(1);
     expect(lists.inbound).toHaveLength(1);
+  });
+
+  it('rejects handoffs referencing unknown runs or artifacts', () => {
+    const run = parse<MesaAgentRun>(
+      handleCreateRun(ctx, { agentId: 'builder-1', input: 'Implement X', taskId })
+    );
+    expect(() =>
+      handleRequestHandoff(ctx, {
+        taskId,
+        runId: 'run_ghost',
+        artifactId: 'artifact_ghost',
+        requestedReviewer: 'codex',
+        summary: 'Please review',
+      })
+    ).toThrow(/Agent run not found/);
+    expect(() =>
+      handleSubmitHandoffResult(ctx, {
+        taskId,
+        runId: run.id,
+        artifactId: 'artifact_ghost',
+        reviewer: 'codex',
+        summary: 'LGTM',
+        verdict: 'approved',
+      })
+    ).toThrow(/Artifact not found/);
   });
 });
 
@@ -175,6 +216,38 @@ describe('event / projection tools', () => {
   it('returns null projection lookups without throwing', () => {
     const proj = parse<unknown>(handleGetTaskProjection(ctx, { taskId }));
     expect(proj === null || typeof proj === 'object').toBe(true);
+  });
+});
+
+describe('why (causal explanation) tools', () => {
+  it('explains a fresh task with a status chain and a not-started blocker', () => {
+    const result = parse<{
+      entityType: string;
+      taskId: string;
+      currentStatus: string;
+      statusChain: Array<{ to: string; cause: { confidence: string } }>;
+      blocker: { kind: string; confidence: string };
+      timeline: unknown[];
+    }>(handleWhyTask(ctx, { taskId }));
+    expect(result.entityType).toBe('task');
+    expect(result.taskId).toBe(taskId);
+    expect(result.currentStatus).toBe('todo');
+    expect(result.statusChain.length).toBeGreaterThan(0);
+    expect(result.statusChain[0]?.to).toBe('todo');
+    expect(result.blocker.kind).toBe('not_started');
+    expect(result.timeline.length).toBeGreaterThan(0);
+  });
+
+  it('rejects unknown task ids loudly', () => {
+    expect(() => handleWhyTask(ctx, { taskId: 'T-does-not-exist' })).toThrow(
+      /Task not found/
+    );
+  });
+
+  it('rejects unknown meeting ids loudly', () => {
+    expect(() => handleWhyMeeting(ctx, { meetingId: 'm-does-not-exist' })).toThrow(
+      /Meeting not found/
+    );
   });
 });
 

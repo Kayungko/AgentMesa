@@ -9,6 +9,7 @@ import { runArtifact } from './commands/artifact.js';
 import { runMeeting } from './commands/meeting.js';
 import { runAgent } from './commands/agent.js';
 import { runEvents, runTimeline } from './commands/events.js';
+import { runWhy } from './commands/why.js';
 import { runTransports } from './commands/transports.js';
 import { runRebuild } from './commands/rebuild.js';
 import { runPolicyCheck, runPolicyInspect } from './commands/policy.js';
@@ -62,6 +63,10 @@ switch (args.command) {
 
   case 'timeline':
     runTimeline(args);
+    break;
+
+  case 'why':
+    runWhy(args);
     break;
 
   case 'transports':
@@ -141,11 +146,16 @@ State Commands:
 
 Inspection Commands:
   doctor [--fix]              Check workspace health (--fix removes orphaned temp files)
+  doctor --as-agent           Agent self-check: identity, rooms, permissions, MCP channel
+                   [--actor <id>]   Actor id (default: AGENTMESA_MCP_ACTOR_ID env)
   rebuild                     Rebuild all projections from events
   events list [filters]       List events (--meeting, --task, --type, --actor)
   timeline <id>                Auto-detect task or meeting timeline
   timeline task <id>           Show task event timeline + projection
   timeline meeting <id>        Show meeting event timeline + projection
+  why <id>                     Explain why a task/meeting sits in its current status
+  why task <id>                Task causal chain + current blocker
+  why meeting <id>             Meeting causal chain + current blocker
   transports                  List available transports and capabilities
   transports list              Same as 'mesa transports'
   transports inspect <name>    Show transport details (policy-gated)
@@ -193,9 +203,12 @@ Examples:
   mesa events list --task task_e5f6a7b8 --type task_status_changed
   mesa timeline task_e5f6a7b8    # auto-detect task or meeting
   mesa timeline task task_e5f6a7b8
+  mesa why task task_e5f6a7b8           # why is this task stuck?
+  mesa why task task_e5f6a7b8 --json
   mesa transports
   mesa transports inspect "File Transport"
   mesa transports inbox "File Transport" --status pending
   mesa doctor
+  mesa doctor --as-agent --actor agent:codex --json
 `);
 }

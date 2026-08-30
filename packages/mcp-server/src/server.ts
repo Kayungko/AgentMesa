@@ -36,6 +36,8 @@ import {
   getMeetingEventsInputSchema,
   getTaskProjectionInputSchema,
   getMeetingProjectionInputSchema,
+  whyTaskInputSchema,
+  whyMeetingInputSchema,
   createCheckInputSchema,
   listChecksInputSchema,
   getCheckInputSchema,
@@ -87,12 +89,15 @@ import {
   handleGetMeetingEvents,
   handleGetTaskProjection,
   handleGetMeetingProjection,
+  handleWhyTask,
+  handleWhyMeeting,
   handleCreateCheck,
   handleListChecks,
   handleGetCheck,
   handleLinkPr,
   handleImportCiResults,
 } from './tools.js';
+import { toolErrorResult } from './tool-errors.js';
 
 /**
  * Resolve the MCP server's actor identity from the environment. The id and
@@ -138,63 +143,34 @@ function createMcpContextFactory(
 
 type ContextFactory = (args?: Record<string, unknown>) => MesaRuntimeContext;
 
-function errorEnvelope(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  return {
-    content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }],
-    isError: true,
-  };
-}
-
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function wrapRuntimeHandler<T extends Record<string, any>>(
-  makeCtx: ContextFactory,
-  handler: (ctx: MesaRuntimeContext, args: T) => string
-) {
-  return async (args: T) => {
-    try {
-      return { content: [{ type: 'text' as const, text: handler(makeCtx(args), args) }] };
-    } catch (error) {
-      return errorEnvelope(error);
-    }
-  };
-}
+type AnyToolDefinition = { description: string; inputSchema: Record<string, any> };
 
+/**
+ * Register a `mesa_*` tool under the unified error contract: every failure —
+ * whether a structured ToolError thrown by the handler or an error bubbling
+ * up from core/runner/connectors — is returned as an `isError` envelope
+ * carrying what failed, why, and how to fix it, so an AI caller can repair
+ * its arguments and retry on its own.
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function wrapAsyncRuntimeHandler<T extends Record<string, any>>(
+function registerMesaTool(
+  server: McpServer,
+  name: string,
+  def: AnyToolDefinition,
   makeCtx: ContextFactory,
-  handler: (ctx: MesaRuntimeContext, args: T) => Promise<string>
-) {
-  return async (args: T) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  handler: (ctx: MesaRuntimeContext, args: any) => string | Promise<string>,
+): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  server.registerTool(name, def, async (args: any) => {
     try {
-      return { content: [{ type: 'text' as const, text: await handler(makeCtx(args), args) }] };
+      const text = await handler(makeCtx(args), args);
+      return { content: [{ type: 'text' as const, text }] };
     } catch (error) {
-      return errorEnvelope(error);
+      return toolErrorResult(name, error);
     }
-  };
-}
-
-function wrapRuntimeNoArgHandler(
-  makeCtx: ContextFactory,
-  handler: (ctx: MesaRuntimeContext) => string
-) {
-  return async () => {
-    try {
-      return { content: [{ type: 'text' as const, text: handler(makeCtx()) }] };
-    } catch (error) {
-      return errorEnvelope(error);
-    }
-  };
-}
-
-function wrapNoCtxHandler(handler: () => string) {
-  return async () => {
-    try {
-      return { content: [{ type: 'text' as const, text: handler() }] };
-    } catch (error) {
-      return errorEnvelope(error);
-    }
-  };
+  });
 }
 
 export function createMcpServer(rootDir: string, options?: McpServerOptions): McpServer {
@@ -205,238 +181,255 @@ export function createMcpServer(rootDir: string, options?: McpServerOptions): Mc
 
   const makeCtx = createMcpContextFactory(rootDir, options?.actor ?? resolveActor());
 
+  // Every tool goes through registerMesaTool so failures uniformly return the
+  // what/why/fix error envelope instead of a bare message string.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const register = (name: string, def: AnyToolDefinition, handler: (ctx: MesaRuntimeContext, args: any) => string | Promise<string>) => {
+    registerMesaTool(server, name, def, makeCtx, handler);
+  };
+
   // Task tools
-  server.registerTool('mesa_create_task', {
+  register('mesa_create_task', {
     description: 'Create a new AgentMesa task',
     inputSchema: createTaskInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleCreateTask));
+  }, handleCreateTask);
 
-  server.registerTool('mesa_list_tasks', {
+  register('mesa_list_tasks', {
     description: 'List all AgentMesa tasks',
     inputSchema: listTasksInputSchema,
-  }, wrapRuntimeNoArgHandler(makeCtx, handleListTasks));
+  }, handleListTasks);
 
-  server.registerTool('mesa_read_task', {
+  register('mesa_read_task', {
     description: 'Read a specific AgentMesa task by ID',
     inputSchema: readTaskInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleReadTask));
+  }, handleReadTask);
 
-  server.registerTool('mesa_update_status', {
+  register('mesa_update_status', {
     description: 'Update the status of an AgentMesa task',
     inputSchema: updateStatusInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleUpdateStatus));
+  }, handleUpdateStatus);
 
   // Message tools
-  server.registerTool('mesa_post_message', {
+  register('mesa_post_message', {
     description: 'Post a message to an AgentMesa task',
     inputSchema: postMessageInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handlePostMessage));
+  }, handlePostMessage);
 
-  server.registerTool('mesa_request_review', {
+  register('mesa_request_review', {
     description: 'Request a review for a task, sets status to ready_for_review',
     inputSchema: requestReviewInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleRequestReview));
+  }, handleRequestReview);
 
-  server.registerTool('mesa_submit_review', {
+  register('mesa_submit_review', {
     description: 'Submit a review result for a task, updates status to approved or changes_requested',
     inputSchema: submitReviewInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleSubmitReview));
+  }, handleSubmitReview);
 
-  server.registerTool('mesa_list_messages', {
+  register('mesa_list_messages', {
     description: 'List messages, optionally filtered by task ID',
     inputSchema: listMessagesInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleListMessages));
+  }, handleListMessages);
 
   // Artifact tools
-  server.registerTool('mesa_attach_artifact', {
+  register('mesa_attach_artifact', {
     description: 'Attach an artifact to an AgentMesa task',
     inputSchema: attachArtifactInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleAttachArtifact));
+  }, handleAttachArtifact);
 
-  server.registerTool('mesa_list_artifacts', {
+  register('mesa_list_artifacts', {
     description: 'List artifacts, optionally filtered by task ID or kind',
     inputSchema: listArtifactsInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleListArtifacts));
+  }, handleListArtifacts);
 
   // Meeting tools
-  server.registerTool('mesa_create_meeting', {
+  register('mesa_create_meeting', {
     description: 'Create a new AgentMesa meeting',
     inputSchema: createMeetingInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleCreateMeeting));
+  }, handleCreateMeeting);
 
-  server.registerTool('mesa_list_meetings', {
+  register('mesa_list_meetings', {
     description: 'List all AgentMesa meetings',
     inputSchema: listMeetingsInputSchema,
-  }, wrapRuntimeNoArgHandler(makeCtx, handleListMeetings));
+  }, handleListMeetings);
 
   // Agent tools
-  server.registerTool('mesa_register_agent', {
+  register('mesa_register_agent', {
     description: 'Register an AI agent in AgentMesa',
     inputSchema: registerAgentInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleRegisterAgent));
+  }, handleRegisterAgent);
 
-  server.registerTool('mesa_list_agents', {
+  register('mesa_list_agents', {
     description: 'List all registered AgentMesa agents',
     inputSchema: listAgentsInputSchema,
-  }, wrapRuntimeNoArgHandler(makeCtx, handleListAgents));
+  }, handleListAgents);
 
   // Remote member registration (M3 Broad Access)
-  server.registerTool('mesa_register_remote_member', {
+  register('mesa_register_remote_member', {
     description: 'Register a remote agent (joined via MCP streamable HTTP) in the agent registry and optionally invite it into a Room as a remote member',
     inputSchema: registerRemoteMemberInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleRegisterRemoteMember));
+  }, handleRegisterRemoteMember);
 
   // Agent run tools
-  server.registerTool('mesa_create_run', {
+  register('mesa_create_run', {
     description: 'Create a new AgentMesa agent run (pending status)',
     inputSchema: createRunInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleCreateRun));
+  }, handleCreateRun);
 
-  server.registerTool('mesa_list_runs', {
+  register('mesa_list_runs', {
     description: 'List agent runs, optionally filtered by task, agent, or status',
     inputSchema: listRunsInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleListRuns));
+  }, handleListRuns);
 
-  server.registerTool('mesa_read_run', {
+  register('mesa_read_run', {
     description: 'Read a specific agent run by ID',
     inputSchema: readRunInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleReadRun));
+  }, handleReadRun);
 
-  server.registerTool('mesa_update_run_status', {
+  register('mesa_update_run_status', {
     description: 'Update an agent run status (optionally attach output/error)',
     inputSchema: updateRunStatusInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleUpdateRunStatus));
+  }, handleUpdateRunStatus);
 
-  server.registerTool('mesa_exec_run', {
+  register('mesa_exec_run', {
     description: 'Execute a pending agent run through its runner backend (drives the real CLI when configured)',
     inputSchema: execRunInputSchema,
-  }, wrapAsyncRuntimeHandler(makeCtx, handleExecRun));
+  }, handleExecRun);
 
-  server.registerTool('mesa_activate_session_agent', {
+  register('mesa_activate_session_agent', {
     description: 'Invite a registered agent into a session and drive the real CLI agent to participate — the agent replies are written back into the session timeline',
     inputSchema: activateSessionAgentInputSchema,
-  }, wrapAsyncRuntimeHandler(makeCtx, handleActivateSessionAgent));
+  }, handleActivateSessionAgent);
 
   // Workflow tools
-  server.registerTool('mesa_list_workflows', {
+  register('mesa_list_workflows', {
     description: 'List registered workflow definition IDs',
     inputSchema: listWorkflowsInputSchema,
-  }, wrapNoCtxHandler(handleListWorkflows));
+  }, handleListWorkflows);
 
-  server.registerTool('mesa_read_workflow', {
+  register('mesa_read_workflow', {
     description: 'Read a workflow definition by ID',
     inputSchema: readWorkflowInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleReadWorkflow));
+  }, handleReadWorkflow);
 
-  server.registerTool('mesa_run_workflow', {
+  register('mesa_run_workflow', {
     description: 'Start and advance a workflow for a task, returning the final workflow state',
     inputSchema: runWorkflowInputSchema,
-  }, wrapAsyncRuntimeHandler(makeCtx, handleRunWorkflow));
+  }, handleRunWorkflow);
 
   // Handoff tools
-  server.registerTool('mesa_request_handoff', {
+  register('mesa_request_handoff', {
     description: 'Write a review_request handoff envelope to the outbox',
     inputSchema: requestHandoffInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleRequestHandoff));
+  }, handleRequestHandoff);
 
-  server.registerTool('mesa_submit_handoff_result', {
+  register('mesa_submit_handoff_result', {
     description: 'Write a review_result handoff envelope to the inbox',
     inputSchema: submitHandoffResultInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleSubmitHandoffResult));
+  }, handleSubmitHandoffResult);
 
-  server.registerTool('mesa_list_handoffs', {
+  register('mesa_list_handoffs', {
     description: 'List inbound and outbound handoff envelopes',
     inputSchema: listHandoffsInputSchema,
-  }, wrapRuntimeNoArgHandler(makeCtx, handleListHandoffs));
+  }, handleListHandoffs);
 
   // Event / projection tools
-  server.registerTool('mesa_list_events', {
+  register('mesa_list_events', {
     description: 'List events, optionally filtered by stream, meeting, or type',
     inputSchema: listEventsInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleListEvents));
+  }, handleListEvents);
 
-  server.registerTool('mesa_get_task_events', {
+  register('mesa_get_task_events', {
     description: 'List events for a specific task stream',
     inputSchema: getTaskEventsInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleGetTaskEvents));
+  }, handleGetTaskEvents);
 
-  server.registerTool('mesa_get_meeting_events', {
+  register('mesa_get_meeting_events', {
     description: 'List all events for a meeting across every stream',
     inputSchema: getMeetingEventsInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleGetMeetingEvents));
+  }, handleGetMeetingEvents);
 
-  server.registerTool('mesa_get_task_projection', {
+  register('mesa_why_task', {
+    description: 'Explain a task causally: status chain with actors and causes, plus the current blocker (who/what it is waiting on and the evidence)',
+    inputSchema: whyTaskInputSchema,
+  }, handleWhyTask);
+
+  register('mesa_why_meeting', {
+    description: 'Explain a meeting causally: task snapshots, cross-stream timeline, and the current blocker with evidence',
+    inputSchema: whyMeetingInputSchema,
+  }, handleWhyMeeting);
+
+  register('mesa_get_task_projection', {
     description: 'Read the current projection (read model) for a task',
     inputSchema: getTaskProjectionInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleGetTaskProjection));
+  }, handleGetTaskProjection);
 
-  server.registerTool('mesa_get_meeting_projection', {
+  register('mesa_get_meeting_projection', {
     description: 'Read the current projection (read model) for a meeting',
     inputSchema: getMeetingProjectionInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleGetMeetingProjection));
+  }, handleGetMeetingProjection);
 
   // Check result tools
-  server.registerTool('mesa_create_check', {
+  register('mesa_create_check', {
     description: 'Record a MesaCheckResult (test/lint/typecheck/security/custom) for a task',
     inputSchema: createCheckInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleCreateCheck));
+  }, handleCreateCheck);
 
-  server.registerTool('mesa_list_checks', {
+  register('mesa_list_checks', {
     description: 'List check results, optionally filtered by task, kind, or status',
     inputSchema: listChecksInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleListChecks));
+  }, handleListChecks);
 
-  server.registerTool('mesa_get_check', {
+  register('mesa_get_check', {
     description: 'Read a specific check result by ID',
     inputSchema: getCheckInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleGetCheck));
+  }, handleGetCheck);
 
   // GitHub connector tools (shell out to the real `gh` CLI)
-  server.registerTool('mesa_link_pr', {
+  register('mesa_link_pr', {
     description: 'Link a GitHub pull request to a task (stores a pr_summary artifact)',
     inputSchema: linkPrInputSchema,
-  }, wrapAsyncRuntimeHandler(makeCtx, handleLinkPr));
+  }, handleLinkPr);
 
-  server.registerTool('mesa_import_ci_results', {
+  register('mesa_import_ci_results', {
     description: 'Import GitHub Actions CI status for the current repo via `gh run list`, recording a MesaCheckResult per finished run',
     inputSchema: importCiResultsInputSchema,
-  }, wrapAsyncRuntimeHandler(makeCtx, handleImportCiResults));
+  }, handleImportCiResults);
 
   // Room tools (global, cross-workspace group chat)
-  server.registerTool('mesa_create_room', {
+  register('mesa_create_room', {
     description: 'Create a new cross-workspace Room (group chat)',
     inputSchema: createRoomInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleCreateRoom));
+  }, handleCreateRoom);
 
-  server.registerTool('mesa_list_rooms', {
+  register('mesa_list_rooms', {
     description: 'List all Rooms',
     inputSchema: listRoomsInputSchema,
-  }, wrapRuntimeNoArgHandler(makeCtx, handleListRooms));
+  }, handleListRooms);
 
-  server.registerTool('mesa_invite_to_room', {
+  register('mesa_invite_to_room', {
     description: 'Invite a session or agent from a workspace into a Room',
     inputSchema: inviteToRoomInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleInviteToRoom));
+  }, handleInviteToRoom);
 
-  server.registerTool('mesa_leave_room', {
+  register('mesa_leave_room', {
     description: 'Remove a session or agent from a Room',
     inputSchema: leaveRoomInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleLeaveRoom));
+  }, handleLeaveRoom);
 
-  server.registerTool('mesa_send_room_message', {
+  register('mesa_send_room_message', {
     description: 'Post a message into a Room (cross-workspace)',
     inputSchema: sendRoomMessageInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleSendRoomMessage));
+  }, handleSendRoomMessage);
 
-  server.registerTool('mesa_list_room_messages', {
+  register('mesa_list_room_messages', {
     description: 'List messages in a Room (optionally only those after a message-id cursor)',
     inputSchema: listRoomMessagesInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handleListRoomMessages));
+  }, handleListRoomMessages);
 
-  server.registerTool('mesa_poll_rooms', {
+  register('mesa_poll_rooms', {
     description: 'Poll all Rooms the calling member belongs to: new messages per room since a cursor (message id), plus each room\'s current cursor. Pass cursors per roomId to read incrementally; omit for a summary plus the latest message.',
     inputSchema: pollRoomsInputSchema,
-  }, wrapRuntimeHandler(makeCtx, handlePollRooms));
+  }, handlePollRooms);
 
   return server;
 }

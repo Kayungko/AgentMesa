@@ -45,3 +45,17 @@ export {
   handleGetTaskProjection,
   handleGetMeetingProjection,
 } from './tools.js';
+export {
+  ToolError,
+  toolError,
+  invalidValueError,
+  unknownIdError,
+  describeToolError,
+  toolErrorResult,
+  TOOL_ERROR_CODES,
+} from './tool-errors.js';
+export type {
+  ToolErrorCode,
+  ToolErrorDetails,
+  ToolErrorResult,
+} from './tool-errors.js';

@@ -304,6 +304,30 @@ The result is a complete chronological timeline:
 
 The Mesa Desk visual dashboard renders this timeline as a chronological feed. The CLI can output it with `mesa timeline --meeting <id>`.
 
+### Causal explanation (`mesa why`)
+
+Beyond raw timeline replay, the core `why-service` (`explainTask` / `explainMeeting`) reconstructs
+*why* each transition happened and what the entity is currently waiting on:
+
+- Events are attributed to a task across **all stream shapes**: the task's own stream, plus
+  `data.run.taskId`, `data.check.taskId`, `data.message.taskId`, `data.artifact.taskId`, and
+  `data.taskId` (workflow events). Meeting timelines merge the meeting stream with every task
+  stream that belongs to the meeting.
+- Each status transition carries a `cause` — the causal-candidate events (messages, run
+  completions/failures, checks, workflow decisions, assignments) recorded between the previous
+  transition and this one. Auto-generated notification messages (`task_created`,
+  `status_changed`) are excluded: they are effects, never causes. Cause confidence is
+  `inferred` (temporal correlation), `unknown` when the window is empty — never fabricated.
+- The **blocker** classification maps current status to a conclusion
+  (`waiting_review`, `waiting_user_decision`, `waiting_workflow_approval`, `needs_fix`,
+  `stalled`, `failed`, `blocked`, `active`, `terminal`, …) with evidence event ids and an
+  `evidenced` / `inferred` / `unknown` confidence. "After entering this status" comparisons use
+  log position, not wall-clock timestamps (ISO millisecond timestamps can tie within one
+  transition burst).
+
+The CLI exposes this as `mesa why task <id>` / `mesa why meeting <id>` (`--json` for the
+structured result). See `packages/cli/README.md`.
+
 ## 8. Performance
 
 **Write path: O(1)**
