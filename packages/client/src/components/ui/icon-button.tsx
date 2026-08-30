@@ -26,8 +26,6 @@ export function IconButton({
         type="button"
         className={classes}
         aria-label={label}
-        data-tooltip={label}
-        ref={setAnchor}
         onMouseEnter={(event) => setAnchor(event.currentTarget)}
         onMouseLeave={() => setAnchor(null)}
         onFocus={(event) => setAnchor(event.currentTarget)}

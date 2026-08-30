@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" width="1080" height="1080">
+<defs>
+  <filter id="avatar-filter" x="-20%" y="-20%" width="140%" height="140%" filterUnits="objectBoundingBox" primitiveUnits="userSpaceOnUse" color-interpolation-filters="linearRGB">
+    <feMorphology operator="dilate" radius="20 20" in="SourceAlpha" result="morphology"/>
+    <feFlood flood-color="#ffffff" flood-opacity="1" result="flood"/>
+    <feComposite in="flood" in2="morphology" operator="in" result="composite"/>
+    <feMerge result="merge">
+      <feMergeNode in="composite" result="mergeNode"/>
+      <feMergeNode in="SourceGraphic" result="mergeNode1"/>
+    </feMerge>
+  </filter>
+</defs>
+<g id="notion-avatar" filter="url(#avatar-filter)">
+<g id="notion-avatar-face" fill="#ffffff" data-part="face-4">
+<g id="Face/-4" stroke="none" stroke-width="1"  fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M532,379 C664.54834,379 772,486.45166 772,619 C772,751.54834 764.54834,899 592,899 C462.715227,899 358.747776,816.220491 314.739381,718.954345 C313.831676,718.98455 312.917642,719 312,719 C267.81722,719 232,683.18278 232,639 C232,599.134956 261.158843,566.080325 299.312086,560.00055 C325.599297,455.979213 419.809919,379 532,379 Z M295.858895,624.545187 L304.141105,655.454813" id="Path" stroke="#000000" stroke-width="24"></path>
+    </g>
+</g>
+
+<g id="notion-avatar-nose" data-part="nose-3">
+<g id="Nose/-3" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M636.843465,595.910607 C654.994141,637.483681 663.279537,666.31686 661.699654,682.410144 C660.11977,698.503428 648.515798,703.474491 626.887739,697.323331" id="Line" stroke="#000000" stroke-width="16" transform="translate(644.388576, 647.892684) rotate(1.032339) translate(-644.388576, -647.892684) "></path>
+    </g>
+</g>
+
+<g id="notion-avatar-mouth" data-part="mouth-18">
+<g id="Mouth/ 18">
+<g id="Group">
+<path id="Path" fill-rule="evenodd" clip-rule="evenodd" d="M557 770.275C557 770.275 585.239 770.788 599.667 769.145C614.094 767.502 629.872 761.905 636.345 761.24C642.818 760.574 648.322 764.063 649.819 764.063C651.316 764.063 655.058 760.675 662.544 761.24C670.029 761.804 685 770.275 685 770.275C685 770.275 667.784 774.792 640.836 774.792C590.684 776.486 557 770.275 557 770.275Z" stroke="black" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Path_2" d="M682 771C682 771 675.538 776.607 672 779C666.765 782.54 661.978 785.894 651 786C642.504 786.082 624.027 780.984 613 779C600.148 776.688 563 771 563 771" stroke="black" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+</g>
+</g>
+
+<g id="notion-avatar-eyes" data-part="eyes-4">
+<g id="Eyes/-4" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <path d="M570,516 C583.254834,516 594,526.745166 594,540 C594,553.254834 583.254834,564 570,564 C556.745166,564 546,553.254834 546,540 C546,526.745166 556.745166,516 570,516 Z M708,516 C721.254834,516 732,526.745166 732,540 C732,553.254834 721.254834,564 708,564 C694.745166,564 684,553.254834 684,540 C684,526.745166 694.745166,516 708,516 Z M562,526 C558.686292,526 556,528.686292 556,532 C556,535.313708 558.686292,538 562,538 C565.313708,538 568,535.313708 568,532 C568,528.686292 565.313708,526 562,526 Z M700,526 C696.686292,526 694,528.686292 694,532 C694,535.313708 696.686292,538 700,538 C703.313708,538 706,535.313708 706,532 C706,528.686292 703.313708,526 700,526 Z" id="Combined-Shape" fill="#000000"></path>
+    </g>
+</g>
+
+<g id="notion-avatar-eyebrows" data-part="eyebrows-11">
+<g id="Eyebrows/ 11">
+<g id="Group">
+<path id="Path" fill-rule="evenodd" clip-rule="evenodd" d="M682.541 491.005C682.541 491.005 728.644 489.216 741.813 495.149C754.982 501.082 753.21 511.484 753.21 511.484C753.21 511.484 746.419 503.992 737.34 499.348C728.26 494.703 682.541 491.005 682.541 491.005Z" fill="black" stroke="black" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+<path id="Path_2" fill-rule="evenodd" clip-rule="evenodd" d="M595.459 491.005C595.459 491.005 549.356 489.216 536.187 495.149C523.018 501.082 524.79 511.484 524.79 511.484C524.79 511.484 531.581 503.992 540.66 499.348C549.74 494.703 595.459 491.005 595.459 491.005Z" fill="black" stroke="black" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+</g>
+</g>
+
+<g id="notion-avatar-glasses" data-part="glasses-0">
+<g id="Glasses/-0" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd"></g>
+</g>
+
+<g id="notion-avatar-hair" data-part="hair-30">
+<g id="Hairstyle/-30" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M761,317 C805,388 820.125983,447 820.004537,556 C819.946997,603.166783 803.945484,773.166783 772,1066 L609,859 C645.320405,841.585441 670.320405,826.252108 684,813 C716,782 740.763406,753.438362 749,734 C774,675 778,605 766,552 C758,516.666667 680.53461,491.720366 649,463 C627.976927,443.85309 609.643593,419.85309 594,391 C570,427 542,458.666667 510,486 C490.019849,503.066379 412,543 400,559 C388,575 366,596 381,696 C387.274253,737.828352 404.607586,861.161685 433,1066 L206,860 C159.063506,643.42859 185.063506,407.761923 232,317 C278.467129,227.145696 379,176 515,176 C651,176 717,246 761,317 Z" id="Path" stroke="#000000" stroke-width="12" fill="#000000"></path>
+    </g>
+</g>
+
+<g id="notion-avatar-accessories" data-part="accessories-0">
+<g id="Accessories/-0" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd"></g>
+</g>
+
+<g id="notion-avatar-details" data-part="details-0">
+<g id="Details/-0" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd"></g>
+</g>
+
+<g id="notion-avatar-beard" data-part="beard-0">
+<g id="Beard/-0" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd"></g>
+</g>
+</g>
+</svg>

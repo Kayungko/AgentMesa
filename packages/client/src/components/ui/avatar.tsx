@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { MesaAgent } from '@agentmesa/protocol';
 import { accentFor, hashOf, initials } from './format.js';
 
-// Local 3D role avatars (Microsoft Fluent Emoji, see public/avatars/SOURCE.md).
+// Notion 风手绘线稿头像(由 notion-avatar 部件预组合生成,见 public/avatars/SOURCE.md)。
 const AVATAR_ASSETS = [
   'claude-scientist',
   'codex-technologist',
@@ -11,6 +11,18 @@ const AVATAR_ASSETS = [
   'dashboard-astronaut',
   'knowledge-mage',
   'market-artist',
+  'notion-avatar-01',
+  'notion-avatar-02',
+  'notion-avatar-03',
+  'notion-avatar-04',
+  'notion-avatar-05',
+  'notion-avatar-06',
+  'notion-avatar-07',
+  'notion-avatar-08',
+  'notion-avatar-09',
+  'notion-avatar-10',
+  'notion-avatar-11',
+  'notion-avatar-12',
 ] as const;
 
 /** Pinned mapping first (claude/codex), role-keyword fallback, else undefined. */
@@ -45,7 +57,7 @@ export function Avatar({
     : undefined;
   const [broken, setBroken] = useState(false);
   useEffect(() => setBroken(false), [asset]);
-  const src = asset ? `${import.meta.env.BASE_URL}avatars/${asset}.png` : undefined;
+  const src = asset ? `${import.meta.env.BASE_URL}avatars/${asset}.svg` : undefined;
   return (
     <span className={`avatar avatar--${accent} avatar--${size}`} title={name} aria-label={`${name} 头像`}>
       {src && !broken
