@@ -83,6 +83,14 @@ interface ActiveTurn {
   permissions: Map<string, PendingPermission>;
   agentDeltasSeen: Set<string>;
   reasoningDeltasSeen: Set<string>;
+  /**
+   * itemId → latest `changes` seen on a fileChange item. The
+   * `item/fileChange/requestApproval` payload carries no file paths (only the
+   * itemId), so the item's own changes — observed on the preceding lifecycle
+   * events — are the only source of per-path granularity for the permission
+   * bridge. Without this, patch checks degrade to the whole grantRoot.
+   */
+  fileChanges: Map<string, unknown>;
   timeoutTimer: ReturnType<typeof setTimeout> | null;
   hardFailTimer: ReturnType<typeof setTimeout> | null;
 }
@@ -237,6 +245,7 @@ class CodexAppServerSession implements AgentDriverSession {
       permissions: new Map(),
       agentDeltasSeen: new Set(),
       reasoningDeltasSeen: new Set(),
+      fileChanges: new Map(),
       timeoutTimer: null,
       hardFailTimer: null,
     };
@@ -446,11 +455,20 @@ class CodexAppServerSession implements AgentDriverSession {
       }
       case CODEX_METHODS.fileChangeRequestApproval: {
         const approval = p as FileChangeApprovalParams;
+        // The wire approval payload carries no file paths — reattach the
+        // changes observed on the item's lifecycle events (keyed by itemId)
+        // so the permission bridge judges per-path instead of per-grantRoot.
+        // When the item was never seen (unexpected ordering), fall back to
+        // the raw payload exactly as before.
+        const itemId = str(approval['itemId']);
+        const changes = itemId !== undefined ? active.fileChanges.get(itemId) : undefined;
+        const detail =
+          changes !== undefined ? { ...(asRecord(params) ?? {}), changes } : params;
         const request: DriverPermissionRequest = {
           requestId: String(id),
           kind: 'patch',
-          title: `patch: ${str(approval['itemId']) ?? 'file change'}`,
-          detail: params,
+          title: `patch: ${itemId ?? 'file change'}`,
+          detail,
         };
         active.permissions.set(String(id), {
           serverId: id,
@@ -557,6 +575,11 @@ class CodexAppServerSession implements AgentDriverSession {
         }
         return;
       case 'fileChange':
+        // Track the item's changes (both phases — completed may refine them)
+        // so a subsequent approval request can be attributed to real paths.
+        if (item['changes'] !== undefined) {
+          active.fileChanges.set(String(item['id']), item['changes']);
+        }
         if (phase === 'started') {
           active.queue.push({
             type: 'tool_use',

@@ -135,6 +135,22 @@ async function approvalCommandStream() {
   });
 }
 
+async function approvalPatchUnseenStream() {
+  await sleep(5);
+  // Approval arrives before any fileChange item event: the driver cannot
+  // attribute paths and must fall back to the raw (path-less) payload.
+  await serverRequest('item/fileChange/requestApproval', {
+    threadId: activeThreadId,
+    turnId: TURN_ID,
+    itemId: 'it_unseen',
+    reason: 'apply patch',
+  });
+  notify('turn/completed', {
+    threadId: activeThreadId,
+    turn: { id: TURN_ID, status: 'completed', items: [], error: null },
+  });
+}
+
 async function approvalPatchStream() {
   await sleep(5);
   notify('item/started', {
@@ -190,6 +206,7 @@ const STREAMS = {
   happy: happyStream,
   'approval-command': approvalCommandStream,
   'approval-patch': approvalPatchStream,
+  'approval-patch-unseen': approvalPatchUnseenStream,
   interruptible: interruptibleStream,
   crash: crashStream,
 };

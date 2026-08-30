@@ -214,6 +214,13 @@ describe('CodexAppServerDriver event stream', () => {
       events.push(event);
       if (event.type === 'permission_request') {
         expect(event.request.kind).toBe('patch');
+        // The wire approval payload carries no file paths; the driver must
+        // reattach the item's own changes (keyed by itemId) so the permission
+        // bridge can judge per-path instead of per-grantRoot.
+        const detail = event.request.detail as Record<string, unknown>;
+        expect(detail['changes']).toEqual([
+          { path: 'a.txt', kind: 'add', diff: '+hello' },
+        ]);
         await session.respondPermission(event.request.requestId, 'deny');
       }
     }
@@ -221,6 +228,26 @@ describe('CodexAppServerDriver event stream', () => {
     expect(events.at(-1)).toMatchObject({ type: 'turn_complete', success: true });
     const decision = readLog().find((e) => e['dir'] === 'decision');
     expect(decision).toMatchObject({ result: { decision: 'decline' } });
+    await session.close();
+  }, 20000);
+
+  it('falls back to the raw payload when the approval precedes its item events', async () => {
+    const driver = makeDriver('approval-patch-unseen');
+    const session = await driver.createSession({ cwd: dir });
+
+    const events: DriverEvent[] = [];
+    for await (const event of session.send({ prompt: 'apply the patch' })) {
+      events.push(event);
+      if (event.type === 'permission_request') {
+        expect(event.request.kind).toBe('patch');
+        const detail = event.request.detail as Record<string, unknown>;
+        expect(detail['changes']).toBeUndefined();
+        expect(detail['itemId']).toBe('it_unseen');
+        await session.respondPermission(event.request.requestId, 'allow');
+      }
+    }
+
+    expect(events.at(-1)).toMatchObject({ type: 'turn_complete', success: true });
     await session.close();
   }, 20000);
 
