@@ -1,0 +1,176 @@
+# AgentMesa Deep Drivers
+
+M4 "Deep Orchestration" adds **deep drivers** to the runner layer. A deep
+driver wraps a *persistent, stateful agent session* (Claude Agent SDK, Codex
+app-server) so AgentMesa can drive full agent sessions — multi-turn threads,
+permission gates, interruption, and resume across processes — instead of only
+firing one-shot CLI commands.
+
+This document covers the driver contract, the two backends, the
+selection/fallback rules, and how permission requests are bridged.
+
+## AgentDriver Contract
+
+The contract lives in `packages/runner/src/drivers/types.ts` (frozen —
+drivers implement it, the executor consumes it):
+
+```ts
+interface AgentDriver {
+  readonly kind: 'claude-agent-sdk' | 'codex-app-server';
+  readonly name: string;
+  isAvailable(): Promise<boolean>;                                  // cheap, side-effect free probe
+  createSession(init: DriverSessionInit): Promise<AgentDriverSession>;
+  resumeSession(handle: DriverSessionHandle, init: DriverSessionInit): Promise<AgentDriverSession>;
+}
+```
+
+A session runs one turn at a time:
+
+```ts
+interface AgentDriverSession {
+  readonly kind: DriverKind;
+  readonly backendSessionId: string;
+  send(input: DriverTurnInput): AsyncIterableIterator<DriverEvent>; // one turn
+  respondPermission(requestId, 'allow' | 'deny', message?): Promise<void>;
+  interrupt(): Promise<void>;   // drives the in-flight turn to a terminal event
+  handle(): DriverSessionHandle; // serializable — persist and resume later
+  close(): Promise<void>;
+}
+```
+
+Turn events (`DriverEvent`): `text`, `thinking`, `tool_use`,
+`permission_request`, `turn_complete` (terminal), `error` (optionally fatal).
+While the event iterable is being consumed, pending `permission_request`s must
+be answered via `respondPermission` or the turn stalls.
+
+**Driver rules:**
+
+- Drivers never require their backing binary/SDK at import time —
+  `isAvailable()` is the availability probe.
+- Drivers are transport-agnostic about Mesa: events and permission callbacks
+  only. Policy enforcement (`assertPolicy`) and approval gates are wired by
+  the caller (run-executor), never inside a driver.
+
+## Backends
+
+| Driver | Kind | Backing | Notes |
+|---|---|---|---|
+| Claude Agent SDK driver | `claude-agent-sdk` | `@anthropic-ai/claude-agent-sdk` | Full agent sessions with multi-turn threads, permission modes, and session resume by SDK session id. |
+| Codex app-server driver | `codex-app-server` | Codex `app-server` | Codex conversations over the app-server protocol, resumed by conversation id. |
+
+The registry is dependency-injected: `executeRun(ctx, runId, { driverRegistry })`.
+Tests pass fakes; the application assembles real drivers in
+`packages/runner/src/drivers/index.ts`. The executor never imports a concrete
+driver implementation.
+
+## Selection and Fallback
+
+`resolveDriverTransport(preference, agent, registry)`
+(`packages/runner/src/drivers/resolve.ts`) decides between the deep-driver
+path and the legacy one-shot CLI runners:
+
+| Preference | Registry state | Outcome |
+|---|---|---|
+| `cli` | anything | CLI runner, reason `driver preference set to cli`. |
+| `auto` (default) | driver for the agent's `client` registered + available | Deep driver. `claude*` clients → `claude-agent-sdk`; `codex*` clients → `codex-app-server`. |
+| `auto` | no driver mapping for the client (e.g. `remote`) | CLI runner, reason `no driver mapping for agent client "…"`. |
+| `auto` | mapped driver missing or `isAvailable()` false (or throws) | CLI runner, reason `driver "…" not registered` / `driver "…" unavailable`. |
+| `claude-agent-sdk` / `codex-app-server` | that driver registered + available | Deep driver (client field ignored). |
+| `claude-agent-sdk` / `codex-app-server` | missing or unavailable | CLI runner, with the matching reason. |
+| any | empty registry | CLI runner, reason `no deep drivers registered`. |
+
+The preference source order: an explicit `driverPreference` argument → the
+`AGENTMESA_DRIVER` environment variable (`auto|claude-agent-sdk|codex-app-server|cli`)
+→ `auto`. Unknown values parse to `auto` (never crash the executor over a bad
+env value).
+
+Dry runs always take the CLI path (they execute nothing by design).
+
+## Run-Executor Integration
+
+`executeRun` (packages/runner/src/run-executor.ts) keeps the run state machine
+unchanged — `pending → running → completed | failed` — and picks the transport
+after marking the run `running`:
+
+1. Inject a non-empty `driverRegistry` and resolve the transport (above).
+2. **Driver path**: resume the persisted session handle for this agent+scope
+   when possible, otherwise `createSession`; run one turn with `run.input` as
+   the prompt; map events to `RunProgress`; persist the resulting handle;
+   close the session. Output becomes the run output (and `agent_run_log`
+   artifact on success), exactly like a CLI run.
+3. **CLI path** (preference `cli`, driver unavailable, empty registry, dry
+   run): byte-for-byte the pre-M4 behavior — the legacy runner is invoked with
+   the same options and progress stages.
+
+Event → progress mapping (`RunProgress` shape, stage names):
+
+| DriverEvent | RunProgress stage |
+|---|---|
+| turn start | `driver_session` (percent 10) |
+| `text` | `agent_message` |
+| `thinking` | `agent_thinking` |
+| `tool_use` | `tool_use` (`tool: <input summary>`) |
+| `permission_request` | `permission_request`, then `permission_granted` / `permission_denied` |
+| non-fatal `error` | `driver_error` |
+| terminal | the standard `persisting_artifact` / `completed` / `failed` stages |
+
+Timeouts and interrupts reuse the existing run state machine: the driver
+turn's wall-clock budget is the run `timeout`; on expiry the executor calls
+`session.interrupt()`, keeps draining events for a short grace period, and
+fails the run with a timeout note.
+
+## Session Resume
+
+`DriverSessionHandle { kind, backendSessionId, createdAt }` is serializable.
+Because the core `MesaAgentRun` record is schema-validated (unknown fields are
+stripped) and out of scope for M4 wiring, handles are persisted as a sidecar
+store instead of inside the run record:
+
+- Location: `.agentmesa/driver-sessions/<sanitized-agentId>.json` (atomic
+  temp+rename writes).
+- Scope: one handle per **agent + scope**, where scope is the run's
+  `meetingId`, else `taskId`, else a global bucket — a session threads within
+  one meeting, never across meetings.
+- On the next `executeRun` for the same agent and scope, the executor resumes
+  the saved handle (same driver kind only; kind mismatch, missing, corrupted,
+  or failing resume → fresh `createSession`).
+- The handle is persisted after every turn (success or failure) and the
+  session is then closed; resume relies on the backend's own session
+  persistence (SDK session id / app-server conversation id).
+
+`executeDriverTurn(ctx, params)` is exported directly (runner package root) so
+the CLI and Desk can drive a deep-driver turn without going through an agent
+run.
+
+## Permission Bridging
+
+Deep-driver permission requests are answered through an injected responder:
+
+```ts
+type DriverPermissionResponder =
+  (request: DriverPermissionRequest) => Promise<'allow' | 'deny'>;
+```
+
+- `DriverPermissionRequest` carries `requestId`, `kind`
+  (`tool|command|patch`), a human-readable `title`, and the raw `detail` for
+  policy evaluation.
+- The responder is passed as `executeRun`'s `permissionResponder` option (or
+  `executeDriverTurn`'s parameter).
+- **Default: deny everything.** Without an injected responder, every gated
+  action is denied with `Denied by AgentMesa policy` — deep drivers fail
+  closed.
+- The real bridge (assertPolicy + human approval gate over Desk) is future
+  wiring; the injection point is the `permissionResponder` option.
+
+## Implementation Status
+
+| Component | Status |
+|---|---|
+| Driver contract (`drivers/types.ts`) | **Done.** Frozen contract; events, permission requests, handles, resume. |
+| Claude Agent SDK driver backend | **In progress** (parallel work; assembled in `drivers/index.ts`). |
+| Codex app-server driver backend | **In progress** (parallel work; assembled in `drivers/index.ts`). |
+| Selection + CLI fallback (`drivers/resolve.ts`) | **Done.** Preference parsing (`AGENTMESA_DRIVER`), client mapping, availability probing, fallback reasons. |
+| run-executor integration | **Done.** Driver turn path, event→progress mapping, timeout/interrupt, artifact persistence; CLI path byte-identical. |
+| Handle persistence + resume | **Done.** Sidecar store under `.agentmesa/driver-sessions/`, per agent+scope resume, resume-failure fallback. |
+| Permission bridging | **Injection point done** (deny-all default). Policy-engine / human-approval bridge is future work. |
+| Real driver assembly (`drivers/index.ts`) | **Pending** — owner session wires the concrete drivers from the parallel backend work. |

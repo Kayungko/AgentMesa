@@ -153,6 +153,31 @@ Status: **Done** (implementation in `packages/mcp-server`; see
   `remote` workspace id; non-loopback binds without a token refuse to start,
   and every request must carry `Authorization: Bearer <token>`.)
 
+## Release 1.4: Deep Orchestration (M4)
+
+Status: **wiring done; driver backends land from parallel work.** See
+`docs/DRIVERS.md`.
+
+- Deep driver contract (`packages/runner/src/drivers/types.ts`): persistent
+  agent sessions — multi-turn, permission gates, interrupt, resumable handles.
+  **Done** (frozen contract).
+- Two deep-driver backends — Claude Agent SDK driver and Codex app-server
+  driver. **Driver 后端实现由并行工作合入**（assembled into the registry via
+  `drivers/index.ts` by the main session）.
+- Driver selection + fallback (`drivers/resolve.ts`): preference
+  (`AGENTMESA_DRIVER` / `auto|claude-agent-sdk|codex-app-server|cli`),
+  agent-client mapping, availability probing, CLI fallback with reasons.
+  **Done.**
+- Run-executor integration: driver turn execution path (resume-or-create
+  session, DriverEvent→RunProgress mapping, timeout→interrupt, permission
+  bridging with deny-all default) with the CLI path kept byte-identical.
+  **Done.**
+- Session resume persistence: `DriverSessionHandle` sidecar store under
+  `.agentmesa/driver-sessions/` (per agent+scope; run record schema is
+  untouched). **Done.**
+- Policy-engine / human-approval permission bridge, real driver assembly,
+  desk/CLI surfacing of driver runs: **future work** (injection points ready).
+
 ## 1.x Acceptance Scenario (universal collaboration)
 
 In Mesa Desk, a user should be able to:

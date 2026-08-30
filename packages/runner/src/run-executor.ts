@@ -1,6 +1,7 @@
 import {
   MesaError,
   appendAgentRunProgress,
+  getAgent,
   getAgentRun,
   updateAgentRunStatus,
   createArtifact,
@@ -8,6 +9,22 @@ import {
 import type { MesaRuntimeContext } from '@agentmesa/core';
 import type { MesaAgentRun, RunProgress } from '@agentmesa/protocol';
 import type { RunProgressSink, RunResult, RunnerType } from './types.js';
+import type {
+  AgentDriver,
+  AgentDriverSession,
+  DriverEvent,
+  DriverPermissionRequest,
+  DriverPreference,
+  DriverSessionHandle,
+  DriverSessionInit,
+} from './drivers/types.js';
+import {
+  driverSessionScope,
+  loadDriverSessionHandle,
+  resolveDriverPreference,
+  resolveDriverTransport,
+  saveDriverSessionHandle,
+} from './drivers/resolve.js';
 import { createRunner } from './runner-factory.js';
 import { parseRunOutput } from './output-parser.js';
 
@@ -50,12 +67,36 @@ export function resolveRunnerType(run: MesaAgentRun): RunnerType {
   }
 }
 
+/**
+ * Permission gate for deep-driver turns. The default implementation denies
+ * everything; the real policy engine / human approval bridge is injected here
+ * by the caller (CLI/desk — see docs/DRIVERS.md § Permission bridging).
+ */
+export type DriverPermissionResponder = (
+  request: DriverPermissionRequest,
+) => Promise<'allow' | 'deny'>;
+
+const denyAllPermissions: DriverPermissionResponder = async () => 'deny';
+
 export interface RunExecutorOptions {
   dryRun?: boolean;
   /** Persist run output as an artifact. Default true; always skipped on dry run. */
   createArtifacts?: boolean;
   timeout?: number;
   onProgress?: RunProgressSink;
+  /**
+   * M4 deep-driver registry (dependency-injected; tests pass fakes, the app
+   * assembles real drivers in `drivers/index.ts`). Empty or omitted keeps the
+   * legacy CLI path byte-for-byte.
+   */
+  driverRegistry?: readonly AgentDriver[];
+  /**
+   * Deep-driver preference: 'auto' | 'claude-agent-sdk' | 'codex-app-server' |
+   * 'cli'. Falls back to the `AGENTMESA_DRIVER` env var, then 'auto'.
+   */
+  driverPreference?: DriverPreference | string;
+  /** Permission gate for deep-driver turns. Default: deny all. */
+  permissionResponder?: DriverPermissionResponder;
 }
 
 export interface RunExecutionResult {
@@ -69,6 +110,12 @@ export interface RunExecutionResult {
  * Drive an existing `pending` agent run through its lifecycle:
  * pending → running → completed | failed. Captures output and, on a
  * successful non-dry run, persists it as an `agent_run_log` artifact.
+ *
+ * When a non-empty `driverRegistry` is injected and the resolved driver
+ * transport is available, the run executes as one deep-driver turn instead of
+ * a one-shot CLI invocation (session resume via the persisted handle). Every
+ * other combination — preference `cli`, driver unavailable, empty registry,
+ * dry runs — takes the unchanged CLI path.
  */
 export async function executeRun(
   ctx: MesaRuntimeContext,
@@ -105,18 +152,53 @@ export async function executeRun(
   await reportProgress({ stage: 'started', message: 'Run started', percent: 0 });
   const runner = createRunner(runnerType, ctx.paths, dryRun);
 
+  const driverRegistry = options?.driverRegistry ?? [];
+  const driverResolution =
+    !dryRun && driverRegistry.length > 0
+      ? await resolveDriverTransport(
+          resolveDriverPreference(options?.driverPreference),
+          safeGetAgent(ctx, run.agentId),
+          driverRegistry,
+        )
+      : undefined;
+
   let result: RunResult;
   try {
-    await reportProgress({ stage: 'runner_invoked', message: `Invoking ${runnerType}`, percent: 10 });
-    result = await runner.run({
-      taskId: run.taskId ?? '',
-      runnerType,
-      agentId: run.agentId,
-      dryRun,
-      ...(options?.timeout !== undefined ? { timeout: options.timeout } : {}),
-      extraPrompt: run.input,
-      onProgress: reportProgress,
-    });
+    const selectedDriver =
+      driverResolution?.transport === 'driver' ? driverResolution.driver : undefined;
+    if (selectedDriver) {
+      await reportProgress({
+        stage: 'driver_session',
+        message: `Executing deep-driver turn via ${selectedDriver.name}`,
+        percent: 10,
+      });
+      const outcome = await executeDriverTurn(ctx, {
+        run,
+        driver: selectedDriver,
+        runnerType,
+        timeoutMs: options?.timeout,
+        permissionResponder: options?.permissionResponder,
+        onProgress: reportProgress,
+      });
+      result = outcome.result;
+    } else {
+      if (driverResolution?.fallbackReason) {
+        ctx.logger.warn('Deep driver unavailable; falling back to CLI runner', {
+          runId,
+          reason: driverResolution.fallbackReason,
+        });
+      }
+      await reportProgress({ stage: 'runner_invoked', message: `Invoking ${runnerType}`, percent: 10 });
+      result = await runner.run({
+        taskId: run.taskId ?? '',
+        runnerType,
+        agentId: run.agentId,
+        dryRun,
+        ...(options?.timeout !== undefined ? { timeout: options.timeout } : {}),
+        extraPrompt: run.input,
+        onProgress: reportProgress,
+      });
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await reportProgress({ stage: 'failed', message, percent: 100 });
@@ -156,4 +238,294 @@ export async function executeRun(
   });
 
   return { run: completed, result };
+}
+
+function safeGetAgent(ctx: MesaRuntimeContext, agentId: string) {
+  try {
+    return getAgent(ctx, agentId);
+  } catch {
+    return undefined;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Deep-driver turn execution (M4)
+// ---------------------------------------------------------------------------
+
+/** Outcome of one deep-driver turn. */
+export interface DriverTurnOutcome {
+  /** RunResult-shaped outcome for the standard run state machine. */
+  result: RunResult;
+  /** Persisted session handle (present unless the driver failed to produce one). */
+  handle: DriverSessionHandle | undefined;
+  /** True when an existing session was resumed instead of created. */
+  resumed: boolean;
+}
+
+/** Raised internally when a driver turn exceeds its wall-clock budget. */
+class DriverTurnTimeout extends Error {}
+
+const PROGRESS_MESSAGE_LIMIT = 200;
+
+function truncateForProgress(text: string): string {
+  const oneLine = text.replace(/\s+/g, ' ').trim();
+  return oneLine.length > PROGRESS_MESSAGE_LIMIT
+    ? `${oneLine.slice(0, PROGRESS_MESSAGE_LIMIT)}…`
+    : oneLine;
+}
+
+function summarizeToolInput(input: unknown): string {
+  if (input === undefined || input === null) {
+    return '';
+  }
+  if (typeof input === 'string') {
+    return truncateForProgress(input);
+  }
+  try {
+    return truncateForProgress(JSON.stringify(input));
+  } catch {
+    return '';
+  }
+}
+
+function driverSessionInit(ctx: MesaRuntimeContext): DriverSessionInit {
+  return { cwd: ctx.paths.rootDir, requirePermissions: true };
+}
+
+function raceNextEvent(
+  iterator: AsyncIterableIterator<DriverEvent>,
+  budgetMs: number,
+): Promise<IteratorResult<DriverEvent>> {
+  return Promise.race([
+    iterator.next(),
+    new Promise<never>((_, reject) => {
+      const timer = setTimeout(
+        () => reject(new DriverTurnTimeout(`driver turn exceeded ${budgetMs}ms`)),
+        budgetMs,
+      );
+      timer.unref?.();
+    }),
+  ]);
+}
+
+export interface DriverTurnParams {
+  /** The agent run whose `input` is the turn prompt (used for scope + identity). */
+  run: MesaAgentRun;
+  /** The resolved deep driver. */
+  driver: AgentDriver;
+  /** RunnerType stamped onto the returned RunResult. */
+  runnerType: RunnerType;
+  /** Override the turn prompt (defaults to `run.input`). */
+  prompt?: string;
+  /** Wall-clock cap for the whole turn, in milliseconds. */
+  timeoutMs?: number;
+  /** Permission gate; default denies everything. */
+  permissionResponder?: DriverPermissionResponder;
+  /** Progress sink (failures are swallowed — progress must not kill a turn). */
+  onProgress?: RunProgressSink;
+}
+
+/**
+ * Execute one turn on a deep-driver session: resume the persisted handle for
+ * this agent+scope when possible (otherwise create a session), stream
+ * DriverEvents into RunProgress, bridge permission requests through the
+ * injected responder, persist the resulting handle, and close the session.
+ *
+ * Exported so the CLI / desk can drive deep-driver turns directly, outside the
+ * agent-run state machine.
+ */
+export async function executeDriverTurn(
+  ctx: MesaRuntimeContext,
+  params: DriverTurnParams,
+): Promise<DriverTurnOutcome> {
+  const { run, driver, runnerType } = params;
+  const prompt = params.prompt ?? run.input;
+  const respondPermission = params.permissionResponder ?? denyAllPermissions;
+  const timeoutMs = params.timeoutMs;
+  // After an interrupt the driver should emit a terminal event promptly; this
+  // grace budget bounds how long we keep draining before giving up on it.
+  const graceMs = Math.max(100, Math.min(timeoutMs ?? 30_000, 5_000));
+  const startTime = Date.now();
+  const scope = driverSessionScope(run);
+
+  const savedHandle = loadDriverSessionHandle(ctx, run.agentId, scope);
+  let session: AgentDriverSession | undefined;
+  let resumed = false;
+  if (savedHandle && savedHandle.kind === driver.kind) {
+    try {
+      session = await driver.resumeSession(savedHandle, driverSessionInit(ctx));
+      resumed = true;
+    } catch (error) {
+      ctx.logger.warn('Deep driver resume failed; creating a new session', {
+        agentId: run.agentId,
+        driver: driver.name,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      session = undefined;
+    }
+  }
+  if (!session) {
+    session = await driver.createSession(driverSessionInit(ctx));
+  }
+  const activeSession: AgentDriverSession = session;
+
+  const emit = async (stage: string, message: string): Promise<void> => {
+    if (message.length === 0) {
+      return;
+    }
+    try {
+      await params.onProgress?.({ stage, message });
+    } catch {
+      // Progress sink failures must never fail the turn.
+    }
+  };
+
+  const textChunks: string[] = [];
+  let turnSuccess = false;
+  let turnSummary = '';
+  let fatalError: string | undefined;
+  let timedOut = false;
+  let handle: DriverSessionHandle | undefined;
+
+  try {
+    const iterator = activeSession.send({
+      prompt,
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    });
+    try {
+      for (;;) {
+        const next =
+          timeoutMs === undefined
+            ? await iterator.next()
+            : await raceNextEvent(
+                iterator,
+                timedOut ? graceMs : Math.max(0, timeoutMs - (Date.now() - startTime)),
+              );
+        if (next.done) {
+          break;
+        }
+        const event = next.value;
+        if (event.type === 'text') {
+          textChunks.push(event.text);
+          await emit('agent_message', truncateForProgress(event.text));
+          continue;
+        }
+        if (event.type === 'thinking') {
+          await emit('agent_thinking', truncateForProgress(event.text));
+          continue;
+        }
+        if (event.type === 'tool_use') {
+          const inputSummary = summarizeToolInput(event.input);
+          await emit('tool_use', inputSummary ? `${event.tool}: ${inputSummary}` : event.tool);
+          continue;
+        }
+        if (event.type === 'permission_request') {
+          await emit('permission_request', truncateForProgress(event.request.title));
+          const decision = await respondPermission(event.request);
+          await emit(
+            decision === 'allow' ? 'permission_granted' : 'permission_denied',
+            truncateForProgress(event.request.title),
+          );
+          await activeSession.respondPermission(
+            event.request.requestId,
+            decision,
+            decision === 'allow' ? undefined : 'Denied by AgentMesa policy',
+          );
+          continue;
+        }
+        if (event.type === 'error') {
+          if (event.fatal) {
+            fatalError = event.message;
+            break;
+          }
+          await emit('driver_error', truncateForProgress(event.message));
+          continue;
+        }
+        // turn_complete
+        turnSuccess = event.success;
+        turnSummary = event.summary;
+        break;
+      }
+    } catch (error) {
+      if (error instanceof DriverTurnTimeout && !timedOut) {
+        timedOut = true;
+        try {
+          await activeSession.interrupt();
+        } catch {
+          // Best effort — the grace drain below bounds the wait.
+        }
+        // Keep draining so a compliant driver can still flush a terminal event.
+        try {
+          for (;;) {
+            const next = await raceNextEvent(iterator, graceMs);
+            if (next.done) {
+              break;
+            }
+            const event = next.value;
+            if (event.type === 'turn_complete') {
+              turnSuccess = event.success;
+              turnSummary = event.summary;
+              break;
+            }
+            if (event.type === 'error' && event.fatal) {
+              fatalError = event.message;
+              break;
+            }
+          }
+        } catch {
+          // Grace expired or the driver died — timedOut already records the failure.
+        }
+      } else {
+        throw error;
+      }
+    }
+  } finally {
+    try {
+      handle = activeSession.handle();
+      saveDriverSessionHandle(ctx, run.agentId, scope, handle, run.id);
+    } catch (error) {
+      ctx.logger.warn('Failed to persist deep driver session handle', {
+        agentId: run.agentId,
+        driver: driver.name,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    try {
+      await activeSession.close();
+    } catch {
+      // Best-effort cleanup.
+    }
+  }
+
+  const textOutput = textChunks.join('\n').trim();
+  let success: boolean;
+  let output: string;
+  if (timedOut) {
+    success = false;
+    const note = `[deep driver turn interrupted: timeout after ${timeoutMs}ms]`;
+    output = textOutput.length > 0 ? `${textOutput}\n\n${note}` : note;
+  } else if (fatalError !== undefined) {
+    success = false;
+    output = textOutput.length > 0 ? `${textOutput}\n\n${fatalError}` : fatalError;
+  } else if (!turnSuccess) {
+    success = false;
+    // The turn summary explains why the turn failed — keep it alongside any
+    // partial output, since this text becomes the run's `error` field.
+    output = textOutput.length > 0 ? `${textOutput}\n\n${turnSummary}` : turnSummary;
+  } else {
+    success = true;
+    output = textOutput.length > 0 ? textOutput : turnSummary;
+  }
+
+  const result: RunResult = {
+    success,
+    runnerType,
+    taskId: run.taskId ?? '',
+    agentId: run.agentId,
+    output,
+    artifacts: [],
+    duration: Date.now() - startTime,
+    dryRun: false,
+  };
+  return { result, handle, resumed };
 }

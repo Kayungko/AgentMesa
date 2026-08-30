@@ -9,7 +9,13 @@
     "url": "https://github.com/agentmesa/agentmesa",
     "directory": "packages/runner"
   },
-  "keywords": ["agentmesa", "ai-agents", "claude-code", "codex", "mcp"],
+  "keywords": [
+    "agentmesa",
+    "ai-agents",
+    "claude-code",
+    "codex",
+    "mcp"
+  ],
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -25,7 +31,8 @@
   },
   "dependencies": {
     "@agentmesa/core": "workspace:*",
-    "@agentmesa/protocol": "workspace:*"
+    "@agentmesa/protocol": "workspace:*",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.251"
   },
   "devDependencies": {
     "tsup": "^8.3.5",

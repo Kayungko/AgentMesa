@@ -41,3 +41,44 @@ export {
   terminateSessionChildren,
   activeSessionChildCount,
 } from './session-children.js';
+
+// --- M4 Deep Orchestration (drivers) ---
+
+export type {
+  AgentDriver,
+  AgentDriverSession,
+  DriverEvent,
+  DriverKind,
+  DriverPermissionRequest,
+  DriverPreference,
+  DriverSessionHandle,
+  DriverSessionInit,
+  DriverTurnInput,
+} from './drivers/types.js';
+
+export {
+  DRIVER_PREFERENCE_ENV,
+  DRIVER_SESSIONS_DIR,
+  clientToDriverKind,
+  driverSessionScope,
+  loadDriverSessionHandle,
+  parseDriverPreference,
+  resolveDriverPreference,
+  resolveDriverTransport,
+  saveDriverSessionHandle,
+} from './drivers/resolve.js';
+export type { DriverTransportResolution } from './drivers/resolve.js';
+
+export { createDefaultDriverRegistry } from './drivers/index.js';
+export { ClaudeSdkDriver } from './drivers/index.js';
+export type { ClaudeSdkDriverOptions } from './drivers/index.js';
+export { CodexAppServerDriver } from './drivers/index.js';
+export type { CodexAppServerDriverOptions } from './drivers/index.js';
+
+export { executeDriverTurn } from './run-executor.js';
+export type {
+  DriverPermissionResponder,
+  DriverTurnOutcome,
+  DriverTurnParams,
+} from './run-executor.js';
+
