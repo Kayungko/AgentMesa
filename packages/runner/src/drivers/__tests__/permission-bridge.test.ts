@@ -81,6 +81,15 @@ describe('createPolicyPermissionResponder — command', () => {
     expect(log[0]).toMatchObject({ decision: 'deny', rule: 'command.capability' });
   });
 
+  it('allows allowlisted commands for the owner role (core bypass parity)', async () => {
+    // Owner mirrors core's owner bypass: the role table must carry
+    // run_command, otherwise the bridge denies what core allows.
+    const { log, onDecision } = records();
+    const responder = createPolicyPermissionResponder({ roles: ['owner'], onDecision });
+    await expect(responder(request('command', { command: 'pnpm test' }))).resolves.toBe('allow');
+    expect(log[0]).toMatchObject({ decision: 'allow', rule: 'command.allow' });
+  });
+
   it('honors the prefix-match semantics of the allowlist', async () => {
     const responder = createPolicyPermissionResponder({ roles: ['tester'] });
     await expect(

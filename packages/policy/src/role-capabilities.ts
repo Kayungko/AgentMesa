@@ -2,12 +2,21 @@ import type { RoleCapability } from './types.js';
 
 export function defineRoleCapabilities(): RoleCapability {
   return {
+    // Owner mirrors the core engine's bypass semantics (RoleBasedPolicyEngine
+    // short-circuits to allow for owners): every PolicyAction is granted,
+    // including the code-execution vocabulary (modify_source / run_command /
+    // push_code / merge_pr). Without this, the runner permission bridge would
+    // deny Bash/Write tool calls for owners while core allows them.
     owner: [
       'read_task',
       'write_task',
       'change_status',
       'post_message',
       'create_artifact',
+      'modify_source',
+      'run_command',
+      'push_code',
+      'merge_pr',
       'archive_task',
       'delete_task',
       'manage_agents',
@@ -17,6 +26,8 @@ export function defineRoleCapabilities(): RoleCapability {
       'rebuild_projections',
       'inspect_transports',
       'manage_runs',
+      'manage_workflows',
+      'manage_rooms',
     ],
     chair: [
       'read_task',
@@ -37,6 +48,8 @@ export function defineRoleCapabilities(): RoleCapability {
       'rebuild_projections',
       'inspect_transports',
       'manage_runs',
+      'manage_workflows',
+      'manage_rooms',
     ],
     planner: [
       'read_task',
@@ -58,6 +71,9 @@ export function defineRoleCapabilities(): RoleCapability {
       'read_events',
       'read_projections',
       'manage_runs',
+      'manage_meetings',
+      'manage_agents',
+      'manage_rooms',
     ],
     reviewer: [
       'read_task',
@@ -100,6 +116,8 @@ export function defineRoleCapabilities(): RoleCapability {
       'rebuild_projections',
       'inspect_transports',
       'manage_runs',
+      'manage_workflows',
+      'manage_rooms',
     ],
     researcher: [
       'read_task',
@@ -111,6 +129,9 @@ export function defineRoleCapabilities(): RoleCapability {
     custom: [
       'read_task',
     ],
+    // Admin mirrors the core vocabulary (all core capabilities, like core's
+    // admin) but stays deliberately off the code-execution vocabulary —
+    // administer ≠ execute. Only owner carries the full bypass semantics.
     admin: [
       'read_task',
       'write_task',
@@ -126,6 +147,8 @@ export function defineRoleCapabilities(): RoleCapability {
       'rebuild_projections',
       'inspect_transports',
       'manage_runs',
+      'manage_workflows',
+      'manage_rooms',
     ],
     connector: [
       'read_task',

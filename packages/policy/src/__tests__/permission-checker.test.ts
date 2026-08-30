@@ -2,13 +2,48 @@ import { describe, it, expect } from 'vitest';
 import type { AgentRole } from '@agentmesa/protocol';
 import { PermissionChecker, PolicyError } from '../permission-checker.js';
 import { defineRoleCapabilities } from '../role-capabilities.js';
+import type { PolicyAction } from '../types.js';
 
 const checker = new PermissionChecker();
 const capabilities = defineRoleCapabilities();
 
 describe('defineRoleCapabilities', () => {
-  it('chair has all 18 actions', () => {
-    expect(capabilities.chair).toHaveLength(18);
+  it('owner carries every PolicyAction, mirroring the core owner bypass', () => {
+    // Core's RoleBasedPolicyEngine short-circuits owners to allow-all; this
+    // table is what the runner permission bridge consults for Bash/Write
+    // tool calls, so an owner without run_command would be denied there
+    // while core allows — keep the two engines in lockstep.
+    const allActions: PolicyAction[] = [
+      'read_task',
+      'write_task',
+      'change_status',
+      'post_message',
+      'create_artifact',
+      'modify_source',
+      'run_command',
+      'push_code',
+      'merge_pr',
+      'archive_task',
+      'delete_task',
+      'manage_agents',
+      'manage_meetings',
+      'read_events',
+      'read_projections',
+      'rebuild_projections',
+      'inspect_transports',
+      'manage_runs',
+      'manage_workflows',
+      'manage_rooms',
+    ];
+    expect(capabilities.owner).toHaveLength(allActions.length);
+    for (const action of allActions) {
+      expect(capabilities.owner).toContain(action);
+      expect(checker.canPerform('owner', action)).toBe(true);
+    }
+  });
+
+  it('chair has all 20 actions', () => {
+    expect(capabilities.chair).toHaveLength(20);
     expect(capabilities.chair).toContain('read_task');
     expect(capabilities.chair).toContain('write_task');
     expect(capabilities.chair).toContain('change_status');
@@ -27,6 +62,8 @@ describe('defineRoleCapabilities', () => {
     expect(capabilities.chair).toContain('rebuild_projections');
     expect(capabilities.chair).toContain('inspect_transports');
     expect(capabilities.chair).toContain('manage_runs');
+    expect(capabilities.chair).toContain('manage_workflows');
+    expect(capabilities.chair).toContain('manage_rooms');
   });
 
   it('planner has correct actions', () => {
@@ -45,8 +82,13 @@ describe('defineRoleCapabilities', () => {
     expect(capabilities.builder).toContain('create_artifact');
     expect(capabilities.builder).toContain('read_events');
     expect(capabilities.builder).toContain('read_projections');
+    // Aligned with core: builder carries manage_agents / manage_meetings /
+    // manage_rooms (the default MCP actor role must be able to register
+    // itself and open meetings/rooms).
+    expect(capabilities.builder).toContain('manage_agents');
+    expect(capabilities.builder).toContain('manage_meetings');
+    expect(capabilities.builder).toContain('manage_rooms');
     expect(capabilities.builder).not.toContain('push_code');
-    expect(capabilities.builder).not.toContain('manage_agents');
   });
 
   it('reviewer has correct actions', () => {
@@ -173,7 +215,10 @@ describe('PermissionChecker.getRolesForAction', () => {
     expect(roles).toContain('chair');
     expect(roles).toContain('maintainer');
     expect(roles).toContain('admin');
-    expect(roles).toHaveLength(4);
+    // builder joins the list to match core (self-registration for the
+    // default MCP actor role).
+    expect(roles).toContain('builder');
+    expect(roles).toHaveLength(5);
   });
 
   it('returns roles that can read_events', () => {
