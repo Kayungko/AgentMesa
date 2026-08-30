@@ -137,6 +137,50 @@ The Mesa MCP server acts as a transport adapter. It wraps each Core service call
 
 MCP is **one transport**, not the center. The tools it exposes are thin adapters over Core — the same Core any other transport can call.
 
+## MCP Streamable HTTP (Release 1.3)
+
+The MCP server's second wire binding, for GUI apps with custom-connector
+support (ChatGPT dev mode, Claude Desktop, Cursor, Mana-class apps). It runs
+the same tools as stdio — the transport layer is abstracted so tool handlers
+stay transport-agnostic.
+
+**How it works:**
+- Start with `mesa-mcp --transport http [--host 127.0.0.1] [--port 8765] [--token <token>]` (or `AGENTMESA_MCP_TRANSPORT=http` plus the `AGENTMESA_HTTP_HOST` / `AGENTMESA_HTTP_PORT` / `AGENTMESA_HTTP_TOKEN` environment variables).
+- Single endpoint (`/mcp` by default) speaking the MCP Streamable HTTP transport specification: `POST` for JSON-RPC requests/responses, `DELETE` to terminate a session, and an optional SSE `GET` stream for servers that push (this deployment answers tool calls with plain JSON responses).
+- Sessions are stateful: the server assigns an `mcp-session-id` at `initialize` and routes every subsequent request to that session's transport + server pair.
+
+**Per-connection actor binding.** Each session owns its own `McpServer`
+instance whose actor is read from the connection's headers at initialize
+time — never the shared env-derived actor that stdio uses:
+
+- `x-agentmesa-actor-id` — the actor id (e.g. `agent:codex`). Omitted: a
+  connection-scoped fallback `agent:http-<sessionId prefix>`, unique per
+  connection.
+- `x-agentmesa-actor-roles` — comma-separated roles, validated against the
+  protocol role enum. Omitted: `builder`, the same least-privilege default as
+  stdio.
+
+Because room tools normalize the actor id to a member ref, a remote agent
+connecting as `agent:remote-bot` can only speak as `remote-bot` — the M1
+anti-spoofing rules hold unchanged over HTTP.
+
+**Remote member registration.** `mesa_register_remote_member` registers a
+remote agent in the agent registry (`client: "remote"`, optional
+`metadata.endpoint`) and optionally invites it into a room under the reserved
+`remote` workspace id — member triple `("remote", "agent", <agentId>)`.
+
+**Local-first isolation:**
+- The listener binds `127.0.0.1` by default.
+- Binding a non-loopback host without a token refuses to start.
+- When a token is configured, every request must carry
+  `Authorization: Bearer <token>`; failures are rejected with `401` before any
+  protocol handling.
+
+**Capabilities:** full read/write (same tools as stdio). Push support is
+available through the optional SSE stream but not required by clients.
+
+**Availability:** when the MCP server is started with `--transport http`.
+
 ## HTTP Transport (future)
 
 A local REST API for agents that do not support MCP but can make HTTP requests.
@@ -206,6 +250,7 @@ Bridges CI pipeline results into AgentMesa tasks.
 | Transport Registry (core) | **Done.** `registerTransport/listTransports/getTransport/inspectTransport` with `transport.inspect` policy enforcement. |
 | `MCPTransport` skeleton (core) | **Done.** Declares capabilities, `isAvailable()` returns false. Future integration path documented. |
 | MCP server | **Partial.** MCP server exists and maps tools to Core services, but uses `process.cwd()` directly rather than the `MesaTransport` interface. Full transport-registry integration is design intent. |
+| MCP streamable HTTP (mcp-server) | **Done.** Transport selection (`--transport stdio\|http`), per-session `StreamableHTTPServerTransport` with per-connection actor binding from initialize-time headers, remote member registration (`mesa_register_remote_member`, reserved `remote` workspace id), loopback-by-default binding with token required for non-loopback hosts and `Authorization: Bearer` enforcement on every request. |
 | CLI transport subcommands | **Done.** `mesa transports list/inspect/inbox/outbox` with `--json` and `--status` filter. Inbox/outbox are policy-gated via `transport.inspect`. `--status` validates against allowed values and rejects invalid input. |
 | Transport envelope diagnostics | **Done.** `checkTransportEnvelopes(ctx)` validates all inbox/outbox envelope JSON files against `TransportEnvelopeSchema`. Detects corrupted files, schema-invalid envelopes, and direction/mailbox mismatches (e.g., outbound envelope in inbox). All findings reported with category, path, resourceId, and recommendation. Wired into `mesa doctor` and `mesa doctor --json`. |
 | Transport direction consistency (hardening) | **Done.** `writeInbound` rejects outbound-direction envelopes. `writeOutbound` rejects inbound-direction envelopes. `checkTransportEnvelopes` detects direction/mailbox mismatches. `markProcessed`/`markFailed` accept optional `direction` parameter for outbound envelopes. |
@@ -220,7 +265,7 @@ Bridges CI pipeline results into AgentMesa tasks.
 The runtime evaluates available transports at startup:
 
 1. **File transport** is always enabled if `.agentmesa/` exists.
-2. **MCP transport** is enabled if the MCP server is started with `--mcp`.
+2. **MCP transport** is enabled if the MCP server is started with `--mcp` (stdio) or `--transport http` (streamable HTTP).
 3. **HTTP/WebSocket transport** is enabled when the Desk server or a standalone adapter is running.
 4. **GitHub transport** is enabled when a GitHub App webhook secret is present.
 5. **CI transport** is enabled when a CI provider is configured.
@@ -242,6 +287,7 @@ Each transport enforces its own security boundary:
 | File | OS file permissions on `.agentmesa/`. An agent must have read/write access to the project directory. |
 | MCP | Local-only by default. The MCP server runs on stdio and has the same filesystem access as the calling process. |
 | HTTP | Auth required. A local token in `.agentmesa/config.json` must be included in the `Authorization` header. |
+| MCP streamable HTTP | Loopback (`127.0.0.1`) by default. Non-loopback binds refuse to start without a token; with one, every request must carry `Authorization: Bearer <token>`. Each connection binds its own actor from initialize-time headers — never a shared env-derived actor. |
 | WebSocket | Auth required. Same local token mechanism as HTTP. |
 | GitHub | Webhook signature verification. The GitHub App validates HMAC signatures against the configured secret. |
 | CI | Token-based. The CI provider receives a one-time write token scoped to the specific pipeline run. |

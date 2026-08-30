@@ -18,6 +18,7 @@ import {
   listMeetingsInputSchema,
   registerAgentInputSchema,
   listAgentsInputSchema,
+  registerRemoteMemberInputSchema,
   createRunInputSchema,
   listRunsInputSchema,
   readRunInputSchema,
@@ -68,6 +69,7 @@ import {
   handleListMeetings,
   handleRegisterAgent,
   handleListAgents,
+  handleRegisterRemoteMember,
   handleCreateRun,
   handleListRuns,
   handleReadRun,
@@ -97,6 +99,10 @@ import {
  * roles are operator-configured, not taken from client tool arguments — a
  * connected AI client cannot escalate its own privileges. `builder` is the
  * least-privilege default that still carries `manage_runs` / `manage_tasks`.
+ *
+ * This is the stdio model: one process, one operator-pinned actor. HTTP
+ * connections must NOT use it — they pass an explicit per-connection actor
+ * to `createMcpServer` instead (see http-server.ts).
  */
 export function resolveActor(): MesaActor {
   const id = process.env.AGENTMESA_MCP_ACTOR_ID?.trim() || 'agent:mcp';
@@ -107,8 +113,20 @@ export function resolveActor(): MesaActor {
   return { id, type: 'agent', roles, client: 'mcp' };
 }
 
-function createMcpContextFactory(rootDir: string): (args?: Record<string, unknown>) => MesaRuntimeContext {
-  const actor = resolveActor();
+export interface McpServerOptions {
+  /**
+   * Explicit actor bound to this server instance. When omitted (stdio mode)
+   * the actor is resolved from the environment via `resolveActor()`. HTTP
+   * sessions always pass a connection-scoped actor — never the shared
+   * env-derived one.
+   */
+  actor?: MesaActor;
+}
+
+function createMcpContextFactory(
+  rootDir: string,
+  actor: MesaActor,
+): (args?: Record<string, unknown>) => MesaRuntimeContext {
   return (args) => {
     // A per-call `workspaceId` lets a tool operate on another workspace's
     // data (used by room tools); absent that, fall back to the server root.
@@ -179,13 +197,13 @@ function wrapNoCtxHandler(handler: () => string) {
   };
 }
 
-export function createMcpServer(rootDir: string): McpServer {
+export function createMcpServer(rootDir: string, options?: McpServerOptions): McpServer {
   const server = new McpServer({
     name: 'agentmesa',
     version: currentProtocolVersion,
   });
 
-  const makeCtx = createMcpContextFactory(rootDir);
+  const makeCtx = createMcpContextFactory(rootDir, options?.actor ?? resolveActor());
 
   // Task tools
   server.registerTool('mesa_create_task', {
@@ -261,6 +279,12 @@ export function createMcpServer(rootDir: string): McpServer {
     description: 'List all registered AgentMesa agents',
     inputSchema: listAgentsInputSchema,
   }, wrapRuntimeNoArgHandler(makeCtx, handleListAgents));
+
+  // Remote member registration (M3 Broad Access)
+  server.registerTool('mesa_register_remote_member', {
+    description: 'Register a remote agent (joined via MCP streamable HTTP) in the agent registry and optionally invite it into a Room as a remote member',
+    inputSchema: registerRemoteMemberInputSchema,
+  }, wrapRuntimeHandler(makeCtx, handleRegisterRemoteMember));
 
   // Agent run tools
   server.registerTool('mesa_create_run', {

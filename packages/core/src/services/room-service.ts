@@ -18,6 +18,14 @@ import { getGlobalMesaDir } from '../workspace-registry.js';
 import { withLock } from './lock-manager.js';
 
 /**
+ * Reserved workspace id for remote members — agents that reach AgentMesa over
+ * the network (MCP streamable HTTP) instead of through a local workspace.
+ * They have no entry in the workspace registry, so their room-member triple
+ * uses this fixed id: `("remote", "agent", <agentId>)`.
+ */
+export const REMOTE_WORKSPACE_ID = 'remote' as const;
+
+/**
  * Global Room store — cross-workspace group chat. A room gathers sessions and
  * agents from different workspaces (identified by the `(workspaceId, kind, ref)`
  * triple) so their messages flow together. Like the workspace registry, room

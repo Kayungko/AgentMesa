@@ -37,6 +37,7 @@ import {
   getMeeting,
   assertPolicy,
   MesaError,
+  REMOTE_WORKSPACE_ID,
 } from '@agentmesa/core';
 import { executeRun, activateSessionAgent } from '@agentmesa/runner';
 import {
@@ -54,6 +55,7 @@ import type {
   MesaEvent,
   CheckKind,
   CheckResultStatus,
+  MesaRoom,
 } from '@agentmesa/protocol';
 
 // --- Input schemas for MCP tool registration ---
@@ -186,6 +188,16 @@ export const registerAgentInputSchema = {
   name: z.string().min(1),
   client: z.string().min(1),
   roles: z.array(z.string()).min(1),
+};
+
+// --- Remote member registration (M3 Broad Access) ---
+
+export const registerRemoteMemberInputSchema = {
+  id: z.string().min(1),
+  name: z.string().min(1),
+  roles: z.array(agentRoleSchema).optional(),
+  endpoint: z.string().optional(),
+  roomId: z.string().optional(),
 };
 
 export const listAgentsInputSchema = {};
@@ -580,6 +592,52 @@ export function handleRegisterAgent(
 export function handleListAgents(ctx: MesaRuntimeContext): string {
   const agents = listAgents(ctx);
   return JSON.stringify(agents);
+}
+
+/**
+ * mesa_register_remote_member（M3 Broad Access）：把一个远程 agent 注册成
+ * room/meeting 成员。
+ *
+ * 远程 agent 通过 MCP streamable HTTP 接入，没有本地 workspace，因此：
+ * - 先注册进本 workspace 的 agent registry（client = "remote"，endpoint 记入
+ *   metadata），供展示与路由使用；
+ * - 可选直接拉进某个 room：成员三元组固定为
+ *   `(REMOTE_WORKSPACE_ID, "agent", id)`，之后该 agent 以
+ *   `x-agentmesa-actor-id: agent:<id>` 连上来即可发言（fromRef 防冒充校验
+ *   天然成立——actor 归一化 ref 等于成员 ref）。
+ */
+export function handleRegisterRemoteMember(
+  ctx: MesaRuntimeContext,
+  args: {
+    id: string;
+    name: string;
+    roles?: AgentRole[];
+    endpoint?: string;
+    roomId?: string;
+  },
+): string {
+  assertPolicy(ctx, 'agent.register', `agent:${args.id}`);
+  const agent = registerAgent(ctx, {
+    id: args.id,
+    name: args.name,
+    client: 'remote',
+    status: 'available',
+    roles: args.roles && args.roles.length > 0 ? args.roles : ['builder'],
+    ...(args.endpoint ? { metadata: { endpoint: args.endpoint } } : {}),
+  });
+
+  let room: MesaRoom | undefined;
+  if (args.roomId) {
+    assertPolicy(ctx, 'room.invite', `room:${args.roomId}`);
+    room = roomStore().invite(args.roomId, {
+      workspaceId: REMOTE_WORKSPACE_ID,
+      kind: 'agent',
+      ref: args.id,
+      label: args.name,
+      ...(args.roles && args.roles.length > 0 ? { roles: args.roles } : {}),
+    });
+  }
+  return JSON.stringify(room ? { agent, room } : { agent });
 }
 
 // --- Agent run schemas ---

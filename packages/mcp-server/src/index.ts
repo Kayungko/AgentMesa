@@ -1,4 +1,17 @@
 export { startServer, createMcpServer, resolveActor } from './server.js';
+export type { McpServerOptions } from './server.js';
+export {
+  startHttpServer,
+  isLoopbackHost,
+  validateHttpServerOptions,
+  isAuthorized,
+  actorFromHeaders,
+  ACTOR_ID_HEADER,
+  ACTOR_ROLES_HEADER,
+} from './http-server.js';
+export type { HttpServerOptions, HttpServerHandle } from './http-server.js';
+export { parseServerConfig } from './config.js';
+export type { ServerConfig, McpTransportKind } from './config.js';
 export {
   handleCreateTask,
   handleListTasks,
@@ -14,6 +27,7 @@ export {
   handleListMeetings,
   handleRegisterAgent,
   handleListAgents,
+  handleRegisterRemoteMember,
   handleCreateRun,
   handleListRuns,
   handleReadRun,

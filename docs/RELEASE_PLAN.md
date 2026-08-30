@@ -138,10 +138,20 @@ convention:
 
 ## Release 1.3: Broad Access (M3)
 
+Status: **Done** (implementation in `packages/mcp-server`; see
+`docs/TRANSPORTS.md` § MCP Streamable HTTP).
+
 - MCP server transport selection layer: streamable HTTP alongside stdio.
-- Per-connection actor binding (never a shared env-derived actor).
+  (`--transport stdio|http` / `AGENTMESA_MCP_TRANSPORT`; `src/http-server.ts`
+  on the SDK's `StreamableHTTPServerTransport`.)
+- Per-connection actor binding (never a shared env-derived actor). Each HTTP
+  session gets its own `McpServer` whose actor is read from
+  initialize-time headers (`x-agentmesa-actor-id` / `-roles`); stdio keeps the
+  operator-pinned env actor.
 - Remote member registration; loopback-by-default binding, token required
-  for non-loopback.
+  for non-loopback. (`mesa_register_remote_member` tool with the reserved
+  `remote` workspace id; non-loopback binds without a token refuse to start,
+  and every request must carry `Authorization: Bearer <token>`.)
 
 ## 1.x Acceptance Scenario (universal collaboration)
 
