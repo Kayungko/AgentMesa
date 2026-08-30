@@ -98,6 +98,20 @@
 
 .chat-system { display: flex; justify-content: center; align-items: baseline; gap: 7px; padding: var(--space-1) 0; color: var(--color-text-subtle); font-size: var(--text-3xs); }
 
+/* --- Run activity audit trail (driver mode + permission verdicts) --------- */
+
+.chat-activity {
+  display: flex;
+  justify-content: center;
+  padding: 2px 0;
+  color: var(--color-text-subtle);
+  font-size: var(--text-3xs);
+}
+.chat-activity::before { content: "·"; margin-right: 6px; }
+.chat-activity--driver { color: var(--color-text-muted); }
+.chat-activity--permission_denied { color: var(--color-danger, var(--color-text-muted)); }
+.chat-activity--permission_granted { color: var(--color-text-subtle); }
+
 .chat-msg { width: 100%; display: flex; align-items: flex-start; gap: var(--space-2); margin: 10px 0; }
 .chat-msg--own { justify-content: flex-end; }
 .chat-msg__col { max-width: var(--bubble-max-width); display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }

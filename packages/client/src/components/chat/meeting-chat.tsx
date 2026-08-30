@@ -6,6 +6,7 @@ import type { useMesaRuntime } from '../../useMesaRuntime.js';
 import { useFreshMembers } from '../ui/use-fresh-members.js';
 import { ApprovalCard } from '../cards/approval-card.js';
 import { RunCard } from '../cards/run-card.js';
+import { collectRunActivity } from '../../run-activity.js';
 import { ChatHeader } from './chat-header.js';
 import { Composer } from './composer.js';
 import { MeetingBubbles } from './bubbles.js';
@@ -69,6 +70,14 @@ export function MeetingChat({
     [runtime.activeRuns, detail?.agents],
   );
 
+  // Audit trail: how session runs in this meeting were driven (deep driver
+  // vs CLI) and every permission verdict the guard made. Derived from the
+  // live event stream, so it updates as turns progress.
+  const runActivity = useMemo(
+    () => collectRunActivity(runtime.events, meetingId),
+    [runtime.events, meetingId],
+  );
+
   // Approvals that arrive while this meeting is open enter with the shared
   // msg-in animation; cards already present on first render are the baseline
   // and never animate.
@@ -116,7 +125,7 @@ export function MeetingChat({
       {sendError ? <p className="inline-error chat-send-error">{sendError}</p> : null}
 
       <ol className="chat-stream" ref={streamRef}>
-        {messages.length === 0 && streamApprovals.length === 0 && streamRuns.length === 0 ? (
+        {messages.length === 0 && streamApprovals.length === 0 && streamRuns.length === 0 && runActivity.length === 0 ? (
           <ChatEmpty title="还没有消息" detail="任务创建、Agent 交接和评审都会出现在这里。发条消息开始协作。" />
         ) : (
           <>
@@ -134,6 +143,11 @@ export function MeetingChat({
             {streamRuns.map((run) => (
               <li key={run.id} className="chat-card chat-card--run">
                 <RunCard run={run} compact onSelect={onSelectRun} />
+              </li>
+            ))}
+            {runActivity.map((item) => (
+              <li key={item.id} className={`chat-activity chat-activity--${item.kind}`}>
+                {item.label}
               </li>
             ))}
           </>
