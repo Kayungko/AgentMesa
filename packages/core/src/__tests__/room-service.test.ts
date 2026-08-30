@@ -243,6 +243,30 @@ describe('room service', () => {
     expect(sent.senderRole).toBe('reviewer');
   });
 
+  it('rejects mentions that reference non-members', () => {
+    const store = createRoomStore();
+    const room = store.createRoom({ name: 'mention 校验群' });
+    store.invite(room.id, { workspaceId: wsA, kind: 'session', ref: 'meeting_1' });
+    store.invite(room.id, { workspaceId: wsB, kind: 'agent', ref: 'claude' });
+
+    // mentions 语义是 member refs：引用不在房间里的成员直接拒绝。
+    expect(() => store.sendMessage(room.id, {
+      workspaceId: wsA,
+      from: { workspaceId: wsA, kind: 'session', ref: 'meeting_1' },
+      summary: '@ghost 看下',
+      mentions: ['claude', 'ghost'],
+    })).toThrow(/non-members/);
+
+    // 全部命中成员 ref 时正常入库。
+    const sent = store.sendMessage(room.id, {
+      workspaceId: wsA,
+      from: { workspaceId: wsA, kind: 'session', ref: 'meeting_1' },
+      summary: '@claude 看下',
+      mentions: ['claude'],
+    });
+    expect(sent.mentions).toEqual(['claude']);
+  });
+
   it('rejects a sender whose ref does not match actorRef (impersonation)', () => {
     const store = createRoomStore();
     const room = store.createRoom({ name: '防冒充群' });
@@ -331,6 +355,8 @@ describe('room service', () => {
       roles: ['reviewer'],
       sessionRef: 'sess_123',
     });
+    // mentions 语义是 member refs：被 @ 的 claude 需先入群。
+    store.invite(room.id, { workspaceId: wsB, kind: 'agent', ref: 'claude' });
 
     const message = store.sendMessage(room.id, {
       workspaceId: wsA,

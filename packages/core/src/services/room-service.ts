@@ -317,6 +317,19 @@ export function createRoomStore(
             `Sender is not a member of room ${roomId}: ${fromKey}. Invite the member first.`,
           );
         }
+        // mentions 语义是 member refs（DOMAIN_MODEL：routing hint）——引用
+        // 不存在的成员会产出指向空的高亮与路由噪音，直接拒绝（按 ref 匹配，
+        // 与 client mention.ts 的提取口径一致）。
+        if (validated.mentions !== undefined && validated.mentions.length > 0) {
+          const memberRefs = new Set(room.members.map((member) => member.ref));
+          const unknown = validated.mentions.filter((ref) => !memberRefs.has(ref));
+          if (unknown.length > 0) {
+            throw new MesaError(
+              'VALIDATION_ERROR',
+              `mentions reference non-members of room ${roomId}: ${unknown.join(', ')}. Invite the member first.`,
+            );
+          }
+        }
         const now = new Date().toISOString();
         const message: RoomMessage = RoomMessageSchema.parse({
           protocolVersion: currentProtocolVersion,

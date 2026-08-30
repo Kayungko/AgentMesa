@@ -115,6 +115,12 @@ describe('DeskServer rooms', () => {
       headers: auth,
       body: JSON.stringify({ workspaceId: 'ws_1', kind: 'human', ref: 'user', label: '我' }),
     });
+    // mentions 语义是 member refs（DOMAIN_MODEL）：被 @ 的 claude 必须先在房间里。
+    await fetch(`${base}/api/rooms/${room.id}/members`, {
+      method: 'POST',
+      headers: auth,
+      body: JSON.stringify({ workspaceId: 'ws_1', kind: 'agent', ref: 'claude', label: 'Claude' }),
+    });
 
     const msg = await fetch(`${base}/api/rooms/${room.id}/messages`, {
       method: 'POST',
@@ -150,6 +156,21 @@ describe('DeskServer rooms', () => {
     const dropped = (await bad.json()) as { mentions?: string[]; origin?: string };
     expect(dropped.origin).toBeUndefined();
     expect(dropped.mentions).toBeUndefined();
+
+    // 全字符串但引用不存在成员的 mention：core 拒绝（mentions 语义是 member refs）。
+    const ghost = await fetch(`${base}/api/rooms/${room.id}/messages`, {
+      method: 'POST',
+      headers: auth,
+      body: JSON.stringify({
+        workspaceId: 'ws_1',
+        from: { workspaceId: 'ws_1', kind: 'human', ref: 'user', label: '我' },
+        summary: '@ghost 不存在的成员',
+        mentions: ['ghost'],
+      }),
+    });
+    expect(ghost.status).toBe(400);
+    const rejected = (await ghost.json()) as { error?: string };
+    expect(rejected.error).toMatch(/non-members/);
   });
 
   it('rejects creating a room without a name', async () => {
