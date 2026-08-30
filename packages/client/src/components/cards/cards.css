@@ -50,6 +50,7 @@
   outline: 0;
 }
 .approval-card textarea::placeholder { color: var(--color-text-subtle); }
+.approval-card__reason { font-size: var(--text-2xs); color: var(--color-text-muted); margin: 0; }
 .approval-card__actions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); margin-top: var(--space-2); }
 
 .entity-detail {

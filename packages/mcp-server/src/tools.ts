@@ -1100,6 +1100,11 @@ export async function handleActivateSessionAgent(
           roles: agent.roles,
           client: agent.client,
         },
+        // Phase 2 speech guard: meeting-speech turns are read-only for every
+        // role (state changes go through task → run → approval). No askHuman
+        // here: the MCP caller is an agent with no human waiting on approvals,
+        // and the guard denies mutative actions before the approval gate.
+        speechGuard: true,
       })
     : baseOptions;
   const result = await activateSessionAgent(ctx, args.meetingId, args.agentId, options);

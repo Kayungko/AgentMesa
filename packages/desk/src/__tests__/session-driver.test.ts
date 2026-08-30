@@ -124,6 +124,32 @@ describe('DeskServer meeting-agent activation driver selection', () => {
     expect(options.driverRegistry!.length).toBeGreaterThan(0);
     expect(typeof options.permissionResponder).toBe('function');
     expect(options.timeout).toBe(5000);
+
+    // Behavioural speech-guard assertions: the assembled responder must keep
+    // meeting-speech turns read-only (patch → deny, readonly command → allow)
+    // regardless of the agent's registered builder role.
+    const responder = options.permissionResponder!;
+    const patchDecision = await responder({
+      requestId: 'req-patch',
+      kind: 'patch',
+      title: 'patch: src/a.ts',
+      detail: { changes: [{ path: 'src/a.ts', kind: 'modify' }] },
+    });
+    expect(patchDecision).toBe('deny');
+    const commandDecision = await responder({
+      requestId: 'req-cmd',
+      kind: 'command',
+      title: 'command: git status',
+      detail: { command: 'git status' },
+    });
+    expect(commandDecision).toBe('allow');
+    const writeDecision = await responder({
+      requestId: 'req-write',
+      kind: 'tool',
+      title: 'tool: Write',
+      detail: { toolName: 'Write', file_path: 'src/a.ts' },
+    });
+    expect(writeDecision).toBe('deny');
   });
 
   it('auto with a codex-family agent keeps the CLI path', async () => {

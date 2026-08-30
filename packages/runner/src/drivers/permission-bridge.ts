@@ -31,6 +31,15 @@
  *   known read-only tools are allowed, unknown tools are denied (both
  *   defaults configurable).
  *
+ * Speech guard (`options.speechGuard`): opt-in read-only fence for session
+ * speech turns (COLLAB_VISION: "conversation is free; state mutation goes
+ * through task → run → approval"). Enabled, it overrides the role
+ * capability table (owner included): patches are denied outright, commands
+ * must be read-only (`SPEECH_READONLY_COMMANDS`), and tools mapped to a
+ * mutating policy (`modify_source` / `push_code` / `merge_pr` /
+ * `run_command`) are denied. Blocked-pattern and secret-path checks still
+ * run first; fence denials are audited like any other decision.
+ *
  * Human approval gate (`options.askHuman`): policy denials short-circuit —
  * the human is never asked. Only "allowed but requires approval" operations
  * (the policy package's confirmation-gate concept —
@@ -127,6 +136,26 @@ export interface PolicyPermissionResponderOptions {
    * overrides an otherwise-allowed tool call.
    */
   corePolicy?: MesaPolicyEngine;
+  /**
+   * Read-only fence for session speech turns (COLLAB_VISION: "conversation is
+   * free; state mutation goes through task → run → approval"). When enabled,
+   * the fence takes precedence over the role capability table — even owner
+   * cannot mutate state through a speech turn:
+   *
+   * - `patch` requests are denied outright (`speech.patch_denied`);
+   * - `command` requests must match the read-only command set
+   *   (`SPEECH_READONLY_COMMANDS`, same prefix semantics as the allowlist);
+   *   approval-required commands are denied directly — a speech turn never
+   *   consults the human approval gate (`speech.command_denied`);
+   * - `tool` requests mapped to a mutating policy (`modify_source`,
+   *   `push_code`, `merge_pr`, `run_command`) are denied
+   *   (`speech.tool_denied`); read-only tools are unaffected.
+   *
+   * Blocked-pattern and secret-path checks still run first (their order is
+   * unchanged). Every fence denial produces an auditable
+   * `PermissionDecisionRecord` like any other decision.
+   */
+  speechGuard?: boolean;
   /** Audit callback for every decision (allow and deny). Must not throw. */
   onDecision?: (record: PermissionDecisionRecord) => void | Promise<void>;
   /**
@@ -191,6 +220,43 @@ export const DEFAULT_COMMAND_ALLOWLIST: readonly string[] = [
   'yarn lint',
   'yarn typecheck',
 ];
+
+/**
+ * Read-only command set for speech-guarded turns (`speechGuard: true`).
+ * Same prefix-match semantics as the allowlist (exact match or
+ * `entry + ' '` prefix). Commands outside this set are denied in speech
+ * turns regardless of role capabilities; approval-required commands never
+ * reach the human gate (a speech turn must not prompt for approval).
+ */
+export const SPEECH_READONLY_COMMANDS: readonly string[] = [
+  'git status',
+  'git diff',
+  'git log',
+  'git show',
+  'git branch',
+  'ls',
+  'cat',
+  'pwd',
+  'echo',
+  'grep',
+  'rg',
+  'find',
+  'node --version',
+  'npm --version',
+  'pnpm --version',
+];
+
+/**
+ * Tool policies blocked by the speech guard: anything that mutates source,
+ * pushes/merges code, or executes shell commands (command execution in a
+ * speech turn may only go through the command kind's read-only set).
+ */
+const SPEECH_DENIED_TOOL_POLICIES: ReadonlySet<PolicyAction> = new Set([
+  'modify_source',
+  'push_code',
+  'merge_pr',
+  'run_command',
+]);
 
 /** Default tool name → policy action mapping (normalized, lowercase). */
 const DEFAULT_TOOL_POLICY_MAP: ToolPolicyMap = {
@@ -403,6 +469,7 @@ export function createPolicyPermissionResponder(
   const unknownToolPolicy = options.unknownToolPolicy ?? 'deny';
   const readonlyToolPolicy = options.readonlyToolPolicy ?? 'allow';
   const workspaceRootDir = options.workspaceRootDir;
+  const speechGuard = options.speechGuard === true;
 
   const actor = options.actor;
   const roles: string[] =
@@ -448,6 +515,25 @@ export function createPolicyPermissionResponder(
         `roles [${roles.join(', ')}] lack the "run_command" capability`,
       );
     }
+    // Speech fence before the approval gate and the allowlist: a speech turn
+    // allows read-only inspection only, and never prompts a human —
+    // approval-required commands are denied outright.
+    if (speechGuard) {
+      const speechReadonly = SPEECH_READONLY_COMMANDS.some(
+        (allowed) => command === allowed || command.startsWith(`${allowed} `),
+      );
+      if (!speechReadonly) {
+        return deny(
+          'speech.command_denied',
+          `command "${command}" is not read-only; session speech turns are read-only; state changes go through task → run → approval`,
+        );
+      }
+      return {
+        decision: 'allow',
+        rule: 'speech.command_allow',
+        reason: 'read-only command permitted in a speech turn',
+      };
+    }
     if (!check.allowed && check.requiresApproval) {
       return {
         decision: 'deny',
@@ -469,6 +555,14 @@ export function createPolicyPermissionResponder(
   }
 
   function judgePatch(request: DriverPermissionRequest): Verdict {
+    // Speech fence first: a speech turn never mutates state, so patches are
+    // denied before any path extraction or file-access judgment.
+    if (speechGuard) {
+      return deny(
+        'speech.patch_denied',
+        'session speech turns are read-only; state changes go through task → run → approval',
+      );
+    }
     const paths: string[] = [];
     collectPaths(request.detail, paths);
     if (paths.length === 0) {
@@ -535,6 +629,17 @@ export function createPolicyPermissionResponder(
         rule: 'tool.readonly',
         reason: `read-only tool "${toolName}" allowed by tool policy map`,
       };
+    }
+
+    // Speech fence before the capability check: state-mutating tools are
+    // denied in speech turns for every role, including owner. Tools mapped
+    // to run_command are denied here too — command execution in a speech
+    // turn may only flow through the command kind's read-only set.
+    if (speechGuard && SPEECH_DENIED_TOOL_POLICIES.has(policy)) {
+      return deny(
+        'speech.tool_denied',
+        `tool "${toolName}" mutates state ("${policy}"); session speech turns are read-only; state changes go through task → run → approval`,
+      );
     }
 
     if (!hasCapability(policy)) {

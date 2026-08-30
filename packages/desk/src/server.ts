@@ -68,6 +68,7 @@ import {
   type RunnerCommandPatch,
 } from '@agentmesa/setup';
 import { generateDashboardHtml } from './dashboard.js';
+import { PermissionApprovalQueue, createDeskAskHuman } from './permission-approvals.js';
 
 /** Most recent room messages returned by the room detail endpoint. */
 const ROOM_MESSAGE_LIMIT = 200;
@@ -182,6 +183,7 @@ export class DeskServer {
   private actualPort = 0;
   private server: Server | null = null;
   private readonly eventResponses = new Set<ServerResponse>();
+  private readonly permissionApprovalQueue = new PermissionApprovalQueue();
 
   constructor(rootDir: string, port: number = 3456, options: DeskServerOptions = {}) {
     this.rootDir = rootDir;
@@ -228,6 +230,9 @@ export class DeskServer {
     // Kill any in-flight session-collaboration CLI processes first so they do
     // not linger as orphans after the host stops or switches workspace.
     terminateSessionChildren();
+    // Fail-closed any permission approvals still awaiting a human answer —
+    // the desk restart (also the workspace-switch path) cannot serve them.
+    this.permissionApprovalQueue.clear();
 
     for (const response of this.eventResponses) {
       response.end();
@@ -253,6 +258,16 @@ export class DeskServer {
 
   getPort(): number {
     return this.actualPort || this.requestedPort;
+  }
+
+  /**
+   * Pending driver-permission approvals (deep-driver `askHuman` gate). The
+   * main-session wiring injects `createDeskAskHuman(this.permissionApprovals,
+   * { meetingId })` into `attachPermissionResponder`; the HTTP surface under
+   * `/api/permissions/*` lets the desktop UI list and decide them.
+   */
+  get permissionApprovals(): PermissionApprovalQueue {
+    return this.permissionApprovalQueue;
   }
 
   private createReadContext(): MesaRuntimeContext {
@@ -331,6 +346,15 @@ export class DeskServer {
           // Gated actions run under the agent's registered identity, not the
           // desk write actor.
           actor: sessionAgentActor(agentId, agent),
+          // Phase 2 speech guard: meeting-speech turns are read-only. State
+          // changes go through task → run → approval; the guard fences off
+          // modify_source/push_code/merge_pr tools and non-readonly commands
+          // for every role, owner included.
+          speechGuard: true,
+          // Human approval bridge: with the speech guard active this never
+          // fires (mutative actions are denied before the approval gate), but
+          // the wiring is ready for when the guard is relaxed per role/config.
+          askHuman: createDeskAskHuman(this.permissionApprovals, { meetingId }),
         })
       : baseOptions;
     await activateSessionAgent(writeContext, meetingId, agentId, options);
@@ -433,6 +457,10 @@ export class DeskServer {
     }
     if (pathname === '/api/checks') {
       this.sendJson(res, listCheckResults(readContext));
+      return;
+    }
+    if (pathname === '/api/permissions/pending') {
+      this.sendJson(res, { pending: this.permissionApprovalQueue.list() });
       return;
     }
     if (pathname === '/api/setup/status') {
@@ -719,6 +747,21 @@ export class DeskServer {
         ...(typeof body.error === 'string' ? { error: body.error } : {}),
       });
       this.sendJson(res, run);
+      return;
+    }
+
+    const permissionDecideMatch = pathname.match(/^\/api\/permissions\/([^/]+)\/decide$/);
+    if (permissionDecideMatch) {
+      const body = await this.readJsonBody(req) as { decision?: unknown };
+      if (body.decision !== 'allow' && body.decision !== 'deny') {
+        throw new MesaError('VALIDATION_ERROR', 'decision must be "allow" or "deny"');
+      }
+      const decided = this.permissionApprovalQueue.decide(permissionDecideMatch[1]!, body.decision);
+      if (!decided) {
+        this.sendError(res, 404, `Unknown permission request: ${permissionDecideMatch[1]}`);
+        return;
+      }
+      this.sendJson(res, { ok: true });
       return;
     }
 

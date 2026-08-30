@@ -10,6 +10,17 @@ export interface WorkflowState {
   completedAt?: string;
 }
 
+/** A driver permission request waiting for a human allow/deny (desk askHuman bridge). */
+export interface PendingPermissionApproval {
+  id: string;
+  kind: 'tool' | 'command' | 'patch';
+  title: string;
+  resource?: string;
+  reason?: string;
+  requestedAt: string;
+  meetingId?: string;
+}
+
 export interface RuntimeConfig {
   baseUrl: string;
   token?: string;

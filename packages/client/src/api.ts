@@ -1,5 +1,5 @@
 import type { EventEnvelope, MesaAgent, MesaMeeting, MesaMessage, MesaRoom, MesaTask, MesaWorkspace } from '@agentmesa/protocol';
-import type { MeetingDetail, RoomDetail, RuntimeConfig, WorkflowState, WorkspaceList } from './types.js';
+import type { MeetingDetail, PendingPermissionApproval, RoomDetail, RuntimeConfig, WorkflowState, WorkspaceList } from './types.js';
 
 function headers(config: RuntimeConfig, json = false): HeadersInit {
   return {
@@ -22,6 +22,24 @@ export function loadRuns(config: RuntimeConfig) {
 
 export function loadWorkflows(config: RuntimeConfig) {
   return request<WorkflowState[]>(config, '/api/workflows');
+}
+
+// --- Driver permission approvals (desk askHuman bridge) ---
+
+export function listPendingPermissions(config: RuntimeConfig): Promise<{ pending: PendingPermissionApproval[] }> {
+  return request<{ pending: PendingPermissionApproval[] }>(config, '/api/permissions/pending');
+}
+
+export function decidePermission(
+  config: RuntimeConfig,
+  id: string,
+  decision: 'allow' | 'deny',
+): Promise<{ ok: boolean }> {
+  return postJson<{ ok: boolean }>(
+    config,
+    `/api/permissions/${encodeURIComponent(id)}/decide`,
+    { decision },
+  );
 }
 
 export function loadEvents(config: RuntimeConfig, cursor?: string) {

@@ -440,4 +440,126 @@ describe('attachPermissionResponder', () => {
       options.permissionResponder(request('command', { command: 'pnpm test' })),
     ).resolves.toBe('deny');
   });
+
+  it('passes speechGuard through to the responder', async () => {
+    const ctx = fakeCtx(['owner']);
+    const options = attachPermissionResponder({}, { ctx, speechGuard: true });
+    await expect(
+      options.permissionResponder(request('patch', { path: 'src/main.ts' })),
+    ).resolves.toBe('deny');
+    await expect(
+      options.permissionResponder(request('command', { command: 'git status' })),
+    ).resolves.toBe('allow');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// speechGuard — read-only fence for speech turns
+// ---------------------------------------------------------------------------
+
+describe('createPolicyPermissionResponder — speechGuard', () => {
+  it('denies every patch in a speech turn, even for owner (fence precedes role)', async () => {
+    const { log, onDecision } = records();
+    const responder = createPolicyPermissionResponder({
+      roles: ['owner'],
+      speechGuard: true,
+      onDecision,
+    });
+    await expect(
+      responder(request('patch', { changes: [{ path: 'src/main.ts', kind: 'modify' }] })),
+    ).resolves.toBe('deny');
+    expect(log[0]).toMatchObject({ decision: 'deny', rule: 'speech.patch_denied' });
+    expect(log[0]?.reason).toContain('read-only');
+  });
+
+  it('denies builder patches in a speech turn too', async () => {
+    const responder = createPolicyPermissionResponder({
+      roles: ['builder'],
+      speechGuard: true,
+    });
+    await expect(
+      responder(request('patch', { file_path: 'src/main.ts', diff: '...' })),
+    ).resolves.toBe('deny');
+  });
+
+  it('allows read-only commands in a speech turn (git status)', async () => {
+    const { log, onDecision } = records();
+    const responder = createPolicyPermissionResponder({
+      roles: ['builder'],
+      speechGuard: true,
+      onDecision,
+    });
+    await expect(responder(request('command', { command: 'git status' }))).resolves.toBe('allow');
+    expect(log[0]).toMatchObject({ decision: 'allow', rule: 'speech.command_allow' });
+  });
+
+  it('denies allowlisted but non-read-only commands (pnpm test, builder)', async () => {
+    const { log, onDecision } = records();
+    const responder = createPolicyPermissionResponder({
+      roles: ['builder'],
+      speechGuard: true,
+      onDecision,
+    });
+    await expect(responder(request('command', { command: 'pnpm test' }))).resolves.toBe('deny');
+    expect(log[0]).toMatchObject({ decision: 'deny', rule: 'speech.command_denied' });
+    expect(log[0]?.reason).toContain('read-only');
+  });
+
+  it('denies approval-required commands outright instead of gating to a human (git push)', async () => {
+    const askHuman = vi.fn(async () => 'allow' as const);
+    const { log, onDecision } = records();
+    const responder = createPolicyPermissionResponder({
+      roles: ['builder'],
+      speechGuard: true,
+      askHuman,
+      onDecision,
+    });
+    await expect(responder(request('command', { command: 'git push origin main' }))).resolves.toBe(
+      'deny',
+    );
+    expect(askHuman).not.toHaveBeenCalled();
+    expect(log[0]).toMatchObject({ decision: 'deny', rule: 'speech.command_denied' });
+  });
+
+  it('keeps blocked and secret-path command checks ahead of the fence', async () => {
+    const { log, onDecision } = records();
+    const responder = createPolicyPermissionResponder({
+      roles: ['owner'],
+      speechGuard: true,
+      onDecision,
+    });
+    await expect(responder(request('command', { command: 'cat .env' }))).resolves.toBe('deny');
+    expect(log[0]).toMatchObject({ decision: 'deny', rule: 'command.secret_path' });
+  });
+
+  it('denies mutating tools (Write, Bash) and allows read-only tools (Read, Grep)', async () => {
+    const { log, onDecision } = records();
+    const responder = createPolicyPermissionResponder({
+      roles: ['builder'],
+      speechGuard: true,
+      onDecision,
+    });
+    await expect(
+      responder(request('tool', { toolName: 'Write', input: { file_path: 'src/a.ts' } })),
+    ).resolves.toBe('deny');
+    expect(log[0]).toMatchObject({ decision: 'deny', rule: 'speech.tool_denied' });
+    await expect(
+      responder(request('tool', { toolName: 'Bash', input: { command: 'git status' } })),
+    ).resolves.toBe('deny');
+    expect(log[1]).toMatchObject({ decision: 'deny', rule: 'speech.tool_denied' });
+    await expect(responder(request('tool', { toolName: 'Read' }))).resolves.toBe('allow');
+    expect(log[2]).toMatchObject({ decision: 'allow', rule: 'tool.readonly' });
+    await expect(responder(request('tool', { toolName: 'Grep' }))).resolves.toBe('allow');
+  });
+
+  it('still blocks a speech command for a role without run_command (capability first)', async () => {
+    const { log, onDecision } = records();
+    const responder = createPolicyPermissionResponder({
+      roles: ['reviewer'],
+      speechGuard: true,
+      onDecision,
+    });
+    await expect(responder(request('command', { command: 'git status' }))).resolves.toBe('deny');
+    expect(log[0]).toMatchObject({ decision: 'deny', rule: 'command.capability' });
+  });
 });

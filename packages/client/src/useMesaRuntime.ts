@@ -5,23 +5,33 @@ import {
   createEventStream,
   createMeeting,
   createTask,
+  decidePermission as decidePermissionApi,
   decideWorkflow,
+  listPendingPermissions,
   loadAgents,
   loadMeetings,
   loadRuns,
   loadTasks,
   loadWorkflows,
 } from './api.js';
-import type { RuntimeConfig, WorkflowState } from './types.js';
+import type { PendingPermissionApproval, RuntimeConfig, WorkflowState } from './types.js';
 
 export type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'offline';
 
 const MAX_EVENTS = 100;
 
+/**
+ * Driver permission approvals live in the desk process (not the workspace
+ * event log), so the SSE stream never announces them — poll for them instead,
+ * at the same cadence the approvals view otherwise refreshes.
+ */
+const PERMISSION_POLL_MS = 5_000;
+
 export function useMesaRuntime(config: RuntimeConfig) {
   const cursorKey = `agentmesa.event.cursor.${config.view}`;
   const [runs, setRuns] = useState<MesaAgentRun[]>([]);
   const [workflows, setWorkflows] = useState<WorkflowState[]>([]);
+  const [pendingPermissions, setPendingPermissions] = useState<PendingPermissionApproval[]>([]);
   const [meetings, setMeetings] = useState<MesaMeeting[]>([]);
   const [agents, setAgents] = useState<MesaAgent[]>([]);
   const [tasks, setTasks] = useState<MesaTask[]>([]);
@@ -33,18 +43,20 @@ export function useMesaRuntime(config: RuntimeConfig) {
   const seenRef = useRef(new Set<string>());
 
   const refresh = useCallback(async () => {
-    const [nextRuns, nextWorkflows, nextMeetings, nextAgents, nextTasks] = await Promise.all([
+    const [nextRuns, nextWorkflows, nextMeetings, nextAgents, nextTasks, nextPermissions] = await Promise.all([
       loadRuns(config),
       loadWorkflows(config),
       loadMeetings(config),
       loadAgents(config),
       loadTasks(config),
+      listPendingPermissions(config),
     ]);
     setRuns(nextRuns);
     setWorkflows(nextWorkflows);
     setMeetings(nextMeetings);
     setAgents(nextAgents);
     setTasks(nextTasks);
+    setPendingPermissions(nextPermissions.pending);
     setError(undefined);
     setLoaded(true);
   }, [config]);
@@ -102,6 +114,16 @@ export function useMesaRuntime(config: RuntimeConfig) {
     };
   }, [config, cursorKey, refresh]);
 
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (document.hidden) return;
+      listPendingPermissions(config)
+        .then((result) => setPendingPermissions(result.pending))
+        .catch(() => undefined);
+    }, PERMISSION_POLL_MS);
+    return () => clearInterval(interval);
+  }, [config]);
+
   const waiting = useMemo(
     () => workflows.filter((workflow) => workflow.status === 'waiting_approval'),
     [workflows],
@@ -123,6 +145,12 @@ export function useMesaRuntime(config: RuntimeConfig) {
     await decideWorkflow(config, workflowId, decision, message);
     await refresh();
   }, [config, refresh]);
+
+  const decidePermission = useCallback(async (id: string, decision: 'allow' | 'deny') => {
+    await decidePermissionApi(config, id, decision);
+    const result = await listPendingPermissions(config);
+    setPendingPermissions(result.pending);
+  }, [config]);
 
   const createSession = useCallback(async (
     input: { title: string; purpose?: string; agents?: string[] },
@@ -163,6 +191,7 @@ export function useMesaRuntime(config: RuntimeConfig) {
     tasks,
     events,
     waiting,
+    pendingPermissions,
     activeRuns,
     failedRuns,
     connection,
@@ -170,6 +199,7 @@ export function useMesaRuntime(config: RuntimeConfig) {
     loaded,
     refresh,
     decide,
+    decidePermission,
     createSession,
     inviteAgent,
     createTaskInSession,

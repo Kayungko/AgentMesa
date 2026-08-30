@@ -92,6 +92,22 @@ describe('handleActivateSessionAgent driver selection', () => {
     expect(Array.isArray(options.driverRegistry)).toBe(true);
     expect(options.driverRegistry!.length).toBeGreaterThan(0);
     expect(typeof options.permissionResponder).toBe('function');
+
+    // Behavioural speech-guard assertion: the assembled responder keeps
+    // meeting-speech turns read-only despite the builder role.
+    const responder = options.permissionResponder!;
+    await expect(responder({
+      requestId: 'req-patch',
+      kind: 'patch',
+      title: 'patch: src/a.ts',
+      detail: { changes: [{ path: 'src/a.ts', kind: 'modify' }] },
+    })).resolves.toBe('deny');
+    await expect(responder({
+      requestId: 'req-write',
+      kind: 'tool',
+      title: 'tool: Write',
+      detail: { toolName: 'Write', file_path: 'src/a.ts' },
+    })).resolves.toBe('deny');
   });
 
   it('auto with a codex-family agent keeps the CLI path', async () => {

@@ -12,9 +12,28 @@ import {
   resolveDriverRegistryFromEnv,
   attachPermissionResponder,
 } from '@agentmesa/runner';
+import type { DriverPermissionRequest } from '@agentmesa/runner';
 import type { RunStatus, RunAction } from '@agentmesa/protocol';
+import { createInterface } from 'node:readline/promises';
 import type { ParsedArgs } from '../parse-args.js';
 import { printSuccess, printError, outputResult } from '../output.js';
+
+/**
+ * Terminal human-approval gate for deep-driver turns: prints the pending
+ * action and asks y/n. Non-interactive stdin (pipes, CI) denies — same
+ * fail-closed outcome as having no gate configured.
+ */
+async function askHumanInTerminal(request: DriverPermissionRequest): Promise<'allow' | 'deny'> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return 'deny';
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    console.log(`\n[approval needed] ${request.title}`);
+    const answer = (await rl.question('Allow this action? [y/N] ')).trim().toLowerCase();
+    return answer === 'y' || answer === 'yes' ? 'allow' : 'deny';
+  } finally {
+    rl.close();
+  }
+}
 
 export async function runRuns(args: ParsedArgs): Promise<void> {
   const rootDir = process.cwd();
@@ -150,6 +169,10 @@ export async function runRuns(args: ParsedArgs): Promise<void> {
         }, {
           ctx,
           actor: runActor,
+          // Terminal human-approval gate: when a deep-driver turn hits an
+          // approval-required action, the operator decides here instead of
+          // the default fail-closed deny. Non-interactive stdin denies.
+          askHuman: askHumanInTerminal,
         }));
         outputResult(run, json, () => {
           if (run.status === 'completed') {
