@@ -1,12 +1,12 @@
 # AgentMesa
 
-**AgentMesa is a plugin-first meeting layer for AI coding agents.**
+**AgentMesa is a local-first universal agent collaboration layer.**
 
-AgentMesa gives Claude Code, Codex, Cursor, Gemini CLI, and other AI coding agents a shared meeting table where they can hand off tasks, review code, discuss fixes, and synchronize state through a common protocol.
+Any capable AI agent — CLI (Claude Code, Codex, Gemini CLI) or GUI/desktop (AI Mana, ChatGPT desktop, Claude Desktop, Cursor) — can join the same room, exchange structured messages under human direction, and produce auditable, replayable collaboration records. Coding-agent collaboration remains the flagship workflow, but it is a proving pair, not the product boundary.
 
 中文定位：
 
-> AgentMesa 是一个插件优先的 AI 编程智能体协作会议层。它让 Claude Code、Codex、Cursor、Gemini CLI 等 Agent 跨各自客户端围绕同一个任务自动交接、讨论、评审、修复和交付。
+> AgentMesa 是一个本地优先的通用 AI 智能体协作层。任何 Agent——CLI 的 Claude Code、Codex、Gemini CLI，或 GUI/App 内置的智能体——都能进入同一个群聊，在人的指挥下协作，全程留下可审计、可回放的本地事件记录。
 
 ## Vision
 
@@ -16,7 +16,7 @@ The long-term goal is broader:
 
 > Any capable AI agent should be able to join the same project meeting, understand shared task context, exchange structured messages, produce artifacts, and continue the workflow from its own client.
 
-See [Vision](docs/VISION.md).
+See [Collaboration Vision](docs/COLLAB_VISION.md) (direction of record) and [Vision](docs/VISION.md).
 
 ## Why AgentMesa
 
@@ -164,6 +164,7 @@ AgentMesa is **feature-complete for the 0.1.0 release**. All phases 0-14 of deve
 
 See:
 
+- [Collaboration Vision](docs/COLLAB_VISION.md) — direction of record
 - [Vision](docs/VISION.md)
 - [Product Design](docs/PRODUCT.md)
 - [Architecture](docs/ARCHITECTURE.md)

@@ -111,3 +111,50 @@ Codex approves.
 Tests are run.
 User approves delivery.
 ```
+
+## Release 1.1: Room Message Loop (M1)
+
+Direction reference: `COLLAB_VISION.md` §4 M1. Repays the architecture-audit
+blockers and makes cross-session rooms a mechanism instead of a manual
+convention:
+
+- Room messages and membership changes enter the event stream with cursor
+  increment (`listAfter`).
+- Room MCP tools go through `assertPolicy` (no more policy bypass).
+- Member identity anti-spoofing: `from.ref` must match the MCP actor;
+  per-member credentials.
+- New `mesa_poll_rooms` tool + "poll at turn start" convention in generated
+  CLAUDE.md / AGENTS.md.
+- Room `invite`/`leave` under `withLock`; CLI runner Windows `shell:true`
+  fix.
+
+## Release 1.2: Collaboration Semantics (M2)
+
+- Protocol: `mentions`, `senderRole`, `origin` on room messages; `roles` on
+  room members; human as a first-class sender.
+- Desk UI: @-mention composer, mention highlighting, role badges, embedded
+  plan/approval/run cards in the room stream, agent-conversation collapsing,
+  system-event timeline.
+
+## Release 1.3: Broad Access (M3)
+
+- MCP server transport selection layer: streamable HTTP alongside stdio.
+- Per-connection actor binding (never a shared env-derived actor).
+- Remote member registration; loopback-by-default binding, token required
+  for non-loopback.
+
+## 1.x Acceptance Scenario (universal collaboration)
+
+In Mesa Desk, a user should be able to:
+
+```txt
+Create a room.
+Invite a running Claude Code session, a Codex session, and a GUI agent
+  (joined via MCP connector) as members.
+@mention the planner agent with a requirement.
+Planner proposes a plan as an embedded card.
+User confirms; a task is created and assigned to a builder agent.
+Builder runs; run status streams back into the room.
+Reviewer agent posts structured feedback; user makes the final call.
+The entire exchange replays from the local event log.
+```

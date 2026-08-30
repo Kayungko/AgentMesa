@@ -81,7 +81,9 @@ Created by an agent or human. Status transitions are enforced by the protocol (n
 - `threadId` — grouping thread (optional; null means top-level meeting message)
 - `taskId` — related task (optional; null for meeting-level discussion)
 - `replyToMessageId` — parent message in a thread (optional)
-- `senderAgentId` — agent that sent the message
+- `senderAgentId` — agent that sent the message (or null when the sender is a human; humans are first-class senders)
+- `mentions` — agent ids that were @-mentioned in this message (optional; routing hint)
+- `origin` — `human | agent` (only human-origin messages may trigger task creation)
 - `kind` — message type
 - `body` — structured content (markdown or typed payload)
 - `createdAt`
@@ -420,6 +422,50 @@ Detected automatically on workspace init. Updated when the workspace detects bra
 
 ---
 
+### 16. MesaRoom
+
+**Purpose:** A cross-workspace, cross-vendor group chat where agents, external sessions, and humans collaborate under human direction. See `COLLAB_VISION.md`.
+
+Rooms live in the **global Mesa home** (`~/.agentmesa/rooms/`), not under a single workspace's `.agentmesa/` — a room deliberately spans workspaces and vendors.
+
+**Key fields:**
+- `id` — `room_<ulid>`
+- `name` — human-readable room name
+- `purpose` — free-text topic (optional)
+- `members` — list of `MesaRoomMember`
+- `createdAt`, `updatedAt`
+
+**MesaRoomMember:**
+- `workspaceId` — workspace the member belongs to (or the global workspace for external members)
+- `kind` — `agent | session | human`
+- `ref` — for `agent`: agent id; for `session`: meeting id or an external running-session identity; for `human`: user identity
+- `label` — display name (optional)
+- `roles` — collaboration roles carried into the room (`planner | builder | reviewer | ...`, optional; defaults to the agent's registered role)
+- `lastSeenAt` — updated on poll/send; used for liveness and stale-member cleanup
+- `joinedAt`
+
+**MesaRoomMessage:**
+- `id` — `rmsg_<ulid>`
+- `roomId` — owning room
+- `from` — sender as `{workspaceId, kind, ref, label}` (must match a room member; for MCP callers it must match the actor identity)
+- `mentions` — member refs that were @-mentioned (routing hint, optional)
+- `senderRole` — role badge for rendering (optional)
+- `origin` — `human | agent` (only human-origin messages may trigger task creation)
+- `type` — message type (free-form; `text` default)
+- `summary` — one-line preview / routing-relevant text
+- `body` — full structured content (optional)
+- `taskId` — task context anchor (optional; links a message to a task)
+- `createdAt`
+
+**Relationships:**
+- Has many `MesaRoomMember`s and `MesaRoomMessage`s
+- Room messages may reference a `MesaTask` (work triggered from the room)
+
+**Routing and lifecycle notes:**
+@mention activates a reply only; state mutation follows the existing task → run → approval workflow ("conversation is free, task creation needs human confirmation"). Membership is message-level identity, not a process handle: a running external session joins as a member and participates through its host's access path (poll at turn start). Delivery to live sessions is best-effort polling by design. Member `lastSeenAt` staleness (configurable, e.g. 30 minutes) marks the member stale; cleanup happens lazily on the next poll.
+
+---
+
 ## Relationship Diagram
 
 ```
@@ -555,6 +601,9 @@ These must hold true at all times. The protocol and storage layer enforce them.
 | 13 | An agent cannot mutate state without a valid `MesaRuntimeContext` that includes actor identity and policy evaluation. |
 | 14 | Two agents cannot simultaneously write to the same logical resource (lock enforced). |
 | 15 | All entity IDs use the format `<prefix>_<ulid>` where prefix is the entity's short name. |
+| 16 | A room message sender must be a room member, and for MCP callers must match the actor identity (no spoofing). |
+| 17 | Room messages are append-only and never modified or deleted. |
+| 18 | Only human-origin room messages can trigger task creation; agent-to-agent conversation never auto-starts work. |
 
 ---
 
@@ -632,6 +681,8 @@ All entity IDs follow the pattern `<prefix>_<ulid>`:
 | `check_` | MesaCheckResult |
 | `event_` | MesaEvent |
 | `transport_` | MesaTransport |
+| `room_` | MesaRoom |
+| `rmsg_` | MesaRoomMessage |
 | `ws_` | MesaWorkspace |
 | `repo_` | MesaRepository |
 
