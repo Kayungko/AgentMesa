@@ -7,7 +7,8 @@ permission gates, interruption, and resume across processes — instead of only
 firing one-shot CLI commands.
 
 This document covers the driver contract, the two backends, the
-selection/fallback rules, and how permission requests are bridged.
+selection/fallback rules, how permission requests are bridged, and the
+separate opt-in switch for session collaboration runs.
 
 ## AgentDriver Contract
 
@@ -86,6 +87,11 @@ env value).
 
 Dry runs always take the CLI path (they execute nothing by design).
 
+This resolution governs the **task-run** `executeRun` path only. Session
+collaboration runs (meeting-invited agent speech) have their own independent
+switch, `AGENTMESA_SESSION_DRIVER` — see
+[Session Runs](#session-runs-conditional-deep-driver-opt-in-agentmesa_session_driver).
+
 ## Enabling (call-site wiring)
 
 `AGENTMESA_DRIVER` is the single switch that turns deep drivers on at the
@@ -108,8 +114,66 @@ Notes:
   argument), and workflow definitions gain no new fields.
 - Every call constructs fresh driver instances: drivers own child processes /
   SDK handles, so a registry is never shared across executors.
-- Permission bridging is still deny-all at these call sites until the policy
-  responder is wired in (see below) — deep-driver turns fail closed.
+- Permission bridging is wired at all three call sites: each builds its
+  executor options with `attachPermissionResponder(...)` from
+  `packages/runner/src/drivers/permission-bridge.ts`, so gated actions are
+  judged by the policy engine under the **run's agent identity** (its
+  registered roles) rather than blanket-denied. The one remaining gap is the
+  human approval gate: no call site configures `askHuman` yet, so
+  approval-required operations still fail closed (see
+  [Permission Bridging](#permission-bridging)).
+
+## Session Runs: Conditional Deep-Driver Opt-In (`AGENTMESA_SESSION_DRIVER`)
+
+Meeting collaboration runs — a session agent invited into a meeting speaking
+back into the timeline (`packages/runner/src/session-run.ts`) — get their own
+switch, separate from `AGENTMESA_DRIVER`:
+
+| `AGENTMESA_SESSION_DRIVER` | Effect on session runs |
+|---|---|
+| `cli` (default) | Session speech behaves exactly as before: a one-shot `claude -p` / `codex exec` cold start per speaking turn. |
+| `auto` | Only claude-family agents (client starting with `claude`) go through the deep driver; codex-family agents stay on the CLI (until the Codex patch-approval wire-payload issue is fixed). |
+| `claude-agent-sdk` / `codex-app-server` | Every session run is driven by that driver, regardless of client family. |
+
+Two helpers, exported from the runner package, carry the semantics:
+
+- `resolveSessionDriverPreference(env?)` — parses the env var with the same
+  lenient rules as the task-run side (unknown values never crash a run).
+- `shouldUseSessionDriver(preference, agentClient)` — decides per agent
+  whether the speaking turn takes the deep-driver path.
+
+**Why a separate switch.** The session path deliberately does **not** inherit
+the `AGENTMESA_DRIVER` global default. Once the Claude Agent SDK is installed,
+`isAvailable()` is always true — if `auto` silently applied to session runs,
+every claude-family member's meeting speech would flip to deep-driver turns
+overnight. An independent, default-`cli` switch keeps the rollout gradual and
+opt-in per deployment.
+
+**Behavior when a session run goes deep:**
+
+- The resume handle is keyed by `meetingId` (the scope rules in
+  [Session Resume](#session-resume) already provide this), so a member threads
+  across speaking turns within one meeting — cross-turn memory.
+- Permission requests pass through the same policy bridge, judged by the
+  **agent's registered roles**: read-only tools are allowed; `Bash` / `Write`
+  are judged against the role capability table. No `askHuman` gate is wired
+  for session runs either — approval-required operations fail closed.
+- Output is still written back into the meeting timeline under the agent's
+  identity; the deep driver only changes how the turn is executed, not how the
+  reply is delivered.
+
+**Phase 1 scope** is claude-family only (`auto` maps codex-family to CLI) and
+speaking turns passing through the permission bridge.
+
+**Roadmap (planned, not yet built):** Phase 2 tightens session speech to a
+read-only fence (speaking turns restricted to read-only tool use unless a
+meeting-level capability says otherwise) and wires the `askHuman` bridge so
+approval-gated actions surface to a human over Desk instead of failing closed.
+
+**Two switches, no linkage.** `AGENTMESA_SESSION_DRIVER` and `AGENTMESA_DRIVER`
+are independent: the former governs only session collaboration runs and
+defaults to `cli`; the latter governs the task-run `executeRun` call sites.
+Setting one never changes the behavior of the other.
 
 ## Run-Executor Integration
 
@@ -180,23 +244,47 @@ type DriverPermissionResponder =
   (`tool|command|patch`), a human-readable `title`, and the raw `detail` for
   policy evaluation.
 - The responder is passed as `executeRun`'s `permissionResponder` option (or
-  `executeDriverTurn`'s parameter).
-- **Default: deny everything.** Without an injected responder, every gated
-  action is denied with `Denied by AgentMesa policy` — deep drivers fail
-  closed.
-- The real bridge (assertPolicy + human approval gate over Desk) is future
-  wiring; the injection point is the `permissionResponder` option.
+  `executeDriverTurn`'s parameter). Without one, the executor's built-in
+  default still **denies everything** (`Denied by AgentMesa policy`) — deep
+  drivers fail closed.
+- The real bridge is `createPolicyPermissionResponder(options)` /
+  `attachPermissionResponder(executorOptions, { ctx, ... })` in
+  `packages/runner/src/drivers/permission-bridge.ts`. It judges every request
+  through the `@agentmesa/policy` checkers:
+  - `command` — blocked-pattern / secret-path scan → `run_command` role
+    capability (checked *before* the approval gate, so a human approval can
+    never upgrade a role) → approval-required patterns → command allowlist.
+  - `patch` — secret-path scan → `FileAccessChecker` write-scope rules per
+    role (paths relativized against the workspace root); unparsable payload →
+    deny.
+  - `tool` — tool name → policy action (`Write`/`Edit` → modify_source,
+    `Bash` → run_command, …) judged by role capability; known read-only tools
+    pass, unknown tools are denied; `ctx.policy` is consulted as a second
+    opinion for actions with a core mapping.
+  - Any parse failure, unknown payload structure, or thrown error inside the
+    bridge resolves to deny. Every decision is reported through the optional
+    `onDecision` callback as an auditable `PermissionDecisionRecord`.
+- All three `executeRun` call sites (CLI `mesa runs exec`, MCP
+  `mesa_exec_run`, orchestrator `run_agent` steps) assemble the responder via
+  `attachPermissionResponder`, evaluating gated actions under the run's agent
+  identity (the agent's registered roles), not the calling actor.
+- **Human approval gate not yet configured anywhere.** The bridge supports an
+  `askHuman` callback for "allowed but requires approval" operations; no call
+  site passes one today, so such operations are denied with
+  `approval.required … no human approval gate is configured` — still
+  fail-closed. Wiring the gate over Desk is future work.
 
 ## Implementation Status
 
 | Component | Status |
 |---|---|
 | Driver contract (`drivers/types.ts`) | **Done.** Frozen contract; events, permission requests, handles, resume. |
-| Claude Agent SDK driver backend | **In progress** (parallel work; assembled in `drivers/index.ts`). |
-| Codex app-server driver backend | **In progress** (parallel work; assembled in `drivers/index.ts`). |
+| Claude Agent SDK driver backend | **Done.** Real sessions, multi-turn threads, resume by SDK session id; assembled in `drivers/index.ts`. |
+| Codex app-server driver backend | **Done.** App-server conversations, resume by conversation id; assembled in `drivers/index.ts`. |
 | Selection + CLI fallback (`drivers/resolve.ts`) | **Done.** Preference parsing (`AGENTMESA_DRIVER`), client mapping, availability probing, fallback reasons. |
 | run-executor integration | **Done.** Driver turn path, event→progress mapping, timeout/interrupt, artifact persistence; CLI path byte-identical. |
 | Handle persistence + resume | **Done.** Sidecar store under `.agentmesa/driver-sessions/`, per agent+scope resume, resume-failure fallback. |
-| Permission bridging | **Injection point done** (deny-all default). Policy-engine / human-approval bridge is future work. |
+| Permission bridging (`drivers/permission-bridge.ts`) | **Done.** Policy-engine responder (`createPolicyPermissionResponder` / `attachPermissionResponder`) wired at all three `executeRun` call sites. The `askHuman` human approval gate is not configured at any call site yet — approval-required operations fail closed. |
 | Real driver assembly (`drivers/index.ts`) | **Done.** `createDefaultDriverRegistry()` builds the real Claude SDK + Codex app-server drivers. |
-| Env switch + call-site wiring (`drivers/env.ts`) | **Done.** `AGENTMESA_DRIVER` gates the registry at the MCP server / orchestrator / CLI call sites; `cli` disables deep drivers. The permission responder at the call sites is pending the policy bridge. |
+| Env switch + call-site wiring (`drivers/env.ts`) | **Done.** `AGENTMESA_DRIVER` gates the registry at the MCP server / orchestrator / CLI call sites; `cli` disables deep drivers. |
+| Session-run deep-driver opt-in (`AGENTMESA_SESSION_DRIVER`) | **In progress** (parallel work; this section documents the frozen contract). `resolveSessionDriverPreference` / `shouldUseSessionDriver`, default `cli`, Phase 1 claude-family only. |

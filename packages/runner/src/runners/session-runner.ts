@@ -21,7 +21,9 @@ export class SessionRunner extends AbstractRunner {
     const { startTime } = this.prepareRun(options);
     const isDryRun = this.dryRun || options.dryRun || false;
 
-    const ctx = createRuntimeContext({
+    // `getAgent` is a plain storage read (no policy check), so a minimal
+    // lookup context suffices to resolve the agent's registration first.
+    const lookupCtx = createRuntimeContext({
       rootDir: this.paths.rootDir,
       actor: {
         id: options.agentId,
@@ -33,10 +35,24 @@ export class SessionRunner extends AbstractRunner {
 
     let agent;
     try {
-      agent = getAgent(ctx, options.agentId);
+      agent = getAgent(lookupCtx, options.agentId);
     } catch {
       agent = undefined;
     }
+
+    // Carry the agent's registered roles (fallback ['builder'] for unknown
+    // agents) so the actor identity matches the registry — the roles are not
+    // consumed by this runner today, but keeping them accurate prevents silent
+    // divergence if a policy check is ever added on this path.
+    const ctx = createRuntimeContext({
+      rootDir: this.paths.rootDir,
+      actor: {
+        id: options.agentId,
+        type: 'agent',
+        roles: agent?.roles ?? ['builder'],
+        client: 'claude-code',
+      },
+    });
     const isCodex = agent?.client === 'codex';
     const cliCommand = (isCodex
       ? process.env.AGENTMESA_CODEX_CMD?.trim() || ctx.config.runners?.codexCmd?.trim()

@@ -48,6 +48,8 @@ import {
   executeRun,
   activateSessionAgent,
   resolveDriverRegistryFromEnv,
+  resolveSessionDriverPreference,
+  shouldUseSessionDriver,
   attachPermissionResponder,
 } from '@agentmesa/runner';
 import type { MesaActor } from '@agentmesa/core';
@@ -67,6 +69,7 @@ import type {
   CheckKind,
   CheckResultStatus,
   MesaRoom,
+  MesaAgent,
 } from '@agentmesa/protocol';
 
 // --- Input schemas for MCP tool registration ---
@@ -1068,9 +1071,38 @@ export async function handleActivateSessionAgent(
   ctx: MesaRuntimeContext,
   args: { meetingId: string; agentId: string; timeout?: number }
 ): Promise<string> {
-  const result = await activateSessionAgent(ctx, args.meetingId, args.agentId, {
+  // Session runs have their own deep-driver switch (`AGENTMESA_SESSION_DRIVER`,
+  // default 'cli') so enabling deep drivers for task runs via AGENTMESA_DRIVER
+  // never silently changes the meeting-speech transport. Unregistered agent ids
+  // conservatively stay on the CLI path.
+  const preference = resolveSessionDriverPreference();
+  let agent: MesaAgent | undefined;
+  try {
+    agent = getAgent(ctx, args.agentId);
+  } catch {
+    agent = undefined;
+  }
+  const baseOptions = {
     ...(args.timeout !== undefined ? { timeout: args.timeout } : {}),
-  });
+  };
+  const options = agent && shouldUseSessionDriver(preference, agent.client)
+    ? attachPermissionResponder({
+        ...baseOptions,
+        driverRegistry: resolveDriverRegistryFromEnv(),
+        driverPreference: preference,
+      }, {
+        ctx,
+        // Gated (deep-driver) actions run under the agent's *registered*
+        // identity — its roles and client, not the MCP connection's actor.
+        actor: {
+          id: args.agentId,
+          type: 'agent',
+          roles: agent.roles,
+          client: agent.client,
+        },
+      })
+    : baseOptions;
+  const result = await activateSessionAgent(ctx, args.meetingId, args.agentId, options);
   return JSON.stringify(result);
 }
 

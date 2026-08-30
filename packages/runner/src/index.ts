@@ -82,8 +82,13 @@ export type {
   DriverTurnParams,
 } from './run-executor.js';
 
-export { resolveDriverRegistryFromEnv } from './drivers/env.js';
-export type { DriverEnvSource } from './drivers/env.js';
+export {
+  resolveDriverRegistryFromEnv,
+  resolveSessionDriverPreference,
+  shouldUseSessionDriver,
+  SESSION_DRIVER_PREFERENCE_ENV,
+} from './drivers/env.js';
+export type { DriverEnvSource, SessionDriverPreference } from './drivers/env.js';
 
 export {
   attachPermissionResponder,

@@ -11,6 +11,7 @@ import {
   createMeeting,
   createRuntimeContext,
   createTask,
+  getAgent,
   getAgentRun,
   getArtifact,
   getMeeting,
@@ -40,7 +41,7 @@ import {
   MesaError,
   withLock,
 } from '@agentmesa/core';
-import type { MesaWorkspace } from '@agentmesa/protocol';
+import type { MesaAgent, MesaWorkspace } from '@agentmesa/protocol';
 import type { AgentRole, EventEnvelope, MeetingStatus, RoomMessage, RunStatus, TaskStatus, WorkflowDecisionCommand } from '@agentmesa/protocol';
 import {
   CreateMeetingInputSchema,
@@ -50,7 +51,14 @@ import {
 } from '@agentmesa/protocol';
 import type { MesaActor, MesaRuntimeContext } from '@agentmesa/core';
 import { WorkflowEngine, decideWorkflow, listWorkflowStates } from '@agentmesa/orchestrator';
-import { activateSessionAgent, terminateSessionChildren } from '@agentmesa/runner';
+import {
+  activateSessionAgent,
+  terminateSessionChildren,
+  resolveDriverRegistryFromEnv,
+  resolveSessionDriverPreference,
+  shouldUseSessionDriver,
+  attachPermissionResponder,
+} from '@agentmesa/runner';
 import {
   getSetupStatus,
   installMcpIntegration,
@@ -144,6 +152,23 @@ interface StoredCommandResult {
   accepted: true;
   duplicate: boolean;
   result?: unknown;
+}
+
+/**
+ * Resolve the actor identity under which a session agent's gated
+ * (deep-driver) actions are judged: roles and client come from the agent's
+ * registration record. Unregistered ids fall back to the write-back defaults
+ * (see `writeBackSessionMessage` in runner/session-run.ts), mirroring how the
+ * reply is attributed — though the driver path itself requires a registered
+ * agent (see `activateMeetingAgent`).
+ */
+function sessionAgentActor(agentId: string, agent: MesaAgent | undefined): MesaActor {
+  return {
+    id: agentId,
+    type: 'agent',
+    roles: agent?.roles ?? ['builder'],
+    client: agent?.client ?? 'claude-code',
+  };
 }
 
 export class DeskServer {
@@ -284,9 +309,31 @@ export class DeskServer {
     agentId: string,
     writeContext: MesaRuntimeContext,
   ): Promise<void> {
-    await activateSessionAgent(writeContext, meetingId, agentId, {
-      timeout: this.sessionRunTimeout,
-    });
+    // Session runs carry their own deep-driver switch (`AGENTMESA_SESSION_DRIVER`,
+    // default 'cli') so the task-run switch (`AGENTMESA_DRIVER`) never silently
+    // changes the meeting-speech transport. Unregistered agent ids stay on the
+    // plain CLI path.
+    const preference = resolveSessionDriverPreference();
+    let agent: MesaAgent | undefined;
+    try {
+      agent = getAgent(writeContext, agentId);
+    } catch {
+      agent = undefined;
+    }
+    const baseOptions = { timeout: this.sessionRunTimeout };
+    const options = agent && shouldUseSessionDriver(preference, agent.client)
+      ? attachPermissionResponder({
+          ...baseOptions,
+          driverRegistry: resolveDriverRegistryFromEnv(),
+          driverPreference: preference,
+        }, {
+          ctx: writeContext,
+          // Gated actions run under the agent's registered identity, not the
+          // desk write actor.
+          actor: sessionAgentActor(agentId, agent),
+        })
+      : baseOptions;
+    await activateSessionAgent(writeContext, meetingId, agentId, options);
   }
 
   private async handleRequest(

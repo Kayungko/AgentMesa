@@ -10,7 +10,11 @@ import {
   listTasks,
 } from '@agentmesa/core';
 import type { MesaRuntimeContext } from '@agentmesa/core';
-import { executeRun, type RunExecutionResult } from './run-executor.js';
+import {
+  executeRun,
+  type RunExecutorOptions,
+  type RunExecutionResult,
+} from './run-executor.js';
 import { buildSessionPrompt } from './prompt-builder.js';
 
 const MAX_WRITEBACK_BODY = 50_000;
@@ -28,6 +32,15 @@ export interface SessionRunOptions {
    * agent's actual contribution).
    */
   writeBackToMeetingId?: string;
+  /**
+   * M4 deep-driver options — passed through verbatim to `executeRun` (see
+   * `RunExecutorOptions`). Omitted/empty keeps the legacy CLI path
+   * byte-for-byte; session runs only receive a registry when the caller has
+   * already decided to enable deep drivers (see `shouldUseSessionDriver`).
+   */
+  driverRegistry?: RunExecutorOptions['driverRegistry'];
+  driverPreference?: RunExecutorOptions['driverPreference'];
+  permissionResponder?: RunExecutorOptions['permissionResponder'];
 }
 
 /**
@@ -42,6 +55,11 @@ export async function executeSessionRun(
 ): Promise<RunExecutionResult> {
   const result = await executeRun(ctx, runId, {
     timeout: options?.timeout,
+    // Deep-driver passthrough: undefined values behave exactly as before
+    // (executeRun treats an absent registry as [] and falls back to the CLI path).
+    driverRegistry: options?.driverRegistry,
+    driverPreference: options?.driverPreference,
+    permissionResponder: options?.permissionResponder,
   });
 
   if (options?.writeBackToMeetingId) {
@@ -91,6 +109,10 @@ async function writeBackSessionMessage(
 
 export interface ActivateSessionAgentOptions {
   timeout?: number;
+  /** Deep-driver passthrough — same shape and semantics as `SessionRunOptions`. */
+  driverRegistry?: RunExecutorOptions['driverRegistry'];
+  driverPreference?: RunExecutorOptions['driverPreference'];
+  permissionResponder?: RunExecutorOptions['permissionResponder'];
 }
 
 /**
@@ -155,6 +177,9 @@ export async function activateSessionAgent(
   const { run } = await executeSessionRun(ctx, created.id, {
     writeBackToMeetingId: meetingId,
     timeout: options?.timeout,
+    driverRegistry: options?.driverRegistry,
+    driverPreference: options?.driverPreference,
+    permissionResponder: options?.permissionResponder,
   });
 
   return { run, executed: true };
