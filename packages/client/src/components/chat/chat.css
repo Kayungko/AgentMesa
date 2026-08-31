@@ -152,6 +152,8 @@
 .chat-msg--own .bubble { border-radius: var(--radius-bubble-self); background: var(--color-bubble-self); color: var(--color-on-bubble-self); }
 .chat-msg--own .bubble__body { background: var(--color-bubble-inset); color: inherit; }
 .chat-msg__type--own { background: var(--color-bubble-inset); color: inherit; opacity: 0.85; margin-top: 4px; }
+/* 外部导入来源徽标（导入的 Claude/codex 转写消息）。 */
+.chat-msg__type--import { background: var(--color-info-soft); color: var(--color-info); }
 
 /* Live-arrival entrance (reduced-motion aware). */
 @keyframes msg-in {

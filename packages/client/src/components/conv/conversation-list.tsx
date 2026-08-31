@@ -3,7 +3,7 @@ import type { RoomSummary } from '../../api.js';
 import type { useMesaRuntime } from '../../useMesaRuntime.js';
 import { EmptyState } from '../ui/empty.js';
 import { IconButton } from '../ui/icon-button.js';
-import { PencilSimple, UsersThree } from '../ui/icons.js';
+import { DownloadSimple, PencilSimple, UsersThree } from '../ui/icons.js';
 import { SearchInput } from '../ui/search.js';
 import { SkeletonStack } from '../ui/skeleton.js';
 import { ConvRow, type ConvRowData } from './conv-row.js';
@@ -16,6 +16,7 @@ export function ConversationList({
   onOpen,
   onCreateSession,
   onCreateRoom,
+  onImportSession,
 }: {
   runtime: ReturnType<typeof useMesaRuntime>;
   rooms: RoomSummary[];
@@ -24,6 +25,7 @@ export function ConversationList({
   onOpen: (key: string) => void;
   onCreateSession: () => void;
   onCreateRoom: () => void;
+  onImportSession: () => void;
 }) {
   const [query, setQuery] = useState('');
 
@@ -67,6 +69,7 @@ export function ConversationList({
           <div className="conv-list__create">
             <IconButton label="新建会话" onClick={onCreateSession}><PencilSimple size={16} /></IconButton>
             <IconButton label="新建群聊" onClick={onCreateRoom}><UsersThree size={16} /></IconButton>
+            <IconButton label="导入外部会话" onClick={onImportSession}><DownloadSimple size={16} /></IconButton>
           </div>
         </div>
         <SearchInput value={query} onChange={setQuery} placeholder="搜索会话" />

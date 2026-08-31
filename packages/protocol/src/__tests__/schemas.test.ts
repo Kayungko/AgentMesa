@@ -507,6 +507,7 @@ describe('MesaEventSchema', () => {
       'check_completed',
       'thread_created',
       'thread_resolved',
+      'meeting_imported',
     ]);
   });
 });

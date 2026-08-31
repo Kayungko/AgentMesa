@@ -11,6 +11,7 @@ export {
   Check,
   CheckSquare,
   ClipboardText,
+  DownloadSimple,
   GearSix,
   Info,
   MagnifyingGlass,

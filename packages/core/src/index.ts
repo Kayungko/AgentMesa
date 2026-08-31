@@ -38,3 +38,5 @@ export type { ReadProjectionOptions, TaskProjection, MeetingProjection, AgentPro
 export * from './services/read-model-service.js';
 export * from './services/why-service.js';
 export * from './services/diagnostics.js';
+export * from './services/import-service.js';
+export * from './external-sessions/index.js';

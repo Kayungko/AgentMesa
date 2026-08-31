@@ -22,6 +22,7 @@ import {
 } from '../chat/status-drawer.js';
 import { CreateSessionDialog } from '../dialog/create-session-dialog.js';
 import { CreateRoomDialog } from '../dialog/create-room-dialog.js';
+import { ImportSessionDialog } from '../dialog/import-session-dialog.js';
 import { DeployView } from '../deploy/deploy-view.js';
 import { AgentsView } from '../views/agents-view.js';
 import { TasksView } from '../views/tasks-view.js';
@@ -222,6 +223,7 @@ export function AppShell({ config }: { config: RuntimeConfig }) {
             onOpen={openConversation}
             onCreateSession={() => go('#/sessions/new', { section: 'sessions-new' })}
             onCreateRoom={() => go('#/rooms/new', { section: 'rooms-new' })}
+            onImportSession={() => go('#/sessions/import', { section: 'sessions-import' })}
           />
 
           {section === 'deploy' ? (
@@ -320,6 +322,17 @@ export function AppShell({ config }: { config: RuntimeConfig }) {
         <CreateRoomDialog
           config={config}
           onCreated={(id) => { void refreshRooms(); go(`#/rooms/${id}`, { section: 'rooms', roomId: id }); }}
+          onClose={() => go('#/', { section: 'home' })}
+        />
+      ) : null}
+      {section === 'sessions-import' ? (
+        <ImportSessionDialog
+          config={config}
+          onCreated={(id) => {
+            // 导入的会议不在 useMesaRuntime 的既有数据里，手动刷新会话列表后跳转。
+            void runtime.refresh();
+            go(`#/sessions/${id}`, { section: 'sessions', sessionId: id });
+          }}
           onClose={() => go('#/', { section: 'home' })}
         />
       ) : null}

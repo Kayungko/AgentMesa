@@ -9,6 +9,7 @@ export type Section =
   | 'archive'
   | 'sessions'
   | 'sessions-new'
+  | 'sessions-import'
   | 'rooms'
   | 'rooms-new'
   | 'deploy';
@@ -36,6 +37,7 @@ export function readConfig(): RuntimeConfig {
 export function parseHashRoute(): HashRoute {
   const h = window.location.hash;
   if (h.startsWith('#/sessions/new')) return { section: 'sessions-new' };
+  if (h.startsWith('#/sessions/import')) return { section: 'sessions-import' };
   if (h.startsWith('#/rooms/new')) return { section: 'rooms-new' };
   if (h.startsWith('#/sessions/')) {
     return { section: 'sessions', sessionId: h.slice('#/sessions/'.length).split('/')[0] };

@@ -46,7 +46,9 @@ export function appendMessage(
     summary: validated.summary,
     body: validated.body,
     artifactIds: validated.artifactIds,
-    createdAt: new Date().toISOString(),
+    // Imported sessions pass a historical createdAt so the timeline keeps the
+    // source transcript's order; live messages fall back to "now".
+    createdAt: validated.createdAt ?? new Date().toISOString(),
   };
 
   const result = MesaMessageSchema.parse(message);

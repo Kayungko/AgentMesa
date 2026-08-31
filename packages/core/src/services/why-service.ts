@@ -338,6 +338,8 @@ function summarizeEvent(event: MesaEvent): string {
       return 'Thread created';
     case 'thread_resolved':
       return 'Thread resolved';
+    case 'meeting_imported':
+      return `Meeting imported from ${str(data.source) ?? 'external'} (${str(data.messageCount) ?? '?'} messages)`;
     default:
       return event.type;
   }

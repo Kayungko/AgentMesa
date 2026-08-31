@@ -141,6 +141,7 @@ export const eventTypeSchema = z.enum([
   'check_completed',
   'thread_created',
   'thread_resolved',
+  'meeting_imported',
 ]);
 
 const transportKindSchema = z.enum(['file', 'mcp', 'http', 'websocket', 'github', 'ci']);
@@ -256,6 +257,7 @@ export const MesaMessageSchema = z.object({
   summary: z.string().min(1),
   body: z.string().optional(),
   artifactIds: z.array(z.string()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
   createdAt: z.string().min(1),
 });
 
@@ -300,6 +302,7 @@ export const MesaMeetingSchema = z.object({
   ownerAgentId: z.string().optional(),
   tasks: z.array(z.string()).default([]),
   agents: z.array(z.string()).default([]),
+  metadata: z.record(z.string(), z.unknown()).optional(),
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
   completedAt: z.string().optional(),
@@ -578,6 +581,9 @@ export const CreateMessageInputSchema = z.object({
   summary: z.string().min(1),
   body: z.string().optional(),
   artifactIds: z.array(z.string()).optional(),
+  // Set by the import path to preserve the source transcript's historical
+  // timestamp; absent means "now" (message-service fills it in).
+  createdAt: z.string().datetime().optional(),
 });
 
 export const CreateArtifactInputSchema = z.object({

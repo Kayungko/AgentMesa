@@ -1,5 +1,16 @@
 import type { EventEnvelope, MesaAgent, MesaMeeting, MesaMessage, MesaRoom, MesaTask, MesaWorkspace } from '@agentmesa/protocol';
-import type { MeetingDetail, PendingPermissionApproval, RoomDetail, RuntimeConfig, WorkflowState, WorkspaceList } from './types.js';
+import type {
+  ExternalSessionPreviewItem,
+  ExternalSessionSource,
+  ExternalSessionSummary,
+  ImportSessionResult,
+  MeetingDetail,
+  PendingPermissionApproval,
+  RoomDetail,
+  RuntimeConfig,
+  WorkflowState,
+  WorkspaceList,
+} from './types.js';
 
 function headers(config: RuntimeConfig, json = false): HeadersInit {
   return {
@@ -340,6 +351,41 @@ export function updateMeetingStatus(config: RuntimeConfig, meetingId: string, st
     `/api/meetings/${encodeURIComponent(meetingId)}/status`,
     { status },
   );
+}
+
+// --- External session import (Claude Code / codex CLI transcripts) ---
+
+/** 列出某个来源（claude / codex）本机可导入的外部会话。 */
+export function listExternalSessions(
+  config: RuntimeConfig,
+  source: ExternalSessionSource,
+): Promise<ExternalSessionSummary[]> {
+  return request<{ sessions: ExternalSessionSummary[] }>(
+    config,
+    `/api/imports/external-sessions?source=${encodeURIComponent(source)}`,
+  ).then((payload) => payload.sessions);
+}
+
+/** 预览导入：只取会话前 10 条消息，不落库。 */
+export function previewExternalSession(
+  config: RuntimeConfig,
+  source: ExternalSessionSource,
+  sessionId: string,
+): Promise<ExternalSessionPreviewItem[]> {
+  return postJson<{ meetingId: null; preview: ExternalSessionPreviewItem[] }>(
+    config,
+    '/api/meetings/import',
+    { source, sessionId, previewOnly: true },
+  ).then((payload) => payload.preview);
+}
+
+/** 正式导入：把外部会话转写为 AgentMesa 会议时间线。 */
+export function importExternalSession(
+  config: RuntimeConfig,
+  source: ExternalSessionSource,
+  sessionId: string,
+): Promise<ImportSessionResult> {
+  return postJson<ImportSessionResult>(config, '/api/meetings/import', { source, sessionId });
 }
 
 export function createTask(

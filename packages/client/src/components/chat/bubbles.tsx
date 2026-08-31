@@ -63,6 +63,10 @@ export function MeetingBubbles({
     }
     const label = agent ? agent.name : mine ? '我' : senderId;
     const typeLabel = message.type !== 'general' ? typeLabels[message.type] ?? message.type : undefined;
+    // `metadata` 由 protocol 侧并行补齐——此处防御性读取，避免类型/运行时双重依赖。
+    const metadata = (message as { metadata?: Record<string, unknown> }).metadata;
+    const externalSource = typeof metadata?.source === 'string' && metadata.source ? metadata.source : undefined;
+    const importBadge = externalSource ? `外部导入 · ${externalSource}` : undefined;
     items.push(
       <li
         key={message.id}
@@ -78,6 +82,7 @@ export function MeetingBubbles({
             <span className="chat-msg__meta">
               <strong>{label}</strong>
               {typeLabel ? <em className="chat-msg__type">{typeLabel}</em> : null}
+              {importBadge ? <em className="chat-msg__type chat-msg__type--import">{importBadge}</em> : null}
               <small>{new Date(message.createdAt).toLocaleTimeString()}</small>
             </span>
           ) : null}
@@ -85,6 +90,7 @@ export function MeetingBubbles({
             <p>{message.summary}</p>
             {message.body ? <pre className="bubble__body">{message.body}</pre> : null}
             {mine && typeLabel ? <em className="chat-msg__type chat-msg__type--own">{typeLabel}</em> : null}
+            {mine && importBadge ? <em className="chat-msg__type chat-msg__type--own">{importBadge}</em> : null}
           </div>
         </div>
       </li>,

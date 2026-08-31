@@ -26,6 +26,13 @@ import {
   listMessages,
   listOutboundHandoffs,
   listTasks,
+  findClaudeSessionFile,
+  findCodexSessionFile,
+  importExternalSession,
+  listClaudeSessions,
+  listCodexSessions,
+  parseClaudeSession,
+  parseCodexSession,
   addWorkspace,
   getWorkspace,
   removeWorkspace,
@@ -42,6 +49,7 @@ import {
   withLock,
 } from '@agentmesa/core';
 import type { MesaAgent, MesaWorkspace } from '@agentmesa/protocol';
+import type { ExternalSessionSource, ExternalSessionSummary } from '@agentmesa/core';
 import type { AgentRole, EventEnvelope, MeetingStatus, RoomMessage, RunStatus, TaskStatus, WorkflowDecisionCommand } from '@agentmesa/protocol';
 import {
   CreateMeetingInputSchema,
@@ -463,6 +471,15 @@ export class DeskServer {
       this.sendJson(res, { pending: this.permissionApprovalQueue.list() });
       return;
     }
+    if (pathname === '/api/imports/external-sessions') {
+      const source = url.searchParams.get('source');
+      if (source !== 'claude' && source !== 'codex') {
+        this.sendError(res, 400, 'source must be "claude" or "codex"');
+        return;
+      }
+      this.sendJson(res, { sessions: this.listExternalSessions(source) });
+      return;
+    }
     if (pathname === '/api/setup/status') {
       this.sendJson(res, getSetupStatus(this.rootDir));
       return;
@@ -537,6 +554,31 @@ export class DeskServer {
     }
 
     this.sendError(res, 404, 'Not found');
+  }
+
+  /**
+   * Optional scan-root override for the external-session import surface.
+   * Unset (the normal desktop case) → scanner defaults under the user's home.
+   */
+  private importRootDir(source: ExternalSessionSource): string | undefined {
+    const raw = source === 'claude'
+      ? process.env.AGENTMESA_IMPORT_CLAUDE_ROOT
+      : process.env.AGENTMESA_IMPORT_CODEX_ROOT;
+    return raw && raw.trim().length > 0 ? raw : undefined;
+  }
+
+  /** List external sessions defensively: a missing/unreadable root lists empty. */
+  private listExternalSessions(source: ExternalSessionSource): ExternalSessionSummary[] {
+    const rootDir = this.importRootDir(source);
+    const options = rootDir === undefined ? undefined : { rootDir };
+    try {
+      return source === 'claude'
+        ? listClaudeSessions(options)
+        : listCodexSessions(options);
+    } catch (error) {
+      console.error('Failed to list external sessions:', error instanceof Error ? error.message : String(error));
+      return [];
+    }
   }
 
   private async handleWriteRequest(
@@ -785,6 +827,51 @@ export class DeskServer {
     if (pathname === '/api/meetings') {
       const input = CreateMeetingInputSchema.parse(await this.readJsonBody(req));
       this.sendJson(res, createMeeting(writeContext, input), 201);
+      return;
+    }
+
+    if (pathname === '/api/meetings/import') {
+      const body = await this.readJsonBody(req) as {
+        source?: unknown;
+        sessionId?: unknown;
+        previewOnly?: unknown;
+      };
+      if (body.source !== 'claude' && body.source !== 'codex') {
+        throw new MesaError('VALIDATION_ERROR', 'source must be "claude" or "codex"');
+      }
+      if (typeof body.sessionId !== 'string' || body.sessionId.trim().length === 0) {
+        throw new MesaError('VALIDATION_ERROR', 'sessionId is required');
+      }
+      const source: ExternalSessionSource = body.source;
+      const rootDir = this.importRootDir(source);
+      const filePath = source === 'claude'
+        ? findClaudeSessionFile(body.sessionId, rootDir)
+        : findCodexSessionFile(body.sessionId, rootDir);
+      if (!filePath) {
+        this.sendError(res, 404, `EXTERNAL_SESSION_NOT_FOUND: ${source} session ${body.sessionId}`);
+        return;
+      }
+      const parsed = source === 'claude'
+        ? parseClaudeSession(filePath)
+        : parseCodexSession(filePath);
+      if (body.previewOnly === true) {
+        this.sendJson(res, {
+          meetingId: null,
+          preview: parsed.messages.slice(0, 10).map((message) => ({
+            speaker: message.speaker,
+            text: message.body ?? message.summary,
+            createdAt: message.createdAt,
+            kind: message.kind,
+          })),
+        });
+        return;
+      }
+      const result = importExternalSession(writeContext, {
+        source,
+        sessionId: body.sessionId,
+        parsed,
+      });
+      this.sendJson(res, result, 201);
       return;
     }
 
