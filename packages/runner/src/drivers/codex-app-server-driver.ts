@@ -199,6 +199,9 @@ export class CodexAppServerDriver implements AgentDriver {
           // Surface every gated action as an approval request (verified wire
           // values: untrusted | on-request | never).
           params.approvalPolicy = 'on-request';
+          // Read-only sandbox so workspace writes cannot execute silently —
+          // see the matching comment in the turn/start fence below.
+          params.sandbox = 'read-only';
         }
         const result = asRecord(await connection.request(CODEX_METHODS.threadStart, params));
         const thread = asRecord(result?.['thread']) as CodexThread | null;
@@ -290,6 +293,15 @@ class CodexAppServerSession implements AgentDriverSession {
         // approval. For freshly created threads this matches the
         // thread/start posture and is therefore a no-op.
         params.approvalPolicy = 'on-request';
+        // Sandbox fence: the default sandbox (workspace-write) lets writes
+        // inside the workspace execute WITHOUT any approval request, which
+        // silently bypasses the speech-guard fence (verified live against
+        // codex-cli 0.152.0: a workspace file write produced zero
+        // requestApproval events). Pinning the turn to read-only forces every
+        // write through item/fileChange|commandExecution/requestApproval;
+        // a plain {decision:"accept"} answer then lets the approved write run
+        // (verified live — no updatedSandbox escalation needed).
+        params.sandbox = 'read-only';
       }
       const result = asRecord(await this.connection.request(CODEX_METHODS.turnStart, params));
       const turn = asRecord(result?.['turn']);

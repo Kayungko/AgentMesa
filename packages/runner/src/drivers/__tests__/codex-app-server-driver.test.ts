@@ -115,7 +115,18 @@ describe('CodexAppServerDriver session lifecycle', () => {
     const session = await driver.createSession({ cwd: dir, requirePermissions: true });
     const threadStart = readLog().find((e) => e['dir'] === 'recv' && e['method'] === 'thread/start');
     expect((threadStart?.['params'] as { approvalPolicy?: string })?.approvalPolicy).toBe('on-request');
+    // Read-only sandbox fence (verified live against codex-cli 0.152.0): the
+    // default workspace-write sandbox executes workspace writes with NO
+    // approval request, silently bypassing the permission fence.
+    expect((threadStart?.['params'] as { sandbox?: string })?.sandbox).toBe('read-only');
+    // Without requirePermissions the sandbox stays untouched.
+    const plain = await driver.createSession({ cwd: dir });
+    const plainThreadStart = readLog()
+      .filter((e) => e['dir'] === 'recv' && e['method'] === 'thread/start')
+      .slice(-1);
+    expect((plainThreadStart[0]?.['params'] as { sandbox?: string })?.sandbox).toBeUndefined();
     await session.close();
+    await plain.close();
   }, 20000);
 
   it('declares the experimentalApi capability during initialize (required by thread/resume.excludeTurns)', async () => {
@@ -147,6 +158,9 @@ describe('CodexAppServerDriver session lifecycle', () => {
     expect(turns.length).toBeGreaterThan(0);
     for (const turn of turns) {
       expect((turn['params'] as { approvalPolicy?: string }).approvalPolicy).toBe('on-request');
+      // Same fence at the turn level: resumed threads must not fall back to a
+      // write-permissive sandbox between turns.
+      expect((turn['params'] as { sandbox?: string }).sandbox).toBe('read-only');
     }
 
     // Without requirePermissions the turn posture stays untouched.

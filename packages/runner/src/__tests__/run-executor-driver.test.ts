@@ -495,10 +495,69 @@ describe('strict resume mode (fail-loud takeover)', () => {
     expect(final.status).toBe('failed');
     expect(result.success).toBe(false);
     expect(final.error).toContain('--resume requires a valid session ID');
+    // The Claude CLI appends the prompt line to the external transcript even
+    // on a failed attempt — the failure output must say so.
+    expect(final.error).toContain('prompt 行');
     // The drifted `fresh-*` handle must never replace the adopted one.
     const kept = loadDriverSessionHandle(ctx, 'agent:claude', meeting.id);
     expect(kept?.backendSessionId).toBe('ext-adopted-1');
     expect(kept?.adopted).toBe(true);
+  });
+
+  it('keeps the adopted flag on the persisted handle after a successful turn', async () => {
+    // Live-checklist regression (2026-09-02): driver sessions rebuild their
+    // handle from live state and drop `adopted` (the real Claude SDK session
+    // does the same). Persisting that handle after the first successful turn
+    // used to silently clear the flag — later rounds then lost strict resume
+    // semantics and a broken resume fell back to a stranger session.
+    const driver = new FakeAgentDriver('claude-agent-sdk', DEFAULT_EVENTS);
+    const meeting = createMeeting(ctx, { title: 'Adopted success' });
+    saveDriverSessionHandle(ctx, 'agent:claude', meeting.id, {
+      kind: 'claude-agent-sdk',
+      backendSessionId: 'ext-adopted-2',
+      createdAt: new Date().toISOString(),
+      adopted: true,
+    });
+    const run = createAgentRun(ctx, {
+      agentId: 'agent:claude',
+      meetingId: meeting.id,
+      input: 'Takeover turn',
+      action: 'custom',
+      runnerType: 'session',
+    });
+
+    const { run: final } = await executeRun(ctx, run.id, {
+      driverRegistry: [driver],
+      resumeMode: 'strict',
+    });
+
+    expect(final.status).toBe('completed');
+    const persisted = loadDriverSessionHandle(ctx, 'agent:claude', meeting.id);
+    expect(persisted?.backendSessionId).toBe('ext-adopted-2');
+    expect(persisted?.adopted).toBe(true);
+  });
+
+  it('does not add the transcript-pollution note to non-adopted failures', async () => {
+    // Only externally adopted claude transcripts get the "prompt line may have
+    // been appended" note — Mesa-grown sessions own their transcripts, so a
+    // plain fatal failure must stay clean.
+    const driver = new FakeAgentDriver('claude-agent-sdk', () => [
+      { type: 'error', message: 'backend crashed', fatal: true },
+    ]);
+    const meeting = createMeeting(ctx, { title: 'Grown session' });
+    const run = createAgentRun(ctx, {
+      agentId: 'agent:claude',
+      meetingId: meeting.id,
+      input: 'Do it',
+      action: 'custom',
+      runnerType: 'session',
+    });
+
+    const { run: final } = await executeRun(ctx, run.id, { driverRegistry: [driver] });
+
+    expect(final.status).toBe('failed');
+    expect(final.error).toContain('backend crashed');
+    expect(final.error).not.toContain('prompt 行');
   });
 
   it('marks the run failed (and rethrows) when a strict resume fails through executeRun', async () => {

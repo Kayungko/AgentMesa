@@ -540,6 +540,13 @@ export async function executeDriverTurn(
       // the previous handle unless the turn succeeded or there was nothing
       // to preserve.
       if (!savedHandle || turnSuccess) {
+        // Carry `adopted` forward: an external takeover must stay strict for
+        // the handle's whole life, not just until the first successful turn —
+        // a later broken resume (e.g. the external transcript was deleted)
+        // must keep failing loud instead of silently cold-starting.
+        if (savedHandle?.adopted === true && handle.adopted !== true) {
+          handle = { ...handle, adopted: true };
+        }
         saveDriverSessionHandle(ctx, run.agentId, scope, handle, run.id);
       } else {
         handle = savedHandle;
@@ -576,6 +583,16 @@ export async function executeDriverTurn(
   } else {
     success = true;
     output = textOutput.length > 0 ? textOutput : turnSummary;
+  }
+  if (!success && savedHandle?.adopted === true && driver.kind === 'claude-agent-sdk') {
+    // The Claude CLI appends the user prompt line to the local JSONL transcript
+    // as soon as it starts — even when the turn then fails (observed: auth
+    // failures and bad resume ids still leave a stray prompt line behind).
+    // The external transcript belongs to the user, so say so in the failure
+    // output instead of silently touching the file (concurrent writers make
+    // truncation rollback unsafe).
+    const note = '[注意] 本次失败的尝试仍可能向外部源转录追加了 prompt 行（Claude CLI 启动即写入，失败不回滚）';
+    output = output.length > 0 ? `${output}\n\n${note}` : note;
   }
 
   const result: RunResult = {

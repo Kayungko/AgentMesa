@@ -122,6 +122,13 @@ Notes:
   human approval gate: no call site configures `askHuman` yet, so
   approval-required operations still fail closed (see
   [Permission Bridging](#permission-bridging)).
+- **Credential passthrough caveat (observed live 2026-09-02).** Host-managed
+  auth is NOT inherited by the SDK child processes desk spawns: a host app
+  that keeps its Anthropic credentials in `settings.json` `env`
+  (`ANTHROPIC_AUTH_TOKEN`) must inject that variable into the desk process
+  explicitly, or every deep-driver turn dies on authentication. Users who
+  sign in through the regular `claude` login flow are unaffected — only
+  hosts that intercept auth (e.g. AI Mana) need the injection.
 
 ## Session Runs: Conditional Deep-Driver Opt-In (`AGENTMESA_SESSION_DRIVER`)
 
@@ -289,6 +296,12 @@ a new one.
   the failed run gets a failure bubble written back into the meeting timeline
   (not only server logs / the status drawer), and the client audit trail maps
   the `failed` progress stage to a `运行失败：…` activity line.
+- **The `adopted` marker persists across turns.** Driver sessions rebuild
+  their handle from live state and would drop the marker, so the run executor
+  carries `adopted: true` from the saved handle into every handle it persists
+  after a successful turn (2026-09-02). Without this, the first successful
+  round silently cleared strict semantics and a *later* broken resume (e.g.
+  the external transcript was deleted) fell back to a stranger session.
 - **Precondition: `AGENTMESA_SESSION_DRIVER`.** Adoption only does anything
   when session runs actually take the deep-driver path. The default `cli`
   mode keeps meeting speech on one-shot CLI runners that never read the
@@ -299,6 +312,16 @@ a new one.
   (`resolveSessionDriverRegistry`): `AGENTMESA_DRIVER=cli` (the task-run
   switch) can no longer silently empty the session registry and degrade a
   takeover back to one-shot CLI turns.
+
+**Failed-attempt transcript pollution (known side effect).** The Claude CLI
+appends the user prompt line to the local JSONL transcript as soon as it
+starts — *even when the turn then fails* (observed live 2026-09-01: a failed
+strict-resume attempt grew the external transcript from 20 to 33 lines;
+authentication failures also write). AgentMesa cannot prevent this write, and
+rolling the file back is unsafe (the external client may be writing
+concurrently), so the mitigation is disclosure: a failed turn on an adopted
+claude handle appends a note to the run output telling the user the external
+transcript may have gained a stray prompt line.
 
 **Concurrency and takeover risks.** An adopted session may still be in use by
 its native client (a Claude Code terminal that is mid-conversation, a running
@@ -461,3 +484,33 @@ probe scripts archived under `.tmpfiles/codex-approval-probe/`):
   requestApproval` arrives → desk approval card" chain was not observed
   live; it is covered by mock-based tests and awaits the Phase 3
   integration checklist run on a healthy model config.
+
+## Live codex approval chain + sandbox fence (2026-09-02, codex-cli 0.152.0 on Windows)
+
+The model recovered (`gpt-5.6-sol` answers turns again), so the deferred
+Step 9 behavioral run finally happened — and it caught a real fence bypass:
+
+- **The default sandbox silently bypasses the approval fence.** First live
+  run: a meeting turn asked codex to create a workspace file; the turn
+  completed, the file appeared, the write-back bubble posted — and **zero**
+  approval requests fired. Root cause: codex's default sandbox
+  (`workspace-write`) executes writes inside the workspace WITHOUT any
+  `requestApproval`, so `approvalPolicy: on-request` only gates
+  out-of-sandbox actions. AgentMesa's speech-guard fence (every gated action
+  human-reviewed) never saw the write.
+- **Fix: pin `sandbox: 'read-only'` whenever `requirePermissions` is set.**
+  Wire probes against the real 0.152.0 server: `thread/start` and
+  `turn/start` both accept a `sandbox` string (`read-only` |
+  `workspace-write` | `danger-full-access`; an object form is rejected with
+  the variant list). With `read-only`, a file write reliably produces
+  `item/fileChange/requestApproval` (and shell writes
+  `item/commandExecution/requestApproval`).
+- **A plain `{decision: "accept"}` is sufficient.** Verified live: answering
+  the approval with a bare accept (no `updatedSandbox` escalation) lets the
+  approved write execute. The existing `respondPermission` path needs no
+  change.
+- **Full chain re-verified live after the fix:** meeting turn → codex
+  write attempt → `patch: exec-…` approval card in
+  `GET /api/permissions/pending` → `POST /api/permissions/:id/decide
+  {decision:"allow"}` → file created → run completed → write-back bubble.
+  Probe workspace and scripts: `.tmpfiles/codex-approval-probe-20260902/`.

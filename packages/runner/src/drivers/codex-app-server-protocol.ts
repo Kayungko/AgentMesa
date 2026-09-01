@@ -209,6 +209,13 @@ export interface InitializeParams {
 export interface ThreadStartParams {
   cwd: string;
   approvalPolicy?: 'untrusted' | 'on-request' | 'never';
+  /**
+   * Sandbox posture. The default (workspace-write) executes workspace writes
+   * with NO approval request, silently bypassing AgentMesa's permission fence
+   * (verified live against codex-cli 0.152.0). `read-only` forces every write
+   * through a requestApproval round-trip.
+   */
+  sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access';
 }
 
 export interface ThreadResumeParams {
@@ -227,6 +234,12 @@ export interface TurnStartParams {
    * a resumed external session onto on-request approval.
    */
   approvalPolicy?: 'untrusted' | 'on-request' | 'never';
+  /**
+   * Turn-level sandbox posture — same semantics as
+   * {@link ThreadStartParams.sandbox}; the turn level covers resumed threads
+   * whose stored posture cannot be lifted any other way.
+   */
+  sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access';
 }
 
 export interface CodexThread {
