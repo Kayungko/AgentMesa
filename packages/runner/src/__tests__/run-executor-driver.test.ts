@@ -16,6 +16,7 @@ import type { MesaRuntimeContext } from '@agentmesa/core';
 import { executeDriverTurn, executeRun } from '../run-executor.js';
 import { executeSessionRun } from '../session-run.js';
 import { attachPermissionResponder } from '../drivers/permission-bridge.js';
+import { loadDriverSessionHandle, saveDriverSessionHandle } from '../drivers/resolve.js';
 import type {
   AgentDriver,
   AgentDriverSession,
@@ -454,6 +455,50 @@ describe('strict resume mode (fail-loud takeover)', () => {
     ).rejects.toThrow(/backend session gone/);
     // Fail-loud means no silent fallback: createSession was never called.
     expect(driver.createdSessions).toHaveLength(1); // only the seeding run
+  });
+
+  it('keeps the adopted handle when a strict turn fails after a lazy resume (no clobber)', async () => {
+    // Live-checklist regression (2026-09-01): the Claude CLI assigns a fresh
+    // session id BEFORE rejecting an invalid `--resume` id, so a resumed
+    // session whose turn fails fatally can report a drifted handle. The
+    // failed turn must NOT overwrite the adopted external handle with that
+    // unused id — the takeover would silently degrade to a stranger session.
+    const events: EventFactory = () => [
+      { type: 'error', message: '--resume requires a valid session ID', fatal: true },
+    ];
+    const driver = new FakeAgentDriver(
+      'claude-agent-sdk',
+      events,
+      (id) => new FakeDriverSession('claude-agent-sdk', `fresh-${id}`, events),
+    );
+
+    const meeting = createMeeting(ctx, { title: 'Adopted takeover' });
+    saveDriverSessionHandle(ctx, 'agent:claude', meeting.id, {
+      kind: 'claude-agent-sdk',
+      backendSessionId: 'ext-adopted-1',
+      createdAt: new Date().toISOString(),
+      adopted: true,
+    });
+    const run = createAgentRun(ctx, {
+      agentId: 'agent:claude',
+      meetingId: meeting.id,
+      input: 'Takeover turn',
+      action: 'custom',
+      runnerType: 'session',
+    });
+
+    const { run: final, result } = await executeRun(ctx, run.id, {
+      driverRegistry: [driver],
+      resumeMode: 'strict',
+    });
+
+    expect(final.status).toBe('failed');
+    expect(result.success).toBe(false);
+    expect(final.error).toContain('--resume requires a valid session ID');
+    // The drifted `fresh-*` handle must never replace the adopted one.
+    const kept = loadDriverSessionHandle(ctx, 'agent:claude', meeting.id);
+    expect(kept?.backendSessionId).toBe('ext-adopted-1');
+    expect(kept?.adopted).toBe(true);
   });
 
   it('marks the run failed (and rethrows) when a strict resume fails through executeRun', async () => {

@@ -531,7 +531,19 @@ export async function executeDriverTurn(
   } finally {
     try {
       handle = activeSession.handle();
-      saveDriverSessionHandle(ctx, run.agentId, scope, handle, run.id);
+      // Takeover guard: a FAILED turn must not clobber an existing handle.
+      // Backends report session ids lazily — e.g. the Claude CLI assigns a
+      // fresh session id before rejecting an invalid `--resume` id — so the
+      // handle observed after a failed turn can point at a session that was
+      // never actually used. Persisting it would silently destroy an adopted
+      // external handle (the takeover degrades to a stranger session). Keep
+      // the previous handle unless the turn succeeded or there was nothing
+      // to preserve.
+      if (!savedHandle || turnSuccess) {
+        saveDriverSessionHandle(ctx, run.agentId, scope, handle, run.id);
+      } else {
+        handle = savedHandle;
+      }
     } catch (error) {
       ctx.logger.warn('Failed to persist deep driver session handle', {
         agentId: run.agentId,

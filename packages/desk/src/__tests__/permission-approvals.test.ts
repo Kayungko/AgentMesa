@@ -184,6 +184,31 @@ describe('DeskServer permission approval API', () => {
     expect(pending.pending).toEqual([]);
   });
 
+  it('POST decide decodes URL-encoded ids (tool ids contain ":")', async () => {
+    // Live-checklist regression (2026-09-01): driver permission ids look like
+    // "Write:call_42bd…" and the client sends them URL-encoded
+    // (`encodeURIComponent`). The server must decode before the queue lookup,
+    // otherwise every approval-card button 404s.
+    server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
+    await server.start();
+    const askHuman = createDeskAskHuman(server.permissionApprovals, { timeoutMs: 5_000 });
+    const requestId = 'Write:call_42bdb4a2d3854d10b274ea7f';
+    const promise = askHuman(request({ requestId, kind: 'tool', title: 'Write: approval-test.txt' }));
+
+    const base = `http://localhost:${server.getPort()}`;
+    const headers = { Authorization: 'Bearer secret', 'Content-Type': 'application/json' };
+
+    const res = await fetch(`${base}/api/permissions/${encodeURIComponent(requestId)}/decide`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ decision: 'allow' }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    await expect(promise).resolves.toBe('allow');
+  });
+
   it('returns 404 for an unknown permission id and 400 for a bad decision', async () => {
     server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
     await server.start();

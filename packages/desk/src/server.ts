@@ -632,8 +632,11 @@ export class DeskServer {
     const warnings: string[] = [];
 
     if (source === 'claude') {
+      // undefined rootDir falls back to the scanner default (~/.claude/projects)
+      // — same behavior as the import endpoint; without this the precheck would
+      // report "transcript not found" whenever the env override is unset.
       const rootDir = this.importRootDir(source);
-      const filePath = rootDir === undefined ? undefined : findClaudeSessionFile(sessionId, rootDir);
+      const filePath = findClaudeSessionFile(sessionId, rootDir);
       checks.push(
         filePath
           ? { name: 'transcript', ok: true, detail: filePath }
@@ -954,9 +957,13 @@ export class DeskServer {
       if (body.decision !== 'allow' && body.decision !== 'deny') {
         throw new MesaError('VALIDATION_ERROR', 'decision must be "allow" or "deny"');
       }
-      const decided = this.permissionApprovalQueue.decide(permissionDecideMatch[1]!, body.decision);
+      // The client URL-encodes the request id (`encodeURIComponent`) and
+      // permission ids routinely contain `:` / `/` (e.g. "Write:call_42bd…"),
+      // so decode before queue lookup — otherwise every decide call 404s.
+      const requestId = decodeURIComponent(permissionDecideMatch[1]!);
+      const decided = this.permissionApprovalQueue.decide(requestId, body.decision);
       if (!decided) {
-        this.sendError(res, 404, `Unknown permission request: ${permissionDecideMatch[1]}`);
+        this.sendError(res, 404, `Unknown permission request: ${requestId}`);
         return;
       }
       this.sendJson(res, { ok: true });
