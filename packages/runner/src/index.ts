@@ -69,6 +69,9 @@ export {
 } from './drivers/resolve.js';
 export type { DriverTransportResolution } from './drivers/resolve.js';
 
+export { adoptExternalDriverSession } from './drivers/adopt.js';
+export type { AdoptExternalDriverInput } from './drivers/adopt.js';
+
 export { createDefaultDriverRegistry } from './drivers/index.js';
 export { ClaudeSdkDriver } from './drivers/index.js';
 export type { ClaudeSdkDriverOptions } from './drivers/index.js';

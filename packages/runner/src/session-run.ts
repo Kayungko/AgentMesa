@@ -41,6 +41,8 @@ export interface SessionRunOptions {
   driverRegistry?: RunExecutorOptions['driverRegistry'];
   driverPreference?: RunExecutorOptions['driverPreference'];
   permissionResponder?: RunExecutorOptions['permissionResponder'];
+  /** Deep-driver resume semantics — passed through to `executeRun`. */
+  resumeMode?: RunExecutorOptions['resumeMode'];
 }
 
 /**
@@ -60,6 +62,7 @@ export async function executeSessionRun(
     driverRegistry: options?.driverRegistry,
     driverPreference: options?.driverPreference,
     permissionResponder: options?.permissionResponder,
+    resumeMode: options?.resumeMode,
   });
 
   if (options?.writeBackToMeetingId) {
@@ -113,6 +116,8 @@ export interface ActivateSessionAgentOptions {
   driverRegistry?: RunExecutorOptions['driverRegistry'];
   driverPreference?: RunExecutorOptions['driverPreference'];
   permissionResponder?: RunExecutorOptions['permissionResponder'];
+  /** Deep-driver resume semantics — same shape and semantics as `SessionRunOptions`. */
+  resumeMode?: RunExecutorOptions['resumeMode'];
 }
 
 /**
@@ -180,6 +185,7 @@ export async function activateSessionAgent(
     driverRegistry: options?.driverRegistry,
     driverPreference: options?.driverPreference,
     permissionResponder: options?.permissionResponder,
+    resumeMode: options?.resumeMode,
   });
 
   return { run, executed: true };

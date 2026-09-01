@@ -231,6 +231,71 @@ store instead of inside the run record:
 the CLI and Desk can drive a deep-driver turn without going through an agent
 run.
 
+## Adopting external sessions
+
+Phase 2 of the external-session import surface adds **adoption** (session
+takeover): importing a session that was created *outside* AgentMesa can
+optionally seed the driver-session sidecar so that later deep-driver turns for
+that meeting **resume the original external session** instead of cold-starting
+a new one.
+
+- **Entry point.** `POST /api/meetings/import` with `adopt: true` (Desk
+  `importExternalSession(config, source, sessionId, true)` in the client). The
+  desk maps the source to the synthetic external agent
+  (`agent:claude-external` / `agent:codex-external`) and the driver kind
+  (`claude` → `claude-agent-sdk`, `codex` → `codex-app-server`), then calls
+  `adoptExternalDriverSession(ctx, { agentId, scope: meetingId, kind,
+  backendSessionId, claudeProjectsRoot })` (exported from the runner package
+  root). Adoption only writes the handle — it never activates the agent or
+  starts a run; the next invited speaking turn picks the handle up naturally
+  through the normal resume path.
+- **Scope.** The handle is keyed by `scope = meetingId`, so adoption is
+  per-meeting, exactly like a native handle. Adopting into a second meeting
+  writes a second scope entry in the same sidecar record.
+- **Fail-loud precheck, fail-soft endpoint.** `adoptExternalDriverSession`
+  throws on invalid input and — for `claude-agent-sdk` — when the local
+  transcript (`<projects-root>/<slug>/<sessionId>.jsonl`, one-level scan) is
+  missing, because SDK resume replays that JSONL and a missing file guarantees
+  a dead handle. The desk endpoint catches the throw and degrades: the import
+  snapshot (meeting + messages) still succeeds with `201`, the response just
+  reports `adopted: false` plus `adoptError`. Codex has no synchronous local
+  artifact to probe, so an invalid thread id surfaces at resume time.
+- **Strict resume.** `executeDriverTurn` (and the `RunExecutorOptions` /
+  `SessionRunOptions` / `ActivateSessionAgentOptions` that funnel into it)
+  accepts `resumeMode: 'fallback' | 'strict'` (default `fallback`). This
+  matters most for adopted handles: in `fallback` mode a kind mismatch or a
+  failing resume silently starts a fresh session — the takeover quietly
+  degrades to a new conversation. `strict` fails the turn instead (kind
+  mismatch, or the resume RPC/transcript replay failing), so a broken takeover
+  is visible rather than silent. With *no* persisted handle both modes behave
+  identically (fresh session).
+- **Precondition: `AGENTMESA_SESSION_DRIVER`.** Adoption only does anything
+  when session runs actually take the deep-driver path. The default `cli`
+  mode keeps meeting speech on one-shot CLI runners that never read the
+  sidecar, so the desk response carries `driverMode` and an `adoptWarning`
+  when a handle was seeded while `AGENTMESA_SESSION_DRIVER=cli`. Set it to
+  `claude-agent-sdk` / `codex-app-server` / `auto` for the takeover to take
+  effect.
+
+**Concurrency and takeover risks.** An adopted session may still be in use by
+its native client (a Claude Code terminal that is mid-conversation, a running
+codex app-server thread). Two writers on one backend session can interleave
+turns or clobber each other's state; the client surfaces an "active session"
+warning on the import list, but nothing enforces exclusivity.
+
+**Unverified — needs live validation:**
+
+- Claude resume against a real `~/.claude/projects` JSONL created by another
+  client (the local-transcript dependency is probed at adopt time; actual
+  cross-client resume fidelity is untested).
+- Behavior when the adopted session is concurrently driven by its original
+  client (interleaving, transcript locking, or hard failure).
+- Near-full-context overflow when resuming a very long external session (the
+  backend may refuse the resume or truncate; no mitigation is wired).
+- The external thread's `approvalPolicy` / permission posture carries over
+  from the original session; how that interacts with AgentMesa's policy
+  bridge on the first resumed turn is not yet observed.
+
 ## Permission Bridging
 
 Deep-driver permission requests are answered through an injected responder:
@@ -303,6 +368,7 @@ type DriverPermissionResponder =
 | Real driver assembly (`drivers/index.ts`) | **Done.** `createDefaultDriverRegistry()` builds the real Claude SDK + Codex app-server drivers. |
 | Env switch + call-site wiring (`drivers/env.ts`) | **Done.** `AGENTMESA_DRIVER` gates the registry at the MCP server / orchestrator / CLI call sites; `cli` disables deep drivers. |
 | Session-run deep-driver opt-in (`AGENTMESA_SESSION_DRIVER`) | **Done.** Default `cli`; `auto` claude-family only; explicit kinds full; unregistered agent ids fall back to CLI. Speech guard on; Desk askHuman bridge wired. |
+| External-session adoption (`drivers/adopt.ts`) | **Done.** Desk import `adopt: true` seeds the sidecar handle (`adoptExternalDriverSession`); `resumeMode: 'strict'` for fail-loud takeover. Live cross-client resume behavior unverified (see the adoption section). |
 | Speech guard (`permission-bridge.ts`) | **Done.** `speechGuard` option: read-only meeting-speech turns for every role. |
 | askHuman bridges | **Done.** Desk `PermissionApprovalQueue` + client approval cards; CLI terminal gate on `mesa runs exec`. |
 

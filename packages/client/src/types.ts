@@ -96,6 +96,14 @@ export interface ExternalSessionPreviewItem {
 export interface ImportSessionResult {
   meetingId: string;
   messageCount: number;
+  /** Phase 2 adopt：是否已把外部 session 种入 runner 的驱动句柄 sidecar。 */
+  adopted: boolean;
+  /** adopt 失败原因（快照导入本身仍成功）。 */
+  adoptError?: string;
+  /** 导入时刻 desk 的 AGENTMESA_SESSION_DRIVER 解析值（cli / auto / ...）。 */
+  driverMode?: string;
+  /** adopted=true 但 driverMode='cli' 时的提示：接管句柄不会生效。 */
+  adoptWarning?: string;
 }
 
 declare global {

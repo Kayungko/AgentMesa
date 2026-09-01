@@ -14,6 +14,7 @@ import {
 } from '@agentmesa/core';
 import type { MesaRuntimeContext } from '@agentmesa/core';
 import { executeDriverTurn, executeRun } from '../run-executor.js';
+import { executeSessionRun } from '../session-run.js';
 import { attachPermissionResponder } from '../drivers/permission-bridge.js';
 import type {
   AgentDriver,
@@ -417,6 +418,148 @@ describe('executeRun deep-driver path', () => {
     expect(final.error).toContain('timeout');
     expect(driver.createdSessions[0]!.interrupted).toBe(true);
     expect(driver.createdSessions[0]!.closed).toBe(true);
+  });
+});
+
+describe('strict resume mode (fail-loud takeover)', () => {
+  async function seedHandle(driver: FakeAgentDriver): Promise<string> {
+    // First run (default fallback) creates a session and persists its handle.
+    const meeting = createMeeting(ctx, { title: 'Takeover' });
+    const run1 = createAgentRun(ctx, {
+      agentId: 'agent:claude',
+      meetingId: meeting.id,
+      input: 'First turn',
+      action: 'custom',
+      runnerType: 'session',
+    });
+    await executeRun(ctx, run1.id, { driverRegistry: [driver] });
+    return meeting.id;
+  }
+
+  it('rejects a strict turn when resumeSession throws, without creating a session', async () => {
+    const driver = new FakeAgentDriver('claude-agent-sdk', DEFAULT_EVENTS);
+    const meetingId = await seedHandle(driver);
+    driver.resumeError = new Error('backend session gone');
+
+    const run2 = createAgentRun(ctx, {
+      agentId: 'agent:claude',
+      meetingId,
+      input: 'Second turn',
+      action: 'custom',
+      runnerType: 'session',
+    });
+
+    await expect(
+      executeDriverTurn(ctx, { run: getAgentRun(ctx, run2.id), driver, runnerType: 'session', resumeMode: 'strict' }),
+    ).rejects.toThrow(/backend session gone/);
+    // Fail-loud means no silent fallback: createSession was never called.
+    expect(driver.createdSessions).toHaveLength(1); // only the seeding run
+  });
+
+  it('marks the run failed (and rethrows) when a strict resume fails through executeRun', async () => {
+    const driver = new FakeAgentDriver('claude-agent-sdk', DEFAULT_EVENTS);
+    const meetingId = await seedHandle(driver);
+    driver.resumeError = new Error('backend session gone');
+
+    const run2 = createAgentRun(ctx, {
+      agentId: 'agent:claude',
+      meetingId,
+      input: 'Second turn',
+      action: 'custom',
+      runnerType: 'session',
+    });
+
+    await expect(
+      executeRun(ctx, run2.id, { driverRegistry: [driver], resumeMode: 'strict' }),
+    ).rejects.toThrow(/strict resume failed.*agent:claude/s);
+    expect(getAgentRun(ctx, run2.id).status).toBe('failed');
+    expect(driver.createdSessions).toHaveLength(1); // seeding run only
+  });
+
+  it('rejects a strict turn when the saved handle kind does not match the driver', async () => {
+    const claudeDriver = new FakeAgentDriver('claude-agent-sdk', DEFAULT_EVENTS);
+    const meetingId = await seedHandle(claudeDriver);
+
+    const codexDriver = new FakeAgentDriver('codex-app-server', DEFAULT_EVENTS);
+    const run2 = createAgentRun(ctx, {
+      agentId: 'agent:claude',
+      meetingId,
+      input: 'Second turn on another backend',
+      action: 'custom',
+      runnerType: 'session',
+    });
+
+    await expect(
+      executeRun(ctx, run2.id, {
+        driverRegistry: [codexDriver],
+        driverPreference: 'codex-app-server',
+        resumeMode: 'strict',
+      }),
+    ).rejects.toThrow(/claude-agent-sdk.*codex-app-server/s);
+    expect(getAgentRun(ctx, run2.id).status).toBe('failed');
+    expect(codexDriver.createdSessions).toHaveLength(0);
+  });
+
+  it('creates a fresh session under strict mode when no handle is persisted', async () => {
+    const driver = new FakeAgentDriver('claude-agent-sdk', DEFAULT_EVENTS);
+    const meeting = createMeeting(ctx, { title: 'No handle' });
+    const run = createAgentRun(ctx, {
+      agentId: 'agent:claude',
+      meetingId: meeting.id,
+      input: 'Only turn',
+      action: 'custom',
+      runnerType: 'session',
+    });
+
+    const { run: final, result } = await executeRun(ctx, run.id, {
+      driverRegistry: [driver],
+      resumeMode: 'strict',
+    });
+
+    expect(final.status).toBe('completed');
+    expect(result.success).toBe(true);
+    expect(driver.createdSessions).toHaveLength(1);
+    expect(driver.resumedHandles).toHaveLength(0);
+  });
+
+  it('falls back to a fresh session on resume failure when resumeMode is unset (default)', async () => {
+    // Regression guard for the legacy default: identical to strict-seed above
+    // but with no resumeMode → warn + createSession, run completes.
+    const driver = new FakeAgentDriver('claude-agent-sdk', DEFAULT_EVENTS);
+    const meetingId = await seedHandle(driver);
+    driver.resumeError = new Error('backend session gone');
+
+    const run2 = createAgentRun(ctx, {
+      agentId: 'agent:claude',
+      meetingId,
+      input: 'Second turn',
+      action: 'custom',
+      runnerType: 'session',
+    });
+    const { run: final2 } = await executeRun(ctx, run2.id, { driverRegistry: [driver] });
+
+    expect(final2.status).toBe('completed');
+    expect(driver.createdSessions).toHaveLength(2);
+  });
+
+  it('passes resumeMode through SessionRunOptions down to the driver turn', async () => {
+    const driver = new FakeAgentDriver('claude-agent-sdk', DEFAULT_EVENTS);
+    const meetingId = await seedHandle(driver);
+    driver.resumeError = new Error('backend session gone');
+
+    const run2 = createAgentRun(ctx, {
+      agentId: 'agent:claude',
+      meetingId,
+      input: 'Second turn',
+      action: 'custom',
+      runnerType: 'session',
+    });
+
+    await expect(
+      executeSessionRun(ctx, run2.id, { driverRegistry: [driver], resumeMode: 'strict' }),
+    ).rejects.toThrow(/backend session gone/);
+    expect(getAgentRun(ctx, run2.id).status).toBe('failed');
+    expect(driver.createdSessions).toHaveLength(1); // seeding run only — no fallback session
   });
 });
 

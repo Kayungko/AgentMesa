@@ -97,6 +97,16 @@ export interface RunExecutorOptions {
   driverPreference?: DriverPreference | string;
   /** Permission gate for deep-driver turns. Default: deny all. */
   permissionResponder?: DriverPermissionResponder;
+  /**
+   * Resume semantics for the deep-driver path when a persisted session handle
+   * exists:
+   * - `fallback` (default): legacy behavior — resume failures warn and fall
+   *   back to a fresh session; kind mismatches silently skip resume.
+   * - `strict`: fail-loud (used for externally adopted sessions, where a
+   *   handle that cannot resume must surface instead of silently starting a
+   *   new conversation).
+   */
+  resumeMode?: 'fallback' | 'strict';
 }
 
 export interface RunExecutionResult {
@@ -178,6 +188,7 @@ export async function executeRun(
         runnerType,
         timeoutMs: options?.timeout,
         permissionResponder: options?.permissionResponder,
+        resumeMode: options?.resumeMode,
         onProgress: reportProgress,
       });
       result = outcome.result;
@@ -321,6 +332,17 @@ export interface DriverTurnParams {
   timeoutMs?: number;
   /** Permission gate; default denies everything. */
   permissionResponder?: DriverPermissionResponder;
+  /**
+   * Resume semantics for a persisted session handle:
+   * - `fallback` (default): legacy behavior — resume failures warn and fall
+   *   back to `createSession`; a handle/driver kind mismatch silently skips
+   *   resume.
+   * - `strict`: fail-loud — a kind mismatch or a resume failure rejects the
+   *   turn (the run layer then records it as failed). Strict only constrains
+   *   the "a handle exists but cannot be resumed" case; with *no* persisted
+   *   handle it behaves exactly like fallback and creates a fresh session.
+   */
+  resumeMode?: 'fallback' | 'strict';
   /** Progress sink (failures are swallowed — progress must not kill a turn). */
   onProgress?: RunProgressSink;
 }
@@ -348,14 +370,38 @@ export async function executeDriverTurn(
   const startTime = Date.now();
   const scope = driverSessionScope(run);
 
+  const resumeMode = params.resumeMode ?? 'fallback';
   const savedHandle = loadDriverSessionHandle(ctx, run.agentId, scope);
   let session: AgentDriverSession | undefined;
   let resumed = false;
+  if (savedHandle && savedHandle.kind !== driver.kind) {
+    if (resumeMode === 'strict') {
+      // Takeover semantics: the handle was (typically) seeded externally for a
+      // specific backend. A kind mismatch means the driver configuration has
+      // drifted — surface it instead of silently starting a new session.
+      throw new MesaError(
+        'VALIDATION_ERROR',
+        `strict resume failed for agent "${run.agentId}" (scope "${scope}"): saved session handle kind ` +
+          `"${savedHandle.kind}" does not match driver kind "${driver.kind}"`,
+      );
+    }
+    // fallback: kind mismatch silently skips resume (legacy behavior).
+  }
   if (savedHandle && savedHandle.kind === driver.kind) {
     try {
       session = await driver.resumeSession(savedHandle, driverSessionInit(ctx));
       resumed = true;
     } catch (error) {
+      if (resumeMode === 'strict') {
+        // Propagate the failure (never fall back to a fresh session) while
+        // attaching enough context to diagnose the takeover.
+        throw new MesaError(
+          'VALIDATION_ERROR',
+          `strict resume failed for agent "${run.agentId}" (scope "${scope}", handle kind ` +
+            `"${savedHandle.kind}", backend session "${savedHandle.backendSessionId}"): ` +
+            `${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
       ctx.logger.warn('Deep driver resume failed; creating a new session', {
         agentId: run.agentId,
         driver: driver.name,
@@ -365,6 +411,9 @@ export async function executeDriverTurn(
     }
   }
   if (!session) {
+    // Reached both when no handle was persisted at all (strict and fallback
+    // alike — strict only governs the "handle exists but cannot resume" case)
+    // and on a fallback-mode resume failure.
     session = await driver.createSession(driverSessionInit(ctx));
   }
   const activeSession: AgentDriverSession = session;

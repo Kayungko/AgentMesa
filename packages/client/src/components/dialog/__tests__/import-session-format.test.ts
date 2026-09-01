@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
+  ACTIVE_SESSION_CONFLICT_HINT,
   formatBytes,
   formatRelativeTime,
+  importResultNotices,
   normalizePreviewItem,
   projectTail,
   truncate,
@@ -57,6 +59,43 @@ describe('truncate', () => {
     const result = truncate(long, 20);
     expect(result).toHaveLength(20);
     expect(result.endsWith('…')).toBe(true);
+  });
+});
+
+describe('importResultNotices', () => {
+  it('returns no notices for a clean import (direct navigation)', () => {
+    expect(importResultNotices({})).toEqual([]);
+    expect(importResultNotices({ adoptError: undefined, adoptWarning: undefined })).toEqual([]);
+  });
+
+  it('renders adoptError as an error notice that keeps the snapshot-success framing', () => {
+    const notices = importResultNotices({ adoptError: 'no Claude transcript "x.jsonl" found' });
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatchObject({ kind: 'error' });
+    expect(notices[0]!.text).toContain('快照导入已成功');
+    expect(notices[0]!.text).toContain('no Claude transcript "x.jsonl" found');
+  });
+
+  it('renders adoptWarning as a warning notice, after adoptError', () => {
+    const notices = importResultNotices({
+      adoptError: '预检未命中',
+      adoptWarning: 'AGENTMESA_SESSION_DRIVER=cli，接管不会 resume',
+    });
+    expect(notices).toHaveLength(2);
+    expect(notices[0]).toMatchObject({ kind: 'error' });
+    expect(notices[1]).toMatchObject({ kind: 'warning', text: 'AGENTMESA_SESSION_DRIVER=cli，接管不会 resume' });
+  });
+
+  it('renders adoptWarning alone when adoption succeeded under cli mode', () => {
+    const notices = importResultNotices({ adoptWarning: '当前 AGENTMESA_SESSION_DRIVER=cli' });
+    expect(notices).toEqual([{ kind: 'warning', text: '当前 AGENTMESA_SESSION_DRIVER=cli' }]);
+  });
+});
+
+describe('ACTIVE_SESSION_CONFLICT_HINT', () => {
+  it('carries the concurrency-conflict wording for active sessions', () => {
+    expect(ACTIVE_SESSION_CONFLICT_HINT).toContain('原生客户端');
+    expect(ACTIVE_SESSION_CONFLICT_HINT).toContain('冲突');
   });
 });
 

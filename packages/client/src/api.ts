@@ -379,13 +379,23 @@ export function previewExternalSession(
   ).then((payload) => payload.preview);
 }
 
-/** 正式导入：把外部会话转写为 AgentMesa 会议时间线。 */
+/**
+ * 正式导入：把外部会话转写为 AgentMesa 会议时间线。
+ * `adopt: true` 时同时把外部 session 种入 runner 的驱动句柄 sidecar，
+ * 使后续深度驱动轮次 resume 原外部会话（快照导入与接管互相独立，
+ * 接管失败不影响导入结果）。
+ */
 export function importExternalSession(
   config: RuntimeConfig,
   source: ExternalSessionSource,
   sessionId: string,
+  adopt?: boolean,
 ): Promise<ImportSessionResult> {
-  return postJson<ImportSessionResult>(config, '/api/meetings/import', { source, sessionId });
+  return postJson<ImportSessionResult>(config, '/api/meetings/import', {
+    source,
+    sessionId,
+    ...(adopt === true ? { adopt: true } : {}),
+  });
 }
 
 export function createTask(

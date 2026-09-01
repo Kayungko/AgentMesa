@@ -61,6 +61,7 @@ import type { MesaActor, MesaRuntimeContext } from '@agentmesa/core';
 import { WorkflowEngine, decideWorkflow, listWorkflowStates } from '@agentmesa/orchestrator';
 import {
   activateSessionAgent,
+  adoptExternalDriverSession,
   terminateSessionChildren,
   resolveDriverRegistryFromEnv,
   resolveSessionDriverPreference,
@@ -835,6 +836,7 @@ export class DeskServer {
         source?: unknown;
         sessionId?: unknown;
         previewOnly?: unknown;
+        adopt?: unknown;
       };
       if (body.source !== 'claude' && body.source !== 'codex') {
         throw new MesaError('VALIDATION_ERROR', 'source must be "claude" or "codex"');
@@ -871,7 +873,45 @@ export class DeskServer {
         sessionId: body.sessionId,
         parsed,
       });
-      this.sendJson(res, result, 201);
+
+      // Phase 2 adopt: optionally seed the runner's driver-handle sidecar so
+      // later deep-driver turns for this agent+meeting RESUME the original
+      // external session instead of cold-starting. Adoption never activates
+      // the agent or starts a run here — the next invited speaking turn picks
+      // the handle up naturally. A failed adoption must not fail the import:
+      // the snapshot (meeting) is already durable at this point.
+      let adopted = false;
+      let adoptError: string | undefined;
+      if (body.adopt === true) {
+        try {
+          adoptExternalDriverSession(writeContext, {
+            agentId: source === 'claude' ? 'agent:claude-external' : 'agent:codex-external',
+            scope: result.meetingId,
+            kind: source === 'claude' ? 'claude-agent-sdk' : 'codex-app-server',
+            backendSessionId: body.sessionId,
+            // Same scan root the import used (AGENTMESA_IMPORT_CLAUDE_ROOT);
+            // codex sessions have no local transcript to probe.
+            claudeProjectsRoot: source === 'claude' ? rootDir : undefined,
+          });
+          adopted = true;
+        } catch (error) {
+          adopted = false;
+          adoptError = error instanceof Error ? error.message : String(error);
+        }
+      }
+      const driverMode = resolveSessionDriverPreference();
+      this.sendJson(res, {
+        ...result,
+        adopted,
+        ...(adoptError !== undefined ? { adoptError } : {}),
+        driverMode,
+        ...(adopted && driverMode === 'cli'
+          ? {
+            adoptWarning:
+              '已种入接管句柄，但当前 AGENTMESA_SESSION_DRIVER=cli，会话协作仍走 CLI 单发模式，不会 resume 外部会话；需将其设为 claude-agent-sdk / codex-app-server / auto 后接管才生效',
+          }
+          : {}),
+      }, 201);
       return;
     }
 

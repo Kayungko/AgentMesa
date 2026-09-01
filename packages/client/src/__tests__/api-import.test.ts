@@ -77,6 +77,49 @@ describe('external session import API bindings', () => {
     expect(result).toEqual({ meetingId: 'mtg_imported', messageCount: 42 });
   });
 
+  it('importExternalSession passes adopt:true through to the body when requested', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        meetingId: 'mtg_adopted',
+        messageCount: 7,
+        adopted: true,
+        driverMode: 'cli',
+        adoptWarning: 'AGENTMESA_SESSION_DRIVER=cli，接管句柄不会生效',
+      }), { status: 201 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await importExternalSession(config, 'claude', 'proj/abc', true);
+
+    const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({ source: 'claude', sessionId: 'proj/abc', adopt: true });
+    expect(result).toMatchObject({ meetingId: 'mtg_adopted', messageCount: 7, adopted: true, driverMode: 'cli' });
+    expect(result.adoptWarning).toContain('cli');
+  });
+
+  it('importExternalSession surfaces adopt failures without failing the import result', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        meetingId: 'mtg_degraded',
+        messageCount: 3,
+        adopted: false,
+        adoptError: 'no Claude transcript "ghost.jsonl" found',
+        driverMode: 'auto',
+      }), { status: 201 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await importExternalSession(config, 'codex', 'sess/9', true);
+
+    expect(result).toMatchObject({
+      meetingId: 'mtg_degraded',
+      messageCount: 3,
+      adopted: false,
+      adoptError: 'no Claude transcript "ghost.jsonl" found',
+      driverMode: 'auto',
+    });
+  });
+
   it('importExternalSession surfaces the server error message', async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ error: 'External session not found: ghost' }), { status: 404 }),

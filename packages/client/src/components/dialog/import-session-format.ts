@@ -1,4 +1,4 @@
-import type { ExternalSessionPreviewItem, ExternalSessionSummary } from '../../types.js';
+import type { ExternalSessionPreviewItem, ExternalSessionSummary, ImportSessionResult } from '../../types.js';
 
 // ---------------------------------------------------------------------------
 // 外部会话导入的展示层纯函数：格式化 / 归一化都集中在这里，方便单测。
@@ -31,6 +31,33 @@ export function projectTail(session: Pick<ExternalSessionSummary, 'projectDir' |
   const path = session.projectDir || session.cwd || '';
   const segments = path.replace(/[\\/]+$/, '').split(/[\\/]/);
   return segments[segments.length - 1] ?? '';
+}
+
+/** 列表页「进行中」会话行的接管冲突提示文案。 */
+export const ACTIVE_SESSION_CONFLICT_HINT = '该会话可能正被原生客户端使用，接管续跑可能冲突';
+
+/** 导入结果里需要用户看到的提示（接管失败 / cli 模式不生效）。 */
+export interface ImportNotice {
+  kind: 'error' | 'warning';
+  text: string;
+}
+
+/**
+ * 归一化导入结果的提示：快照导入成功的前提下，adoptError（接管失败，仅降级）
+ * 排在 adoptWarning（接管成功但 driverMode=cli 不生效）之前；无提示返回空数组，
+ * 调用方直接跳转会议。
+ */
+export function importResultNotices(
+  result: Pick<ImportSessionResult, 'adoptError' | 'adoptWarning'>,
+): ImportNotice[] {
+  const notices: ImportNotice[] = [];
+  if (result.adoptError) {
+    notices.push({ kind: 'error', text: `接管续跑未生效（快照导入已成功）：${result.adoptError}` });
+  }
+  if (result.adoptWarning) {
+    notices.push({ kind: 'warning', text: result.adoptWarning });
+  }
+  return notices;
 }
 
 export function truncate(text: string, max: number): string {

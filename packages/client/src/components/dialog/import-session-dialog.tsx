@@ -1,18 +1,20 @@
 import { useCallback, useState } from 'react';
 import { importExternalSession, listExternalSessions, previewExternalSession } from '../../api.js';
-import type { ExternalSessionSource, ExternalSessionSummary, RuntimeConfig } from '../../types.js';
+import type { ExternalSessionSource, ExternalSessionSummary, ImportSessionResult, RuntimeConfig } from '../../types.js';
 import { Button } from '../ui/button.js';
 import { SkeletonStack } from '../ui/skeleton.js';
 import {
+  ACTIVE_SESSION_CONFLICT_HINT,
   formatBytes,
   formatRelativeTime,
+  importResultNotices,
   normalizePreviewItem,
   projectTail,
   type NormalizedPreviewItem,
 } from './import-session-format.js';
 import { Modal } from './modal.js';
 
-type ImportView = 'source' | 'list' | 'preview';
+type ImportView = 'source' | 'list' | 'preview' | 'result';
 
 const sourceOptions: Array<{ source: ExternalSessionSource; title: string; detail: string }> = [
   { source: 'claude', title: 'Claude Code', detail: '~/.claude/projects' },
@@ -21,7 +23,8 @@ const sourceOptions: Array<{ source: ExternalSessionSource; title: string; detai
 
 /**
  * 导入外部会话弹窗：来源选择 → 会话列表 → 预览（前 10 条）→ 确认导入，
- * 同一 Modal 内三态切换（非路由跳转）。
+ * 导入成功但接管有提示（失败 / cli 不生效）时进入结果页，同一 Modal 内
+ * 视图切换（非路由跳转）。
  */
 export function ImportSessionDialog({
   config,
@@ -42,6 +45,10 @@ export function ImportSessionDialog({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string>();
+  // Phase 2 adopt：导入时把外部 session 种入 runner 驱动句柄（默认关）。
+  const [adopt, setAdopt] = useState(false);
+  // 导入成功但带提示（接管失败 / cli 模式不生效）时停留在结果页展示。
+  const [importResult, setImportResult] = useState<ImportSessionResult>();
 
   const loadSessions = useCallback(async (next: ExternalSessionSource) => {
     setListLoading(true);
@@ -84,11 +91,13 @@ export function ImportSessionDialog({
     setSelected(undefined);
     setPreview(undefined);
     setError(undefined);
+    setImportResult(undefined);
   };
 
   const backToSource = () => {
     setView('source');
     setListError(undefined);
+    setImportResult(undefined);
   };
 
   const submitImport = async () => {
@@ -96,7 +105,15 @@ export function ImportSessionDialog({
     setImporting(true);
     setError(undefined);
     try {
-      const result = await importExternalSession(config, source, selected.sessionId);
+      const result = await importExternalSession(config, source, selected.sessionId, adopt);
+      // 快照导入已成功；只有存在需要用户看到的提示（接管失败 / cli 模式
+      // 不生效）时才停留在结果页，否则直接跳转新会议。
+      if (importResultNotices(result).length > 0) {
+        setImportResult(result);
+        setView('result');
+        setImporting(false);
+        return;
+      }
       onCreated(result.meetingId);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
@@ -159,12 +176,15 @@ export function ImportSessionDialog({
                       <span>{formatRelativeTime(session.lastModified)}</span>
                       <span>{formatBytes(session.sizeBytes)}</span>
                     </span>
+                    {session.active ? (
+                      <span className="import-row__conflict">{ACTIVE_SESSION_CONFLICT_HINT}</span>
+                    ) : null}
                   </button>
                 ))
               )}
             </div>
           </>
-        ) : (
+        ) : view === 'preview' ? (
           <>
             <div className="import-list-head">
               <span className="import-row__title" title={selected?.title}>{selected?.title ?? ''}</span>
@@ -193,6 +213,18 @@ export function ImportSessionDialog({
               )}
               {error ? <p className="inline-error">{error}</p> : null}
             </div>
+            <label className="import-adopt">
+              <input
+                type="checkbox"
+                checked={adopt}
+                onChange={(event) => setAdopt(event.target.checked)}
+                disabled={importing || previewLoading}
+              />
+              <span>
+                <strong>接管续跑</strong>
+                <small>导入后在深度驱动模式下继续原会话（resume 外部 session）</small>
+              </span>
+            </label>
             <p className="ctx-hint import-preview__hint">预览最多展示前 10 条消息；导入后会生成完整时间线。</p>
             <footer>
               <Button onClick={backToList} disabled={importing}>返回</Button>
@@ -205,9 +237,26 @@ export function ImportSessionDialog({
               </Button>
             </footer>
           </>
-        )}
+        ) : view === 'result' && importResult ? (
+          <>
+            <div className="import-result">
+              <p className="import-result__ok">
+                快照导入成功——已生成 {importResult.messageCount} 条消息的会议时间线。
+              </p>
+              {importResultNotices(importResult).map((notice, index) => (
+                <p key={index} className={`import-notice import-notice--${notice.kind}`}>{notice.text}</p>
+              ))}
+            </div>
+            <footer>
+              <Button onClick={onClose} disabled={importing}>关闭</Button>
+              <Button variant="primary" onClick={() => onCreated(importResult.meetingId)}>
+                前往会议
+              </Button>
+            </footer>
+          </>
+        ) : null}
 
-        {view !== 'preview' ? (
+        {view === 'source' || view === 'list' ? (
           <footer>
             <Button onClick={onClose} disabled={importing || listLoading}>取消</Button>
           </footer>
