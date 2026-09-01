@@ -129,19 +129,61 @@
 }
 .import-list .stack { padding: 0 8px; }
 .import-row {
-  display: grid;
-  gap: 3px;
-  padding: 8px 10px;
-  border: 1px solid transparent;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 0;
   border-radius: var(--radius-md);
-  background: var(--color-surface);
   color: var(--color-text);
+}
+.import-row > .import-row__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: none;
+  background: none;
   text-align: left;
   cursor: pointer;
+  border-radius: var(--radius-sm, 6px);
   transition: background var(--motion-fast) var(--ease-standard);
 }
-.import-row:hover { background: var(--color-surface-hover); }
+.import-row > .import-row__main:hover { background: var(--color-surface-hover); }
 .import-row__top { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.import-row--selected > .import-row__main { background: color-mix(in srgb, var(--color-accent, #4a7dff) 8%, transparent); }
+.import-row__check {
+  display: flex;
+  align-items: center;
+  padding: 0 0 0 8px;
+  cursor: pointer;
+}
+.import-badge--thread {
+  color: var(--color-text-subtle);
+  background: var(--color-surface-hover);
+  font-family: var(--font-mono, monospace);
+}
+.import-subagents {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--color-text-subtle);
+  font-size: var(--text-3xs);
+  cursor: pointer;
+}
+.import-batch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--color-border, rgba(128, 128, 128, 0.2));
+}
+.import-batch__group {
+  flex: 1;
+  min-width: 0;
+}
+.import-batch-error { padding: 0 16px; }
 .import-row__title {
   flex: 1;
   min-width: 0;
@@ -168,6 +210,33 @@
   color: var(--color-warning);
   font-size: var(--text-3xs);
 }
+.import-badge {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: var(--radius-xs, 4px);
+  font-size: var(--text-3xs);
+  white-space: nowrap;
+}
+.import-badge--imported {
+  color: var(--color-text-subtle);
+  background: var(--color-surface-hover);
+}
+.import-badge--stale {
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+}
+.import-refresh {
+  flex: none;
+  padding: 1px 8px;
+  border: none;
+  border-radius: var(--radius-xs, 4px);
+  color: var(--color-accent, var(--color-text));
+  background: none;
+  font-size: var(--text-3xs);
+  cursor: pointer;
+}
+.import-refresh:hover:not(:disabled) { text-decoration: underline; }
+.import-refresh:disabled { opacity: 0.6; cursor: default; }
 .import-empty { padding: 24px 16px; text-align: center; color: var(--color-text-muted); font-size: var(--text-2xs); }
 
 .import-preview {

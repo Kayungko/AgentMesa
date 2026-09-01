@@ -80,6 +80,10 @@ export interface ExternalSessionSummary {
   /** 5 分钟内仍活跃。 */
   active: boolean;
   threadSource?: string;
+  /** 已导入过：指向持有该会话快照的会议。 */
+  imported?: { meetingId: string };
+  /** 源文件在快照之后又变化了——可刷新快照。 */
+  hasUpdates?: boolean;
 }
 
 /** POST /api/meetings/import（previewOnly）返回的单条预览消息（≤10 条）。 */

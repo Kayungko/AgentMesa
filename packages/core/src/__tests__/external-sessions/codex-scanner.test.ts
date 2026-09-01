@@ -34,6 +34,29 @@ afterEach(() => {
 });
 
 describe('listCodexSessions', () => {
+  it('includeSubagents lists non-user threads with their parent thread id', () => {
+    writeRollout(
+      `rollout-2026-08-31T20-02-27-${USER_ID}.jsonl`,
+      { id: USER_ID, cwd: 'E:\\AgentMesa', thread_source: 'user' },
+    );
+    writeRollout(
+      `rollout-2026-08-31T20-05-00-${SUBAGENT_ID}.jsonl`,
+      { id: SUBAGENT_ID, cwd: 'E:\\AgentMesa', thread_source: 'subagent', parent_thread_id: USER_ID },
+    );
+
+    // Default: only the user thread.
+    expect(listCodexSessions({ rootDir: root }).map((session) => session.sessionId)).toEqual([USER_ID]);
+
+    // Opt-in: the subagent thread is listed and carries the parent anchor.
+    const withSubs = listCodexSessions({ rootDir: root, includeSubagents: true });
+    expect(withSubs.map((session) => session.sessionId).sort()).toEqual([SUBAGENT_ID, USER_ID].sort());
+    const subagent = withSubs.find((session) => session.sessionId === SUBAGENT_ID)!;
+    expect(subagent.threadSource).toBe('subagent');
+    expect(subagent.parentThreadId).toBe(USER_ID);
+    // User threads have no parent anchor.
+    expect(withSubs.find((session) => session.sessionId === USER_ID)!.parentThreadId).toBeUndefined();
+  });
+
   it('lists user threads with sessionId/cwd/title from the first session_meta line', () => {
     writeRollout(
       `rollout-2026-08-31T20-02-27-${USER_ID}.jsonl`,

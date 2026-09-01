@@ -269,13 +269,24 @@ a new one.
   mismatch, or the resume RPC/transcript replay failing), so a broken takeover
   is visible rather than silent. With *no* persisted handle both modes behave
   identically (fresh session).
+- **Adopted handles activate strict automatically.** Handles seeded by
+  `adoptExternalDriverSession` carry an `adopted: true` marker. When desk
+  activates a meeting agent that has an adopted handle for the meeting scope,
+  it passes `resumeMode: 'strict'` without any env switch — organic
+  (Mesa-grown) handles keep `fallback`. A strict failure is also *visible*:
+  the failed run gets a failure bubble written back into the meeting timeline
+  (not only server logs / the status drawer), and the client audit trail maps
+  the `failed` progress stage to a `运行失败：…` activity line.
 - **Precondition: `AGENTMESA_SESSION_DRIVER`.** Adoption only does anything
   when session runs actually take the deep-driver path. The default `cli`
   mode keeps meeting speech on one-shot CLI runners that never read the
   sidecar, so the desk response carries `driverMode` and an `adoptWarning`
   when a handle was seeded while `AGENTMESA_SESSION_DRIVER=cli`. Set it to
   `claude-agent-sdk` / `codex-app-server` / `auto` for the takeover to take
-  effect.
+  effect. The session-run registry follows this switch alone
+  (`resolveSessionDriverRegistry`): `AGENTMESA_DRIVER=cli` (the task-run
+  switch) can no longer silently empty the session registry and degrade a
+  takeover back to one-shot CLI turns.
 
 **Concurrency and takeover risks.** An adopted session may still be in use by
 its native client (a Claude Code terminal that is mid-conversation, a running
@@ -292,9 +303,13 @@ warning on the import list, but nothing enforces exclusivity.
   client (interleaving, transcript locking, or hard failure).
 - Near-full-context overflow when resuming a very long external session (the
   backend may refuse the resume or truncate; no mitigation is wired).
-- The external thread's `approvalPolicy` / permission posture carries over
+- ~~The external thread's `approvalPolicy` / permission posture carries over
   from the original session; how that interacts with AgentMesa's policy
-  bridge on the first resumed turn is not yet observed.
+  bridge on the first resumed turn is not yet observed.~~ Resolved by the
+  2026-09-01 probes: resume neither persists nor echoes an approvalPolicy, so
+  the driver now lifts every `requirePermissions` turn onto
+  `approvalPolicy: 'on-request'` — the posture question is settled at the
+  turn level (see "Live codex approval-posture probes").
 
 ## Permission Bridging
 
@@ -338,21 +353,28 @@ type DriverPermissionResponder =
     `PermissionApprovalQueue` (`packages/desk/src/permission-approvals.ts`) —
     pending approvals surface in the client Approvals view
     (`GET /api/permissions/pending`, `POST /api/permissions/:id/decide`),
-    300s auto-deny timeout. With the session speech guard active this never
-    fires (mutative actions are denied before the approval gate); the wiring
-    is ready for when the guard is relaxed per role/config.
+    300s auto-deny timeout. Phase 3 (2026-09-01) made this gate live for
+    speech turns: gated speech actions escalate here as approval cards.
   - CLI `mesa runs exec` asks in the terminal (`y/N`); non-interactive stdin
     denies (fail-closed, same as having no gate).
   - MCP task runs still pass no gate — the MCP caller is an agent with no
     human waiting; approval-required operations deny fail-closed.
-- **Session speech guard (`speechGuard: true`)** — both session-run call sites
-  (MCP `mesa_activate_session_agent`, Desk invite) enable it: meeting-speech
-  turns are read-only for every role (owner included). Patches deny
-  (`speech.patch_denied`); commands narrow to a readonly allowlist
-  (`SPEECH_READONLY_COMMANDS`); tools mapping to `modify_source` /
-  `push_code` / `merge_pr` / `run_command` deny (`speech.tool_denied`).
-  State changes go through task → run → approval (COLLAB_VISION routing
-  rule 1, extended to the tool layer).
+- **Session speech guard (`speechGuard: true`) — approval posture (Phase 3,
+  2026-09-01)** — both session-run call sites (MCP
+  `mesa_activate_session_agent`, Desk invite) enable it: meeting-speech turns
+  are read-only **by default** for every role (owner included). Read-only
+  commands (`SPEECH_READONLY_COMMANDS`) and read-only tools pass through.
+  Gated actions — patches (`speech.patch_approval_required`), non-read-only
+  commands (`speech.command_approval_required`), and tools mapping to
+  `modify_source` / `push_code` / `merge_pr` / `run_command`
+  (`speech.tool_approval_required`) — escalate to the `askHuman` gate as
+  approval cards instead of being silently denied, and the human decision
+  wins (audited as `human.approved` / `human.denied` with `viaHuman: true`).
+  Without an askHuman gate configured they fail closed (`approval.required`).
+  This replaced the old hard-deny fence, which deadlocked adopted coordinator
+  sessions: a resumed external coordinator dispatching work to its child
+  sessions was either blocked by the fence or ran with no audit constraint —
+  read-only-by-default + human approval keeps both coordination and audit.
 
 ## Implementation Status
 
@@ -368,8 +390,8 @@ type DriverPermissionResponder =
 | Real driver assembly (`drivers/index.ts`) | **Done.** `createDefaultDriverRegistry()` builds the real Claude SDK + Codex app-server drivers. |
 | Env switch + call-site wiring (`drivers/env.ts`) | **Done.** `AGENTMESA_DRIVER` gates the registry at the MCP server / orchestrator / CLI call sites; `cli` disables deep drivers. |
 | Session-run deep-driver opt-in (`AGENTMESA_SESSION_DRIVER`) | **Done.** Default `cli`; `auto` claude-family only; explicit kinds full; unregistered agent ids fall back to CLI. Speech guard on; Desk askHuman bridge wired. |
-| External-session adoption (`drivers/adopt.ts`) | **Done.** Desk import `adopt: true` seeds the sidecar handle (`adoptExternalDriverSession`); `resumeMode: 'strict'` for fail-loud takeover. Live cross-client resume behavior unverified (see the adoption section). |
-| Speech guard (`permission-bridge.ts`) | **Done.** `speechGuard` option: read-only meeting-speech turns for every role. |
+| External-session adoption (`drivers/adopt.ts`) | **Done.** Desk import `adopt: true` seeds the sidecar handle (`adoptExternalDriverSession`) with the `adopted` marker; desk activation passes `resumeMode: 'strict'` for adopted handles (fail-loud takeover) and strict failures surface as meeting-timeline failure bubbles. Live cross-client resume behavior unverified (see the adoption section). |
+| Speech guard (`permission-bridge.ts`) | **Done.** `speechGuard` option: read-only-by-default meeting-speech turns for every role; gated actions escalate to the askHuman approval gate (desk approval cards) instead of hard-denying — the takeover deadlock fix (Phase 3). |
 | askHuman bridges | **Done.** Desk `PermissionApprovalQueue` + client approval cards; CLI terminal gate on `mesa runs exec`. |
 
 ## Live codex integration notes (2026-08-30, codex-cli 0.131.0 on Windows)
@@ -398,3 +420,32 @@ Verified against a real `codex app-server` binary:
   `codex.exe` grandchild orphaned; each stray app-server competes for
   `~/.codex` state. The connection now kills the whole tree
   (`taskkill /pid <pid> /T /F`) on the shell-shim path.
+
+## Live codex approval-posture probes (2026-09-01, codex-cli 0.131.0 on Windows)
+
+Probed against a real `codex app-server` (three throwaway JSON-RPC sessions,
+probe scripts archived under `.tmpfiles/codex-approval-probe/`):
+
+- **`thread/resume.excludeTurns` requires the experimentalApi capability.**
+  Without `capabilities: { experimentalApi: true }` on `initialize`, the
+  server rejects the resume outright: *"thread/resume.excludeTurns requires
+  experimentalApi capability"*. The driver previously never declared the
+  capability, so **every production codex resume was failing** (surfacing as
+  a strict-resume failure for adopted handles). Fixed: the driver's
+  `initialize` now declares `capabilities: { experimentalApi: true }` —
+  with it, the same resume proceeds to rollout lookup.
+- **`thread/resume` does NOT persist an approvalPolicy.** The parameter is
+  accepted (no invalid-params error) but the response thread echoes
+  `approvalPolicy: undefined` either way — resume cannot lift the posture.
+- **`turn/start` accepts a turn-level `approvalPolicy`.** No schema rejection;
+  the turn runs. The driver therefore lifts every `requirePermissions`
+  session's turns onto `approvalPolicy: 'on-request'` — for freshly created
+  threads this matches the thread posture (no-op), and for **resumed
+  external sessions it is the only reliable posture lift** (the takeover
+  approval-escalation path).
+- **Behavioral caveat (unverified).** The probe machine's default model
+  (`gpt-5.6-sol`) 400s on turn execution (needs a feature the local config
+  lacks), so the end-to-end "on-request turn → `item/commandExecution/
+  requestApproval` arrives → desk approval card" chain was not observed
+  live; it is covered by mock-based tests and awaits the Phase 3
+  integration checklist run on a healthy model config.

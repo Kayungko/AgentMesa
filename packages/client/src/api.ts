@@ -359,10 +359,15 @@ export function updateMeetingStatus(config: RuntimeConfig, meetingId: string, st
 export function listExternalSessions(
   config: RuntimeConfig,
   source: ExternalSessionSource,
+  options?: { includeSubagents?: boolean },
 ): Promise<ExternalSessionSummary[]> {
+  const query = new URLSearchParams({ source });
+  if (options?.includeSubagents === true) {
+    query.set('includeSubagents', 'true');
+  }
   return request<{ sessions: ExternalSessionSummary[] }>(
     config,
-    `/api/imports/external-sessions?source=${encodeURIComponent(source)}`,
+    `/api/imports/external-sessions?${query.toString()}`,
   ).then((payload) => payload.sessions);
 }
 
@@ -390,12 +395,26 @@ export function importExternalSession(
   source: ExternalSessionSource,
   sessionId: string,
   adopt?: boolean,
+  groupName?: string,
 ): Promise<ImportSessionResult> {
   return postJson<ImportSessionResult>(config, '/api/meetings/import', {
     source,
     sessionId,
     ...(adopt === true ? { adopt: true } : {}),
+    ...(groupName !== undefined && groupName.trim().length > 0 ? { groupName: groupName.trim() } : {}),
   });
+}
+
+/** 刷新已导入会议的快照：重解析源文件并替换导入的消息（用户消息保留）。 */
+export function refreshImportedMeeting(
+  config: RuntimeConfig,
+  meetingId: string,
+): Promise<{ meetingId: string; messageCount: number }> {
+  return postJson<{ meetingId: string; messageCount: number }>(
+    config,
+    `/api/meetings/${encodeURIComponent(meetingId)}/refresh`,
+    {},
+  );
 }
 
 export function createTask(

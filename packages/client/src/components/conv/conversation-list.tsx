@@ -61,6 +61,27 @@ export function ConversationList({
     });
   }, [runtime.meetings, rooms, unread, query]);
 
+  // 成组导入的会议按 groupName 聚合：组内最新的会议决定组头的位置，
+  // 组头之后依次跟该组的成员（保持排序不变，只插入组头标记）。
+  const renderItems = useMemo<Array<
+    | { type: 'group'; name: string; key: string }
+    | { type: 'row'; row: ConvRowData; key: string }
+  >>(() => {
+    const items: Array<{ type: 'group'; name: string; key: string } | { type: 'row'; row: ConvRowData; key: string }> = [];
+    const seenGroups = new Set<string>();
+    for (const row of rows) {
+      if (row.kind === 'meeting') {
+        const groupName = row.meeting.metadata?.groupName;
+        if (typeof groupName === 'string' && groupName.length > 0 && !seenGroups.has(groupName)) {
+          seenGroups.add(groupName);
+          items.push({ type: 'group', name: groupName, key: `group:${groupName}` });
+        }
+      }
+      items.push({ type: 'row', row, key: `${row.kind}:${row.id}` });
+    }
+    return items;
+  }, [rows]);
+
   return (
     <aside className="conv-list no-drag">
       <header className="conv-list__head">
@@ -83,14 +104,18 @@ export function ConversationList({
             ? <p className="list-empty">没有匹配的会话</p>
             : <EmptyState title="还没有会话" detail="新建会话或群聊，把 Agent 拉进来开始协作。" />
         ) : (
-          rows.map((row) => (
-            <ConvRow
-              key={`${row.kind}:${row.id}`}
-              row={row}
-              active={`${row.kind}:${row.id}` === activeKey}
-              agentsById={agentsById}
-              onOpen={onOpen}
-            />
+          renderItems.map((item) => (
+            item.type === 'group' ? (
+              <div key={item.key} className="conv-group" role="presentation">{item.name}</div>
+            ) : (
+              <ConvRow
+                key={item.key}
+                row={item.row}
+                active={item.key === activeKey}
+                agentsById={agentsById}
+                onOpen={onOpen}
+              />
+            )
           ))
         )}
       </div>

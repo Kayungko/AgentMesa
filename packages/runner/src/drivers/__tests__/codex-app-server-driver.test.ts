@@ -118,6 +118,48 @@ describe('CodexAppServerDriver session lifecycle', () => {
     await session.close();
   }, 20000);
 
+  it('declares the experimentalApi capability during initialize (required by thread/resume.excludeTurns)', async () => {
+    const driver = makeDriver('happy');
+    const session = await driver.createSession({ cwd: dir });
+    const init = readLog().find((e) => e['dir'] === 'recv' && e['method'] === 'initialize');
+    expect((init?.['params'] as { capabilities?: { experimentalApi?: boolean } })?.capabilities)
+      .toEqual({ experimentalApi: true });
+    await session.close();
+  }, 20000);
+
+  it('lifts resumed sessions onto on-request approval at the TURN level (thread/resume has no effective approvalPolicy)', async () => {
+    const driver = makeDriver('happy');
+    const handle: DriverSessionHandle = {
+      kind: 'codex-app-server',
+      backendSessionId: 'thr_resume_9',
+      createdAt: new Date().toISOString(),
+    };
+    // requirePermissions mirrors the production session init (driverSessionInit).
+    const session = await driver.resumeSession(handle, { cwd: dir, requirePermissions: true });
+    await collect(session.send({ prompt: 'dispatch work' }));
+
+    // thread/resume itself carries no approvalPolicy (verified against a real
+    // 0.131.0 server: accepted but not echoed/persisted)…
+    const resume = readLog().find((e) => e['dir'] === 'recv' && e['method'] === 'thread/resume');
+    expect((resume?.['params'] as { approvalPolicy?: string })?.approvalPolicy).toBeUndefined();
+    // …so every turn lifts the posture instead.
+    const turns = readLog().filter((e) => e['dir'] === 'recv' && e['method'] === 'turn/start');
+    expect(turns.length).toBeGreaterThan(0);
+    for (const turn of turns) {
+      expect((turn['params'] as { approvalPolicy?: string }).approvalPolicy).toBe('on-request');
+    }
+
+    // Without requirePermissions the turn posture stays untouched.
+    const plain = await driver.createSession({ cwd: dir });
+    await collect(plain.send({ prompt: 'plain turn' }));
+    const plainTurns = readLog()
+      .filter((e) => e['dir'] === 'recv' && e['method'] === 'turn/start')
+      .slice(-1);
+    expect((plainTurns[0]?.['params'] as { approvalPolicy?: string })?.approvalPolicy).toBeUndefined();
+    await session.close();
+    await plain.close();
+  }, 20000);
+
   it('resumes an existing conversation with thread/resume', async () => {
     const driver = makeDriver('happy');
     const handle: DriverSessionHandle = {

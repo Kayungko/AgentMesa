@@ -14,6 +14,7 @@ import {
 } from '@agentmesa/core';
 import type { MesaRuntimeContext } from '@agentmesa/core';
 import { executeSessionRun, activateSessionAgent } from '../session-run.js';
+import { adoptExternalDriverSession } from '../drivers/adopt.js';
 import type {
   AgentDriver,
   AgentDriverSession,
@@ -238,6 +239,43 @@ describe('executeSessionRun deep-driver passthrough', () => {
     expect(driver.createdSessions).toHaveLength(0);
     expect(result.run.status).toBe('completed');
     expect(result.run.output).toContain('AGENT-CONTRIBUTION:CLI 回合');
+  });
+
+  it('posts a failure bubble into the meeting when a strict takeover resume fails', async () => {
+    const meeting = createMeeting(ctx, { title: '接管失败' });
+    // Seed an adopted handle whose kind does NOT match the registry driver —
+    // strict mode must reject the turn instead of silently cold-starting.
+    adoptExternalDriverSession(ctx, {
+      agentId: 'agent:claude',
+      scope: meeting.id,
+      kind: 'codex-app-server',
+      backendSessionId: 'thread-takeover',
+    });
+    const driver = new FakeDriver('claude-agent-sdk');
+    const run = createAgentRun(ctx, {
+      agentId: 'agent:claude',
+      meetingId: meeting.id,
+      input: '接管续跑',
+      action: 'custom',
+      runnerType: 'session',
+    });
+
+    await expect(
+      executeSessionRun(ctx, run.id, {
+        writeBackToMeetingId: meeting.id,
+        driverRegistry: [driver],
+        driverPreference: 'claude-agent-sdk',
+        resumeMode: 'strict',
+      }),
+    ).rejects.toThrow(/strict resume failed/);
+
+    // The run is persisted as failed …
+    const failedRun = listAgentRuns(ctx, { agentId: 'agent:claude' }).find((r) => r.id === run.id);
+    expect(failedRun?.status).toBe('failed');
+    // … and the meeting timeline still shows the failure instead of going silent.
+    const messages = listMessages(ctx).filter((m) => m.meetingId === meeting.id);
+    expect(messages.some((m) => m.from === 'agent:claude' && m.type === 'general')).toBe(true);
+    expect(messages.some((m) => (m.body ?? '').includes('strict resume failed'))).toBe(true);
   });
 });
 

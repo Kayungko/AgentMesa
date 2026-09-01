@@ -67,6 +67,13 @@ export interface DriverSessionHandle {
   backendSessionId: string;
   /** ISO timestamp of handle creation. */
   createdAt: string;
+  /**
+   * True when the handle was seeded by `adoptExternalDriverSession` (external
+   * takeover) rather than grown organically from a Mesa-driven turn. Adopted
+   * handles activate strict resume semantics: a resume failure must fail loud
+   * instead of silently cold-starting a new conversation.
+   */
+  adopted?: boolean;
 }
 
 /** Options when creating or resuming a driver session. */

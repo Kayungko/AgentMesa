@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { importExternalSession, listExternalSessions, previewExternalSession } from '../../api.js';
+import { importExternalSession, listExternalSessions, previewExternalSession, refreshImportedMeeting } from '../../api.js';
 import type { ExternalSessionSource, ExternalSessionSummary, ImportSessionResult, RuntimeConfig } from '../../types.js';
 import { Button } from '../ui/button.js';
 import { SkeletonStack } from '../ui/skeleton.js';
@@ -49,12 +49,59 @@ export function ImportSessionDialog({
   const [adopt, setAdopt] = useState(false);
   // 导入成功但带提示（接管失败 / cli 模式不生效）时停留在结果页展示。
   const [importResult, setImportResult] = useState<ImportSessionResult>();
+  // 快照刷新：某条已导入会话的源文件变化后，就地重拉快照（列表内操作）。
+  const [refreshingId, setRefreshingId] = useState<string>();
+  // 多选成组导入：勾选 ≥1 条后可批量导入并打上同一组名。
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [groupName, setGroupName] = useState('');
+  const [batchImporting, setBatchImporting] = useState(false);
+  // codex：同时列出 subagent / guardian_review 线程（默认只列 user 线程）。
+  const [includeSubagents, setIncludeSubagents] = useState(false);
 
-  const loadSessions = useCallback(async (next: ExternalSessionSource) => {
+  const toggleSelected = (sessionId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) {
+        next.delete(sessionId);
+      } else {
+        next.add(sessionId);
+      }
+      return next;
+    });
+  };
+
+  const submitBatchImport = async () => {
+    if (!source || batchImporting || selectedIds.size === 0) return;
+    const targets = sessions.filter((session) => selectedIds.has(session.sessionId));
+    if (targets.length === 0) return;
+    setBatchImporting(true);
+    setError(undefined);
+    try {
+      let last: ImportSessionResult | undefined;
+      for (const session of targets) {
+        last = await importExternalSession(
+          config,
+          source,
+          session.sessionId,
+          adopt,
+          groupName || undefined,
+        );
+      }
+      // 组内最后一个（通常是最新会话）作为落点。
+      onCreated(last!.meetingId);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+      // 部分成功时刷新列表：已导入的条目会亮起"已导入"徽标，便于补齐。
+      await loadSessions(source, includeSubagents);
+      setBatchImporting(false);
+    }
+  };
+
+  const loadSessions = useCallback(async (next: ExternalSessionSource, subagents = false) => {
     setListLoading(true);
     setListError(undefined);
     try {
-      setSessions(await listExternalSessions(config, next));
+      setSessions(await listExternalSessions(config, next, { includeSubagents: subagents }));
     } catch (reason) {
       setSessions([]);
       setListError(reason instanceof Error ? reason.message : String(reason));
@@ -67,7 +114,34 @@ export function ImportSessionDialog({
   const pickSource = (next: ExternalSessionSource) => {
     setSource(next);
     setView('list');
-    void loadSessions(next);
+    setSelectedIds(new Set());
+    void loadSessions(next, includeSubagents);
+  };
+
+  const toggleSubagents = () => {
+    const next = !includeSubagents;
+    setIncludeSubagents(next);
+    if (source) {
+      setSelectedIds(new Set());
+      void loadSessions(source, next);
+    }
+  };
+
+  const refreshSnapshot = async (session: ExternalSessionSummary) => {
+    if (!session.imported || refreshingId) return;
+    setRefreshingId(session.sessionId);
+    setListError(undefined);
+    try {
+      await refreshImportedMeeting(config, session.imported.meetingId);
+      // 重新拉取列表：刷新后源锚点对齐，hasUpdates 徽标消失。
+      if (source) {
+        await loadSessions(source, includeSubagents);
+      }
+    } catch (reason) {
+      setListError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setRefreshingId(undefined);
+    }
   };
 
   const openPreview = async (session: ExternalSessionSummary) => {
@@ -145,6 +219,17 @@ export function ImportSessionDialog({
           <>
             <div className="import-list-head">
               <span>{sourceTitle}</span>
+              {source === 'codex' ? (
+                <label className="import-subagents">
+                  <input
+                    type="checkbox"
+                    checked={includeSubagents}
+                    onChange={toggleSubagents}
+                    disabled={listLoading || batchImporting}
+                  />
+                  子代理线程
+                </label>
+              ) : null}
               <button type="button" className="import-back" onClick={backToSource}>切换来源</button>
             </div>
             <div className="import-list">
@@ -156,32 +241,97 @@ export function ImportSessionDialog({
                 <p className="import-empty">未发现会话——先在对应 CLI 里跑一次，再回来导入。</p>
               ) : (
                 sessions.map((session) => (
-                  <button
+                  <div
                     key={session.sessionId}
-                    type="button"
-                    className="import-row"
-                    onClick={() => void openPreview(session)}
+                    className={`import-row${selectedIds.has(session.sessionId) ? ' import-row--selected' : ''}`}
                   >
-                    <span className="import-row__top">
-                      <span className="import-row__title" title={session.title}>{session.title}</span>
+                    <label className="import-row__check">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(session.sessionId)}
+                        onChange={() => toggleSelected(session.sessionId)}
+                        disabled={batchImporting}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="import-row__main"
+                      onClick={() => void openPreview(session)}
+                      disabled={batchImporting}
+                    >
+                      <span className="import-row__top">
+                        <span className="import-row__title" title={session.title}>{session.title}</span>
+                        {session.imported ? (
+                          <span className="import-badge import-badge--imported">已导入</span>
+                        ) : null}
+                        {session.hasUpdates ? (
+                          <span className="import-badge import-badge--stale">源有更新</span>
+                        ) : null}
+                        {session.threadSource && session.threadSource !== 'user' ? (
+                          <span className="import-badge import-badge--thread">{session.threadSource}</span>
+                        ) : null}
+                        {session.active ? (
+                          <span className="agent-state agent-state--active">
+                            <span className="agent-state__dot" />
+                            进行中
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="import-row__meta">
+                        <span title={session.projectDir ?? session.cwd ?? ''}>{projectTail(session) || '未知项目'}</span>
+                        <span>{formatRelativeTime(session.lastModified)}</span>
+                        <span>{formatBytes(session.sizeBytes)}</span>
+                        {session.hasUpdates && session.imported ? (
+                          <button
+                            type="button"
+                            className="import-refresh"
+                            disabled={refreshingId === session.sessionId}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void refreshSnapshot(session);
+                            }}
+                          >
+                            {refreshingId === session.sessionId ? '刷新中…' : '刷新快照'}
+                          </button>
+                        ) : null}
+                      </span>
                       {session.active ? (
-                        <span className="agent-state agent-state--active">
-                          <span className="agent-state__dot" />
-                          进行中
-                        </span>
+                        <span className="import-row__conflict">{ACTIVE_SESSION_CONFLICT_HINT}</span>
                       ) : null}
-                    </span>
-                    <span className="import-row__meta">
-                      <span title={session.projectDir ?? session.cwd ?? ''}>{projectTail(session) || '未知项目'}</span>
-                      <span>{formatRelativeTime(session.lastModified)}</span>
-                      <span>{formatBytes(session.sizeBytes)}</span>
-                    </span>
-                    {session.active ? (
-                      <span className="import-row__conflict">{ACTIVE_SESSION_CONFLICT_HINT}</span>
-                    ) : null}
-                  </button>
+                    </button>
+                  </div>
                 ))
               )}
+            </div>
+            {error ? <p className="inline-error import-batch-error">{error}</p> : null}
+            <div className="import-batch">
+              <label className="import-adopt">
+                <input
+                  type="checkbox"
+                  checked={adopt}
+                  onChange={(event) => setAdopt(event.target.checked)}
+                  disabled={batchImporting}
+                />
+                <span>
+                  <strong>接管续跑</strong>
+                </span>
+              </label>
+              <input
+                type="text"
+                className="import-batch__group"
+                placeholder="组名（可选）——勾选多条一起导入时归为一组"
+                value={groupName}
+                onChange={(event) => setGroupName(event.target.value)}
+                disabled={batchImporting}
+              />
+              <Button
+                variant="primary"
+                type="button"
+                disabled={batchImporting || selectedIds.size === 0}
+                onClick={() => void submitBatchImport()}
+              >
+                {batchImporting ? '导入中…' : `导入所选（${selectedIds.size}）`}
+              </Button>
             </div>
           </>
         ) : view === 'preview' ? (

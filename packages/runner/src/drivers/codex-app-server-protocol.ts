@@ -197,6 +197,13 @@ export type RpcId = string | number;
 
 export interface InitializeParams {
   clientInfo: { name: string; title?: string; version?: string };
+  /**
+   * Client capabilities. `experimentalApi: true` is required for
+   * `thread/resume.excludeTurns` (verified against codex-cli 0.131.0: without
+   * the capability the server rejects the resume with
+   * "excludeTurns requires experimentalApi capability").
+   */
+  capabilities?: { experimentalApi?: boolean };
 }
 
 export interface ThreadStartParams {
@@ -213,6 +220,13 @@ export interface TurnStartParams {
   threadId: string;
   input: Array<{ type: 'text'; text: string }>;
   cwd?: string;
+  /**
+   * Turn-level approval posture. `thread/resume` carries no effective
+   * approvalPolicy (accepted but not echoed/persisted — verified against
+   * codex-cli 0.131.0), so the turn level is the only reliable place to lift
+   * a resumed external session onto on-request approval.
+   */
+  approvalPolicy?: 'untrusted' | 'on-request' | 'never';
 }
 
 export interface CodexThread {

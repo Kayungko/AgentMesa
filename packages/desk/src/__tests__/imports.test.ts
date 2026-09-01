@@ -373,4 +373,108 @@ describe('DeskServer external-session imports', () => {
     expect(falseFlagBody.adopted).toBe(false);
     expect(existsSync(sidecarPath())).toBe(false);
   });
+
+  // --- Snapshot freshness: imported / hasUpdates / refresh ---
+
+  it('POST /api/meetings/import stamps groupName into the meeting title and metadata', async () => {
+    server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
+    await server.start();
+
+    const res = await postImport({ source: 'claude', sessionId: SESSION_ID, groupName: '总控接管' });
+    const body = (await res.json()) as ImportResponseBody & { meetingId: string };
+
+    expect(res.status).toBe(201);
+    const meetingRes = await fetch(`${baseUrl()}/api/meetings/${body.meetingId}`, authed());
+    const meeting = (await meetingRes.json()) as { title: string; metadata: { groupName?: string } };
+    expect(meeting.title).toBe('[总控接管] 修登录 bug');
+    expect(meeting.metadata?.groupName).toBe('总控接管');
+  });
+
+  it('GET /api/imports/external-sessions annotates imported sessions and source updates', async () => {
+    server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
+    await server.start();
+
+    // Before importing: no session carries import state.
+    const before = await (await fetch(`${baseUrl()}/api/imports/external-sessions?source=claude`, authed())).json() as {
+      sessions: Array<{ sessionId: string; imported?: unknown; hasUpdates?: unknown }>;
+    };
+    expect(before.sessions.find((entry) => entry.sessionId === SESSION_ID)?.imported).toBeUndefined();
+
+    const importRes = await postImport({ source: 'claude', sessionId: SESSION_ID });
+    const { meetingId } = (await importRes.json()) as ImportResponseBody;
+
+    // Fresh snapshot: imported, no updates.
+    const fresh = await (await fetch(`${baseUrl()}/api/imports/external-sessions?source=claude`, authed())).json() as {
+      sessions: Array<{ sessionId: string; imported?: { meetingId: string }; hasUpdates?: boolean }>;
+    };
+    const freshEntry = fresh.sessions.find((entry) => entry.sessionId === SESSION_ID);
+    expect(freshEntry?.imported).toEqual({ meetingId });
+    expect(freshEntry?.hasUpdates).toBeUndefined();
+
+    // The external conversation continues → mtime/size drift from the anchors.
+    const transcript = join(claudeRoot, 'E--FakeRepo', `${SESSION_ID}.jsonl`);
+    writeFileSync(
+      transcript,
+      `${readFileSync(transcript, 'utf-8')}${JSON.stringify({
+        type: 'assistant',
+        timestamp: '2026-08-01T12:00:00.000Z',
+        message: { content: [{ type: 'text', text: '后续追问的回复' }] },
+      })}\n`,
+      'utf-8',
+    );
+
+    const stale = await (await fetch(`${baseUrl()}/api/imports/external-sessions?source=claude`, authed())).json() as {
+      sessions: Array<{ sessionId: string; imported?: { meetingId: string }; hasUpdates?: boolean }>;
+    };
+    const staleEntry = stale.sessions.find((entry) => entry.sessionId === SESSION_ID);
+    expect(staleEntry?.imported).toEqual({ meetingId });
+    expect(staleEntry?.hasUpdates).toBe(true);
+  });
+
+  it('POST /api/meetings/:id/refresh re-imports the source snapshot', async () => {
+    server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
+    await server.start();
+
+    const importRes = await postImport({ source: 'claude', sessionId: SESSION_ID });
+    const { meetingId } = (await importRes.json()) as ImportResponseBody;
+
+    // The external conversation continues after the snapshot was taken.
+    const transcript = join(claudeRoot, 'E--FakeRepo', `${SESSION_ID}.jsonl`);
+    writeFileSync(
+      transcript,
+      `${readFileSync(transcript, 'utf-8')}${JSON.stringify({
+        type: 'assistant',
+        timestamp: '2026-08-01T12:00:00.000Z',
+        message: { content: [{ type: 'text', text: '续跑补充回复' }] },
+      })}\n`,
+      'utf-8',
+    );
+
+    const refreshRes = await fetch(`${baseUrl()}/api/meetings/${meetingId}/refresh`, authed({ method: 'POST' }));
+    const refreshBody = (await refreshRes.json()) as { meetingId: string; messageCount: number };
+
+    expect(refreshRes.status).toBe(200);
+    expect(refreshBody.meetingId).toBe(meetingId);
+    // 5 original + 1 new message; no stale duplicates.
+    expect(refreshBody.messageCount).toBe(6);
+
+    const meetingRes = await fetch(`${baseUrl()}/api/meetings/${meetingId}`, authed());
+    const meeting = (await meetingRes.json()) as {
+      messages: Array<{ summary: string }>;
+      metadata: { refreshedAt?: string };
+    };
+    expect(meeting.messages).toHaveLength(6);
+    expect(meeting.messages.some((message) => message.summary === '续跑补充回复')).toBe(true);
+    expect(meeting.metadata?.refreshedAt).toBeTruthy();
+
+    // Refreshing a non-import meeting is rejected.
+    const created = await fetch(`${baseUrl()}/api/meetings`, authed({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: '普通会议' }),
+    }));
+    const plainMeeting = (await created.json()) as { id: string };
+    const rejected = await fetch(`${baseUrl()}/api/meetings/${plainMeeting.id}/refresh`, authed({ method: 'POST' }));
+    expect(rejected.status).toBe(400);
+  });
 });

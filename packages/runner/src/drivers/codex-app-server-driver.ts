@@ -64,6 +64,9 @@ export interface CodexAppServerDriverOptions {
 const DEFAULT_COMMAND = 'codex app-server';
 const CLIENT_INFO: InitializeParams = {
   clientInfo: { name: 'agentmesa', title: 'AgentMesa', version: '0.1.0' },
+  // Required for thread/resume.excludeTurns (verified against codex-cli
+  // 0.131.0 — see InitializeParams.capabilities).
+  capabilities: { experimentalApi: true },
 };
 
 interface PendingPermission {
@@ -206,6 +209,8 @@ class CodexAppServerSession implements AgentDriverSession {
   private closed = false;
   private activeTurn: ActiveTurn | null = null;
   private systemPromptPending: string | null;
+  /** Turn-level approval posture (set when the session init required permissions). */
+  private readonly requirePermissions: boolean;
   /** Wakes the event generator when queue state changes. */
   private resolveWait: (() => void) | null = null;
   private waitPromise: Promise<void> | null = null;
@@ -218,6 +223,7 @@ class CodexAppServerSession implements AgentDriverSession {
     private readonly options: { closeGraceMs?: number; interruptGraceMs: number }
   ) {
     this.systemPromptPending = init.systemPrompt?.trim() ? init.systemPrompt : null;
+    this.requirePermissions = init.requirePermissions === true;
     hooks.onNotification = (method, params) => this.handleNotification(method, params);
     hooks.onServerRequest = (id, method, params) => this.handleServerRequest(id, method, params);
     hooks.onFatal = (error) => this.handleFatal(error);
@@ -261,6 +267,15 @@ class CodexAppServerSession implements AgentDriverSession {
         threadId: this.backendSessionId,
         input: [{ type: 'text', text: prompt }],
       };
+      if (this.requirePermissions) {
+        // Approval-posture lift: thread/resume carries no effective
+        // approvalPolicy (verified against codex-cli 0.131.0 — accepted but
+        // neither echoed nor persisted), so the turn level is the only
+        // reliable place to put a resumed external session onto on-request
+        // approval. For freshly created threads this matches the
+        // thread/start posture and is therefore a no-op.
+        params.approvalPolicy = 'on-request';
+      }
       const result = asRecord(await this.connection.request(CODEX_METHODS.turnStart, params));
       const turn = asRecord(result?.['turn']);
       active.turnId = str(turn?.['id']) ?? null;

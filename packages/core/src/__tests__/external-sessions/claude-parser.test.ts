@@ -30,6 +30,23 @@ function baseSession(): object[] {
 }
 
 describe('parseClaudeSession', () => {
+  it('extracts the transcript line uuid as externalLineId', () => {
+    writeLines([
+      { type: 'user', uuid: 'u-aaa', timestamp: '2026-08-30T01:00:00.000Z', message: { role: 'user', content: '第一问' } },
+      { type: 'assistant', uuid: 'a-bbb', timestamp: '2026-08-30T01:00:05.000Z', message: { content: [{ type: 'text', text: '第一答' }] } },
+    ]);
+
+    const messages = parseClaudeSession(filePath).messages;
+
+    expect(messages[0]!.externalLineId).toBe('u-aaa');
+    expect(messages[1]!.externalLineId).toBe('a-bbb');
+    // Lines without a uuid carry no anchor (optional by design).
+    writeLines([
+      { type: 'user', timestamp: '2026-08-30T01:00:00.000Z', message: { role: 'user', content: '无 uuid 行' } },
+    ]);
+    expect(parseClaudeSession(filePath).messages[0]!.externalLineId).toBeUndefined();
+  });
+
   it('normalizes user text / assistant text+tool_use / tool_result in file order', () => {
     writeLines(baseSession());
 

@@ -127,6 +127,9 @@ export function adoptExternalDriverSession(
       kind: input.kind,
       backendSessionId: input.backendSessionId,
       createdAt: new Date().toISOString(),
+      // Marks the handle as externally adopted so session activation picks
+      // strict resume semantics (fail-loud instead of silent cold-start).
+      adopted: true,
     },
   );
 }

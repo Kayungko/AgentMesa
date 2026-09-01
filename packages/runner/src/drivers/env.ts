@@ -44,6 +44,28 @@ export function resolveDriverRegistryFromEnv(
   return createDefaultDriverRegistry();
 }
 
+/**
+ * Build the driver registry for a SESSION-run call site from
+ * `AGENTMESA_SESSION_DRIVER` alone. Deliberately ignores `AGENTMESA_DRIVER`:
+ * the task-run switch must not silently disable meeting-speech deep drivers
+ * once the session switch has explicitly opted in (without this, a global
+ * `AGENTMESA_DRIVER=cli` would empty the registry and quietly push session
+ * runs back onto the one-shot CLI path — the takeover would degrade without
+ * any warning).
+ *
+ * 'cli' (the default) yields an empty registry; every other value yields the
+ * fresh default registry.
+ */
+export function resolveSessionDriverRegistry(
+  env: DriverEnvSource = process.env,
+): AgentDriver[] {
+  const preference = resolveSessionDriverPreference(env);
+  if (preference === 'cli') {
+    return [];
+  }
+  return createDefaultDriverRegistry();
+}
+
 // ---------------------------------------------------------------------------
 // Session-run deep-driver switch (W1)
 // ---------------------------------------------------------------------------

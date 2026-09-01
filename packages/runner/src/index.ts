@@ -88,6 +88,7 @@ export type {
 export {
   resolveDriverRegistryFromEnv,
   resolveSessionDriverPreference,
+  resolveSessionDriverRegistry,
   shouldUseSessionDriver,
   SESSION_DRIVER_PREFERENCE_ENV,
 } from './drivers/env.js';

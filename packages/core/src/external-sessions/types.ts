@@ -34,6 +34,8 @@ export interface ExternalSessionSummary {
   active: boolean;
   /** codex only: `user` | `subagent` | `guardian_review`. Scanners list `user` threads by default. */
   threadSource?: ExternalThreadSource;
+  /** codex subagent threads only: the parent (spawning) thread id — group-hint on import. */
+  parentThreadId?: string;
 }
 
 /** Normalized message kinds an external transcript is decomposed into. */
@@ -58,6 +60,13 @@ export interface ExternalMessage {
   body?: string;
   /** Tool name for `tool_use` / `tool_result` kinds. */
   toolName?: string;
+  /**
+   * Stable line-level id from the source file (codex: `payload.id` like
+   * `msg_*`/`ctc_*`/`fco_*`, falling back to `<sessionId>#<ordinal>`; claude:
+   * the transcript line `uuid`). Anchors incremental refresh: the same source
+   * line must map to the same id across re-imports.
+   */
+  externalLineId?: string;
 }
 
 /** Parsed session ready for import. */
@@ -76,6 +85,13 @@ export interface ExternalSessionScanOptions {
   rootDir?: string;
   /** Only list sessions modified after this time (ISO). Optional. */
   modifiedSince?: string;
+  /**
+   * Also list non-user codex threads (`subagent` / `guardian_review`). Default
+   * false: subagent rollout files are named by the CHILD thread id (not the
+   * resumable parent id), so they are import-visible only — adoption/resume
+   * semantics still target the parent. Claude sessions have no thread source.
+   */
+  includeSubagents?: boolean;
 }
 
 /** Options shared by both parsers. */

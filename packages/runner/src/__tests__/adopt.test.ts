@@ -53,6 +53,8 @@ describe('adoptExternalDriverSession', () => {
     expect(handle!.kind).toBe('claude-agent-sdk');
     expect(handle!.backendSessionId).toBe(SESSION_ID);
     expect(handle!.createdAt).toBeTruthy();
+    // Adopted handles carry the marker that activates strict resume semantics.
+    expect(handle!.adopted).toBe(true);
   });
 
   it('rejects a claude session whose transcript is missing and writes no sidecar', () => {

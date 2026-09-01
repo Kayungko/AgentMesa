@@ -10,7 +10,12 @@ import {
 } from '@agentmesa/core';
 import type { MesaRuntimeContext } from '@agentmesa/core';
 import type { ActivateSessionAgentOptions } from '@agentmesa/runner';
-import { activateSessionAgent, SESSION_DRIVER_PREFERENCE_ENV } from '@agentmesa/runner';
+import {
+  activateSessionAgent,
+  adoptExternalDriverSession,
+  loadDriverSessionHandle,
+  SESSION_DRIVER_PREFERENCE_ENV,
+} from '@agentmesa/runner';
 import { DeskServer } from '../server.js';
 
 // Spy-only mock: keep the real runner surface (terminateSessionChildren etc.),
@@ -125,17 +130,11 @@ describe('DeskServer meeting-agent activation driver selection', () => {
     expect(typeof options.permissionResponder).toBe('function');
     expect(options.timeout).toBe(5000);
 
-    // Behavioural speech-guard assertions: the assembled responder must keep
-    // meeting-speech turns read-only (patch → deny, readonly command → allow)
-    // regardless of the agent's registered builder role.
+    // Behavioural speech-guard assertions: read-only commands pass through,
+    // while gated actions (patch / mutating tool) escalate to the desk human
+    // approval gate — they land in /api/permissions/pending as approval cards
+    // instead of being silently denied (the takeover deadlock fix).
     const responder = options.permissionResponder!;
-    const patchDecision = await responder({
-      requestId: 'req-patch',
-      kind: 'patch',
-      title: 'patch: src/a.ts',
-      detail: { changes: [{ path: 'src/a.ts', kind: 'modify' }] },
-    });
-    expect(patchDecision).toBe('deny');
     const commandDecision = await responder({
       requestId: 'req-cmd',
       kind: 'command',
@@ -143,13 +142,38 @@ describe('DeskServer meeting-agent activation driver selection', () => {
       detail: { command: 'git status' },
     });
     expect(commandDecision).toBe('allow');
-    const writeDecision = await responder({
+
+    // Gated actions pend on the human gate; assert the approval card landed.
+    const patchPromise = responder({
+      requestId: 'req-patch',
+      kind: 'patch',
+      title: 'patch: src/a.ts',
+      detail: { changes: [{ path: 'src/a.ts', kind: 'modify' }] },
+    });
+    const writePromise = responder({
       requestId: 'req-write',
       kind: 'tool',
       title: 'tool: Write',
       detail: { toolName: 'Write', file_path: 'src/a.ts' },
     });
-    expect(writeDecision).toBe('deny');
+    const base = `http://localhost:${server.getPort()}`;
+    await vi.waitFor(async () => {
+      const res = await fetch(`${base}/api/permissions/pending`, {
+        headers: { Authorization: 'Bearer secret' },
+      });
+      const body = (await res.json()) as { pending: Array<{ id: string }> };
+      const ids = body.pending.map((entry) => entry.id);
+      expect(ids).toContain('req-patch');
+      expect(ids).toContain('req-write');
+    });
+    // The verdicts stay undecided while no human has answered (never resolve
+    // within the test window — the promises are intentionally left pending;
+    // the desk shutdown path resolves them as denied).
+    const settled = await Promise.race([
+      Promise.allSettled([patchPromise, writePromise]).then(() => true),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 300)),
+    ]);
+    expect(settled).toBe(false);
   });
 
   it('auto with a codex-family agent keeps the CLI path', async () => {
@@ -171,6 +195,77 @@ describe('DeskServer meeting-agent activation driver selection', () => {
     expect('driverRegistry' in options).toBe(false);
     expect('driverPreference' in options).toBe(false);
     expect('permissionResponder' in options).toBe(false);
+  });
+
+  it('an adopted external handle activates strict resume semantics', async () => {
+    process.env[SESSION_DRIVER_PREFERENCE_ENV] = 'codex-app-server';
+    registerAgent(ctx, {
+      id: 'agent:codex-external',
+      name: 'Codex External',
+      client: 'codex',
+      status: 'available',
+      roles: ['builder'],
+    });
+    const meeting = createMeeting(ctx, { title: '接管总控' });
+
+    // Seed the sidecar exactly like POST /api/meetings/import?adopt=true does:
+    // an externally adopted handle for this agent+meeting scope.
+    adoptExternalDriverSession(ctx, {
+      agentId: 'agent:codex-external',
+      scope: meeting.id,
+      kind: 'codex-app-server',
+      backendSessionId: 'thread-external-takeover',
+    });
+    expect(loadDriverSessionHandle(ctx, 'agent:codex-external', meeting.id)?.adopted).toBe(true);
+
+    server = new DeskServer(testDir, 0, { sessionToken: 'secret', sessionRunTimeout: 5000 });
+    await server.start();
+    await inviteAgent(meeting.id, 'agent:codex-external');
+
+    const options = lastOptions();
+    expect(options.resumeMode).toBe('strict');
+  });
+
+  it('an organically-grown handle (no adoption) keeps fallback resume semantics', async () => {
+    process.env[SESSION_DRIVER_PREFERENCE_ENV] = 'codex-app-server';
+    registerAgent(ctx, {
+      id: 'agent:codex',
+      name: 'Codex',
+      client: 'codex',
+      status: 'available',
+      roles: ['builder'],
+    });
+    const meeting = createMeeting(ctx, { title: '自然会话' });
+
+    server = new DeskServer(testDir, 0, { sessionToken: 'secret', sessionRunTimeout: 5000 });
+    await server.start();
+    await inviteAgent(meeting.id, 'agent:codex');
+
+    const options = lastOptions();
+    expect(options.resumeMode).toBeUndefined();
+  });
+
+  it('AGENTMESA_DRIVER=cli does not empty the session driver registry once the session switch opted in', async () => {
+    process.env[SESSION_DRIVER_PREFERENCE_ENV] = 'claude-agent-sdk';
+    process.env.AGENTMESA_DRIVER = 'cli';
+    registerAgent(ctx, {
+      id: 'agent:claude',
+      name: 'Claude',
+      client: 'claude',
+      status: 'available',
+      roles: ['builder'],
+    });
+    const meeting = createMeeting(ctx, { title: '双开关' });
+
+    server = new DeskServer(testDir, 0, { sessionToken: 'secret', sessionRunTimeout: 5000 });
+    await server.start();
+    await inviteAgent(meeting.id, 'agent:claude');
+
+    // The task-run switch (AGENTMESA_DRIVER=cli) must not silently degrade
+    // meeting-speech deep drivers back to the one-shot CLI path.
+    const options = lastOptions();
+    expect(options.driverPreference).toBe('claude-agent-sdk');
+    expect(options.driverRegistry!.length).toBeGreaterThan(0);
   });
 
   // Note: the "unregistered agent id falls back to CLI" guard cannot be

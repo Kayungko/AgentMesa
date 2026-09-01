@@ -3,6 +3,7 @@ import {
   createAgentRun,
   createRuntimeContext,
   getAgent,
+  getAgentRun,
   getMeeting,
   listAgentRuns,
   listAgents,
@@ -55,18 +56,39 @@ export async function executeSessionRun(
   runId: string,
   options?: SessionRunOptions,
 ): Promise<RunExecutionResult> {
-  const result = await executeRun(ctx, runId, {
-    timeout: options?.timeout,
-    // Deep-driver passthrough: undefined values behave exactly as before
-    // (executeRun treats an absent registry as [] and falls back to the CLI path).
-    driverRegistry: options?.driverRegistry,
-    driverPreference: options?.driverPreference,
-    permissionResponder: options?.permissionResponder,
-    resumeMode: options?.resumeMode,
-  });
+  let result: RunExecutionResult;
+  try {
+    result = await executeRun(ctx, runId, {
+      timeout: options?.timeout,
+      // Deep-driver passthrough: undefined values behave exactly as before
+      // (executeRun treats an absent registry as [] and falls back to the CLI path).
+      driverRegistry: options?.driverRegistry,
+      driverPreference: options?.driverPreference,
+      permissionResponder: options?.permissionResponder,
+      resumeMode: options?.resumeMode,
+    });
+  } catch (error) {
+    // executeRun rethrows after marking the run `failed` (e.g. a strict-resume
+    // takeover failure). Without this write-back the meeting timeline would
+    // show nothing at all — the failure would live only in server logs and the
+    // status drawer. Surface it as a message bubble, then rethrow so the
+    // fire-and-forget caller still logs the error.
+    if (options?.writeBackToMeetingId) {
+      let failedRun: RunExecutionResult['run'] | undefined;
+      try {
+        failedRun = getAgentRun(ctx, runId);
+      } catch {
+        failedRun = undefined;
+      }
+      if (failedRun) {
+        await writeBackSessionMessage(ctx, options.writeBackToMeetingId, { run: failedRun });
+      }
+    }
+    throw error;
+  }
 
   if (options?.writeBackToMeetingId) {
-    await writeBackSessionMessage(ctx, options.writeBackToMeetingId, result);
+    await writeBackSessionMessage(ctx, options.writeBackToMeetingId, { run: result.run });
   }
 
   return result;
@@ -75,9 +97,9 @@ export async function executeSessionRun(
 async function writeBackSessionMessage(
   ctx: MesaRuntimeContext,
   meetingId: string,
-  result: RunExecutionResult,
+  outcome: { run: RunExecutionResult['run'] },
 ): Promise<void> {
-  const { run } = result;
+  const { run } = outcome;
   const completed = run.status === 'completed';
 
   let agent;

@@ -31,8 +31,10 @@ import {
   importExternalSession,
   listClaudeSessions,
   listCodexSessions,
+  listImportedExternalSessions,
   parseClaudeSession,
   parseCodexSession,
+  refreshImportedMeeting,
   addWorkspace,
   getWorkspace,
   removeWorkspace,
@@ -63,8 +65,9 @@ import {
   activateSessionAgent,
   adoptExternalDriverSession,
   terminateSessionChildren,
-  resolveDriverRegistryFromEnv,
+  loadDriverSessionHandle,
   resolveSessionDriverPreference,
+  resolveSessionDriverRegistry,
   shouldUseSessionDriver,
   attachPermissionResponder,
 } from '@agentmesa/runner';
@@ -348,21 +351,32 @@ export class DeskServer {
     const options = agent && shouldUseSessionDriver(preference, agent.client)
       ? attachPermissionResponder({
           ...baseOptions,
-          driverRegistry: resolveDriverRegistryFromEnv(),
+          // Session-run registry follows AGENTMESA_SESSION_DRIVER alone — the
+          // task-run switch (AGENTMESA_DRIVER) must not silently empty it.
+          driverRegistry: resolveSessionDriverRegistry(),
           driverPreference: preference,
+          // Takeover semantics: when this agent+meeting has an adopted
+          // external handle, resume must fail loud. A broken handle silently
+          // cold-starting a new conversation would defeat the takeover (the
+          // meeting timeline would keep going while talking to a stranger).
+          ...(loadDriverSessionHandle(writeContext, agentId, meetingId)?.adopted === true
+            ? { resumeMode: 'strict' as const }
+            : {}),
         }, {
           ctx: writeContext,
           // Gated actions run under the agent's registered identity, not the
           // desk write actor.
           actor: sessionAgentActor(agentId, agent),
-          // Phase 2 speech guard: meeting-speech turns are read-only. State
-          // changes go through task → run → approval; the guard fences off
-          // modify_source/push_code/merge_pr tools and non-readonly commands
-          // for every role, owner included.
+          // Phase 2 speech guard: meeting-speech turns are read-only BY
+          // DEFAULT — read-only commands pass, while gated actions (patches,
+          // mutating tools, non-read-only commands) escalate to the human
+          // approval gate below instead of being silently denied. This is
+          // what lets an adopted coordinator session dispatch work to its
+          // child sessions while every gated action stays audited (desk
+          // approval cards).
           speechGuard: true,
-          // Human approval bridge: with the speech guard active this never
-          // fires (mutative actions are denied before the approval gate), but
-          // the wiring is ready for when the guard is relaxed per role/config.
+          // Human approval bridge: gated speech actions arrive here as desk
+          // approval cards (5-minute auto-deny fail-closed window).
           askHuman: createDeskAskHuman(this.permissionApprovals, { meetingId }),
         })
       : baseOptions;
@@ -478,7 +492,12 @@ export class DeskServer {
         this.sendError(res, 400, 'source must be "claude" or "codex"');
         return;
       }
-      this.sendJson(res, { sessions: this.listExternalSessions(source) });
+      // codex only: also surface subagent / guardian_review threads. Claude
+      // transcripts carry no thread source, so the flag is a no-op there.
+      const includeSubagents = url.searchParams.get('includeSubagents') === 'true';
+      this.sendJson(res, {
+        sessions: this.listExternalSessionsWithImportState(source, readContext, includeSubagents),
+      });
       return;
     }
     if (pathname === '/api/setup/status') {
@@ -569,9 +588,12 @@ export class DeskServer {
   }
 
   /** List external sessions defensively: a missing/unreadable root lists empty. */
-  private listExternalSessions(source: ExternalSessionSource): ExternalSessionSummary[] {
+  private listExternalSessions(
+    source: ExternalSessionSource,
+    includeSubagents = false,
+  ): ExternalSessionSummary[] {
     const rootDir = this.importRootDir(source);
-    const options = rootDir === undefined ? undefined : { rootDir };
+    const options = rootDir === undefined ? undefined : { rootDir, includeSubagents };
     try {
       return source === 'claude'
         ? listClaudeSessions(options)
@@ -580,6 +602,47 @@ export class DeskServer {
       console.error('Failed to list external sessions:', error instanceof Error ? error.message : String(error));
       return [];
     }
+  }
+
+  /**
+   * Session list annotated with import state: `imported` carries the meeting
+   * that holds this session's snapshot, and `hasUpdates` is true when the
+   * source file changed since the snapshot was taken (mtime or size differs
+   * from the recorded anchors) — the signal for the refresh affordance.
+   */
+  private listExternalSessionsWithImportState(
+    source: ExternalSessionSource,
+    readContext: MesaRuntimeContext,
+    includeSubagents = false,
+  ): Array<ExternalSessionSummary & {
+    imported?: { meetingId: string };
+    hasUpdates?: boolean;
+  }> {
+    const sessions = this.listExternalSessions(source, includeSubagents);
+    let importedIndex: Map<string, { meetingId: string; sourceLastModified?: string; sourceSizeBytes?: number }>;
+    try {
+      importedIndex = new Map(
+        listImportedExternalSessions(readContext)
+          .filter((entry) => entry.source === source)
+          .map((entry) => [entry.externalSessionId, entry]),
+      );
+    } catch {
+      importedIndex = new Map();
+    }
+    return sessions.map((session) => {
+      const imported = importedIndex.get(session.sessionId);
+      if (!imported) {
+        return session;
+      }
+      const anchorsChanged = imported.sourceLastModified !== undefined
+        && (imported.sourceLastModified !== session.lastModified
+          || imported.sourceSizeBytes !== session.sizeBytes);
+      return {
+        ...session,
+        imported: { meetingId: imported.meetingId },
+        ...(anchorsChanged ? { hasUpdates: true } : {}),
+      };
+    });
   }
 
   private async handleWriteRequest(
@@ -837,6 +900,7 @@ export class DeskServer {
         sessionId?: unknown;
         previewOnly?: unknown;
         adopt?: unknown;
+        groupName?: unknown;
       };
       if (body.source !== 'claude' && body.source !== 'codex') {
         throw new MesaError('VALIDATION_ERROR', 'source must be "claude" or "codex"');
@@ -872,6 +936,9 @@ export class DeskServer {
         source,
         sessionId: body.sessionId,
         parsed,
+        ...(typeof body.groupName === 'string' && body.groupName.trim().length > 0
+          ? { groupName: body.groupName.trim() }
+          : {}),
       });
 
       // Phase 2 adopt: optionally seed the runner's driver-handle sidecar so
@@ -912,6 +979,15 @@ export class DeskServer {
           }
           : {}),
       }, 201);
+      return;
+    }
+
+    // Snapshot refresh: re-parse the recorded source transcript and replace
+    // the imported snapshot (user-authored meeting messages are preserved).
+    const meetingRefreshMatch = pathname.match(/^\/api\/meetings\/([^/]+)\/refresh$/);
+    if (meetingRefreshMatch) {
+      const result = refreshImportedMeeting(writeContext, decodeURIComponent(meetingRefreshMatch[1]!));
+      this.sendJson(res, result);
       return;
     }
 

@@ -37,6 +37,24 @@ afterEach(() => {
 });
 
 describe('parseCodexSession', () => {
+  it('extracts externalLineId from payload.id, falling back to <file-id>#<ordinal>', () => {
+    writeLines([
+      { timestamp: '2026-08-31T12:02:27.000Z', type: 'session_meta', payload: { id: SESSION_ID, cwd: 'E:\\AgentMesa', thread_source: 'user' } },
+      { timestamp: '2026-08-31T12:02:28.000Z', type: 'response_item', payload: { type: 'message', role: 'user', id: 'msg_u1', content: [{ type: 'input_text', text: '继续开发' }] } },
+      { timestamp: '2026-08-31T12:02:29.000Z', type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '已完成' }] } },
+    ]);
+
+    const messages = parseCodexSession(filePath).messages;
+
+    // payload.id wins when present.
+    expect(messages[0]!.externalLineId).toBe('msg_u1');
+    // No payload.id → file-derived id + line ordinal (stable across re-parses).
+    expect(messages[1]!.externalLineId).toBe(`${SESSION_ID}#3`);
+    // Re-parsing the same file yields identical anchors.
+    expect(parseCodexSession(filePath).messages.map((message) => message.externalLineId))
+      .toEqual(messages.map((message) => message.externalLineId));
+  });
+
   it('normalizes the timeline in file order with correct kinds and speakers', () => {
     writeLines(baseSession());
 

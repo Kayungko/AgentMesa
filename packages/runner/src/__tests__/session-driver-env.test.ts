@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
   resolveSessionDriverPreference,
+  resolveSessionDriverRegistry,
   shouldUseSessionDriver,
   SESSION_DRIVER_PREFERENCE_ENV,
 } from '../drivers/env.js';
+import { DRIVER_PREFERENCE_ENV } from '../drivers/resolve.js';
 import { parseDriverPreference } from '../drivers/resolve.js';
 
 describe('resolveSessionDriverPreference', () => {
@@ -43,6 +45,30 @@ describe('resolveSessionDriverPreference', () => {
         [SESSION_DRIVER_PREFERENCE_ENV]: undefined,
       }),
     ).toBe('cli');
+  });
+});
+
+describe('resolveSessionDriverRegistry', () => {
+  it('returns an empty registry when the session switch is cli (the default)', () => {
+    expect(resolveSessionDriverRegistry({})).toEqual([]);
+    expect(resolveSessionDriverRegistry({ [SESSION_DRIVER_PREFERENCE_ENV]: 'cli' })).toEqual([]);
+  });
+
+  it('returns the default registry once the session switch opts in', () => {
+    const registry = resolveSessionDriverRegistry({ [SESSION_DRIVER_PREFERENCE_ENV]: 'auto' });
+    expect(Array.isArray(registry)).toBe(true);
+    expect(registry.length).toBeGreaterThan(0);
+  });
+
+  it('ignores AGENTMESA_DRIVER=cli — the task-run switch must not empty the session registry', () => {
+    // The takeover blind spot: AGENTMESA_DRIVER=cli used to empty the shared
+    // registry even when AGENTMESA_SESSION_DRIVER had explicitly opted in,
+    // silently degrading session runs back to the one-shot CLI path.
+    const registry = resolveSessionDriverRegistry({
+      [DRIVER_PREFERENCE_ENV]: 'cli',
+      [SESSION_DRIVER_PREFERENCE_ENV]: 'claude-agent-sdk',
+    });
+    expect(registry.length).toBeGreaterThan(0);
   });
 });
 

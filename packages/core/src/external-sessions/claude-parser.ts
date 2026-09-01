@@ -63,6 +63,8 @@ interface ClaudeLine {
   timestamp?: unknown;
   cwd?: unknown;
   aiTitle?: unknown;
+  /** Transcript-line uuid — the stable line-level anchor for refresh. */
+  uuid?: unknown;
   message?: {
     content?: unknown;
   };
@@ -119,6 +121,9 @@ export function parseClaudeSession(
 
     const createdAt = typeof obj.timestamp === 'string' ? obj.timestamp : startedAt ?? '';
     const content = obj.message?.content;
+    const externalLineId = typeof obj.uuid === 'string' && obj.uuid.length > 0
+      ? obj.uuid
+      : undefined;
 
     if (obj.type === 'user') {
       if (typeof content === 'string') {
@@ -132,6 +137,7 @@ export function parseClaudeSession(
           createdAt,
           summary: summarize(content),
           body: truncate(content, maxBodyLength),
+          ...(externalLineId !== undefined ? { externalLineId } : {}),
         });
       } else if (Array.isArray(content)) {
         for (const block of content) {
@@ -151,6 +157,7 @@ export function parseClaudeSession(
             createdAt,
             summary: '工具结果',
             body: truncate(body, maxBodyLength),
+            ...(externalLineId !== undefined ? { externalLineId } : {}),
           };
           if (toolUseId !== undefined && toolNames.has(toolUseId)) {
             message.toolName = toolNames.get(toolUseId);
@@ -184,6 +191,7 @@ export function parseClaudeSession(
           createdAt,
           summary: summarize(b.text),
           body: truncate(b.text, maxBodyLength),
+          ...(externalLineId !== undefined ? { externalLineId } : {}),
         });
       } else if (b.type === 'tool_use') {
         const name = typeof b.name === 'string' ? b.name : '';
@@ -198,6 +206,7 @@ export function parseClaudeSession(
           toolName: name,
           summary: `${name}(${truncate(args, ARGS_DIGEST_MAX_LENGTH)})`,
           body: truncate(args, maxBodyLength),
+          ...(externalLineId !== undefined ? { externalLineId } : {}),
         });
       } else if (b.type === 'thinking') {
         const thinking = typeof b.thinking === 'string' ? b.thinking : '';
@@ -207,6 +216,7 @@ export function parseClaudeSession(
           createdAt,
           summary: summarize(thinking),
           body: truncate(thinking, maxBodyLength),
+          ...(externalLineId !== undefined ? { externalLineId } : {}),
         });
       }
     }

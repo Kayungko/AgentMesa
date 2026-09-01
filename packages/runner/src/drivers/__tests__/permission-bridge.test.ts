@@ -454,11 +454,11 @@ describe('attachPermissionResponder', () => {
 });
 
 // ---------------------------------------------------------------------------
-// speechGuard — read-only fence for speech turns
+// speechGuard — read-only-by-default fence with human-approval escalation
 // ---------------------------------------------------------------------------
 
 describe('createPolicyPermissionResponder — speechGuard', () => {
-  it('denies every patch in a speech turn, even for owner (fence precedes role)', async () => {
+  it('escalates every patch to the human gate; fail-closed without askHuman, even for owner', async () => {
     const { log, onDecision } = records();
     const responder = createPolicyPermissionResponder({
       roles: ['owner'],
@@ -468,11 +468,14 @@ describe('createPolicyPermissionResponder — speechGuard', () => {
     await expect(
       responder(request('patch', { changes: [{ path: 'src/main.ts', kind: 'modify' }] })),
     ).resolves.toBe('deny');
-    expect(log[0]).toMatchObject({ decision: 'deny', rule: 'speech.patch_denied' });
+    // No askHuman gate configured → the escalation verdict is overwritten by
+    // the fail-closed 'approval.required' rule.
+    expect(log[0]).toMatchObject({ decision: 'deny', rule: 'approval.required' });
     expect(log[0]?.reason).toContain('read-only');
+    expect(log[0]?.reason).toContain('no human approval gate');
   });
 
-  it('denies builder patches in a speech turn too', async () => {
+  it('fail-closes builder patches in a speech turn too (no askHuman gate)', async () => {
     const responder = createPolicyPermissionResponder({
       roles: ['builder'],
       speechGuard: true,
@@ -480,6 +483,22 @@ describe('createPolicyPermissionResponder — speechGuard', () => {
     await expect(
       responder(request('patch', { file_path: 'src/main.ts', diff: '...' })),
     ).resolves.toBe('deny');
+  });
+
+  it('routes speech patches through askHuman — the human decision wins', async () => {
+    const askHuman = vi.fn(async () => 'allow' as const);
+    const { log, onDecision } = records();
+    const responder = createPolicyPermissionResponder({
+      roles: ['builder'],
+      speechGuard: true,
+      askHuman,
+      onDecision,
+    });
+    await expect(
+      responder(request('patch', { changes: [{ path: 'src/main.ts', kind: 'modify' }] })),
+    ).resolves.toBe('allow');
+    expect(askHuman).toHaveBeenCalledTimes(1);
+    expect(log[0]).toMatchObject({ decision: 'allow', rule: 'human.approved', viaHuman: true });
   });
 
   it('allows read-only commands in a speech turn (git status)', async () => {
@@ -493,7 +512,7 @@ describe('createPolicyPermissionResponder — speechGuard', () => {
     expect(log[0]).toMatchObject({ decision: 'allow', rule: 'speech.command_allow' });
   });
 
-  it('denies allowlisted but non-read-only commands (pnpm test, builder)', async () => {
+  it('escalates allowlisted but non-read-only commands (pnpm test, builder) — fail-closed without a gate', async () => {
     const { log, onDecision } = records();
     const responder = createPolicyPermissionResponder({
       roles: ['builder'],
@@ -501,12 +520,13 @@ describe('createPolicyPermissionResponder — speechGuard', () => {
       onDecision,
     });
     await expect(responder(request('command', { command: 'pnpm test' }))).resolves.toBe('deny');
-    expect(log[0]).toMatchObject({ decision: 'deny', rule: 'speech.command_denied' });
+    expect(log[0]).toMatchObject({ decision: 'deny', rule: 'approval.required' });
     expect(log[0]?.reason).toContain('read-only');
+    expect(log[0]?.reason).toContain('no human approval gate');
   });
 
-  it('denies approval-required commands outright instead of gating to a human (git push)', async () => {
-    const askHuman = vi.fn(async () => 'allow' as const);
+  it('gates approval-required speech commands to a human (git push) — the takeover deadlock fix', async () => {
+    const askHuman = vi.fn(async () => 'deny' as const);
     const { log, onDecision } = records();
     const responder = createPolicyPermissionResponder({
       roles: ['builder'],
@@ -517,8 +537,8 @@ describe('createPolicyPermissionResponder — speechGuard', () => {
     await expect(responder(request('command', { command: 'git push origin main' }))).resolves.toBe(
       'deny',
     );
-    expect(askHuman).not.toHaveBeenCalled();
-    expect(log[0]).toMatchObject({ decision: 'deny', rule: 'speech.command_denied' });
+    expect(askHuman).toHaveBeenCalledTimes(1);
+    expect(log[0]).toMatchObject({ decision: 'deny', rule: 'human.denied', viaHuman: true });
   });
 
   it('keeps blocked and secret-path command checks ahead of the fence', async () => {
@@ -532,21 +552,24 @@ describe('createPolicyPermissionResponder — speechGuard', () => {
     expect(log[0]).toMatchObject({ decision: 'deny', rule: 'command.secret_path' });
   });
 
-  it('denies mutating tools (Write, Bash) and allows read-only tools (Read, Grep)', async () => {
+  it('escalates mutating tools (Write, Bash) and allows read-only tools (Read, Grep)', async () => {
     const { log, onDecision } = records();
     const responder = createPolicyPermissionResponder({
       roles: ['builder'],
       speechGuard: true,
       onDecision,
     });
+    // No askHuman gate → fail-closed ('approval.required' overwrite), but the
+    // reason still names the speech escalation.
     await expect(
       responder(request('tool', { toolName: 'Write', input: { file_path: 'src/a.ts' } })),
     ).resolves.toBe('deny');
-    expect(log[0]).toMatchObject({ decision: 'deny', rule: 'speech.tool_denied' });
+    expect(log[0]).toMatchObject({ decision: 'deny', rule: 'approval.required' });
+    expect(log[0]?.reason).toContain('read-only');
     await expect(
       responder(request('tool', { toolName: 'Bash', input: { command: 'git status' } })),
     ).resolves.toBe('deny');
-    expect(log[1]).toMatchObject({ decision: 'deny', rule: 'speech.tool_denied' });
+    expect(log[1]).toMatchObject({ decision: 'deny', rule: 'approval.required' });
     await expect(responder(request('tool', { toolName: 'Read' }))).resolves.toBe('allow');
     expect(log[2]).toMatchObject({ decision: 'allow', rule: 'tool.readonly' });
     await expect(responder(request('tool', { toolName: 'Grep' }))).resolves.toBe('allow');

@@ -9,7 +9,7 @@ import type { EventEnvelope } from '@agentmesa/protocol';
 export interface RunActivityItem {
   /** Event cursor (stable per event, used as the React key). */
   id: string;
-  kind: 'driver' | 'permission_denied' | 'permission_granted';
+  kind: 'driver' | 'permission_denied' | 'permission_granted' | 'failed';
   /** Human-readable line, e.g. `经 claude-agent-sdk 深度驱动` / `权限拒绝：tool: Write`. */
   label: string;
   timestamp: string;
@@ -30,6 +30,12 @@ export function runActivityFromProgress(
   }
   if (stage === 'permission_granted') {
     return { kind: 'permission_granted', label: `权限放行：${message}` };
+  }
+  if (stage === 'failed') {
+    // Failure stage from executeRun (e.g. a strict-resume takeover failure).
+    // Without this the failure is invisible in the meeting timeline — the
+    // run state and error live only in the status drawer.
+    return { kind: 'failed', label: `运行失败：${message}` };
   }
   return undefined;
 }

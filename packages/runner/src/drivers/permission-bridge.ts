@@ -224,9 +224,10 @@ export const DEFAULT_COMMAND_ALLOWLIST: readonly string[] = [
 /**
  * Read-only command set for speech-guarded turns (`speechGuard: true`).
  * Same prefix-match semantics as the allowlist (exact match or
- * `entry + ' '` prefix). Commands outside this set are denied in speech
- * turns regardless of role capabilities; approval-required commands never
- * reach the human gate (a speech turn must not prompt for approval).
+ * `entry + ' '` prefix). Commands outside this set are NOT silently denied:
+ * they surface as human-approval requests (see the speech fence below), so a
+ * coordinating turn can dispatch work while every gated action stays
+ * audited. Without a configured `askHuman` gate they fail closed (denied).
  */
 export const SPEECH_READONLY_COMMANDS: readonly string[] = [
   'git status',
@@ -516,17 +517,21 @@ export function createPolicyPermissionResponder(
       );
     }
     // Speech fence before the approval gate and the allowlist: a speech turn
-    // allows read-only inspection only, and never prompts a human —
-    // approval-required commands are denied outright.
+    // allows read-only inspection by default. Non-read-only commands are not
+    // silently denied — they escalate to the human approval gate (needsHuman),
+    // so an adopted coordinator can dispatch work while every gated action
+    // stays audited. With no askHuman gate configured they fail closed.
     if (speechGuard) {
       const speechReadonly = SPEECH_READONLY_COMMANDS.some(
         (allowed) => command === allowed || command.startsWith(`${allowed} `),
       );
       if (!speechReadonly) {
-        return deny(
-          'speech.command_denied',
-          `command "${command}" is not read-only; session speech turns are read-only; state changes go through task → run → approval`,
-        );
+        return {
+          decision: 'deny',
+          rule: 'speech.command_approval_required',
+          reason: `command "${command}" is not read-only; session speech turns are read-only by default and gated actions go through human approval`,
+          needsHuman: true,
+        };
       }
       return {
         decision: 'allow',
@@ -555,13 +560,16 @@ export function createPolicyPermissionResponder(
   }
 
   function judgePatch(request: DriverPermissionRequest): Verdict {
-    // Speech fence first: a speech turn never mutates state, so patches are
-    // denied before any path extraction or file-access judgment.
+    // Speech fence first: a speech turn never mutates state by default, so
+    // patches escalate to the human approval gate before any path extraction
+    // or file-access judgment (fail-closed without an askHuman gate).
     if (speechGuard) {
-      return deny(
-        'speech.patch_denied',
-        'session speech turns are read-only; state changes go through task → run → approval',
-      );
+      return {
+        decision: 'deny',
+        rule: 'speech.patch_approval_required',
+        reason: 'session speech turns are read-only by default; patches go through human approval',
+        needsHuman: true,
+      };
     }
     const paths: string[] = [];
     collectPaths(request.detail, paths);
@@ -631,15 +639,18 @@ export function createPolicyPermissionResponder(
       };
     }
 
-    // Speech fence before the capability check: state-mutating tools are
-    // denied in speech turns for every role, including owner. Tools mapped
-    // to run_command are denied here too — command execution in a speech
-    // turn may only flow through the command kind's read-only set.
+    // Speech fence before the capability check: state-mutating tools escalate
+    // to the human approval gate in speech turns for every role, including
+    // owner. Tools mapped to run_command escalate here too — command
+    // execution in a speech turn may only flow through the command kind's
+    // read-only set or a human approval.
     if (speechGuard && SPEECH_DENIED_TOOL_POLICIES.has(policy)) {
-      return deny(
-        'speech.tool_denied',
-        `tool "${toolName}" mutates state ("${policy}"); session speech turns are read-only; state changes go through task → run → approval`,
-      );
+      return {
+        decision: 'deny',
+        rule: 'speech.tool_approval_required',
+        reason: `tool "${toolName}" mutates state ("${policy}"); session speech turns are read-only by default and gated actions go through human approval`,
+        needsHuman: true,
+      };
     }
 
     if (!hasCapability(policy)) {

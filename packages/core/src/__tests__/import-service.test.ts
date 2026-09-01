@@ -1,14 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { initWorkspace } from '../workspace.js';
 import { createRuntimeContext } from '../runtime/create-runtime-context.js';
 import type { MesaRuntimeContext } from '../runtime/types.js';
-import { importExternalSession } from '../services/import-service.js';
-import { getMeeting } from '../services/meeting-service.js';
-import { listMessages } from '../services/message-service.js';
+import { importExternalSession, listImportedExternalSessions, refreshImportedMeeting } from '../services/import-service.js';
+import { getMeeting, createMeeting } from '../services/meeting-service.js';
+import { listMessages, appendMessage } from '../services/message-service.js';
 import { getAgent } from '../services/agent-registry.js';
+import { parseClaudeSession } from '../external-sessions/claude-parser.js';
 import type { ExternalMessage, ParsedExternalSession } from '../external-sessions/types.js';
 
 let testDir: string;
@@ -240,5 +241,150 @@ describe('importExternalSession', () => {
 
     expect(result.meetingId).toMatch(/^meeting_/);
     expect(getMeeting(ctx, result.meetingId).title).toBe('外部会话导入 session-abc-123');
+  });
+
+  it('records refresh anchors (sourceFilePath/LastModified/SizeBytes) and per-message externalLineId', () => {
+    const parsed = buildParsedSession();
+    parsed.messages[0]!.externalLineId = 'line-uuid-1';
+    const result = importExternalSession(ctx, {
+      source: 'claude',
+      sessionId: 'session-abc-123',
+      parsed,
+    });
+
+    const meeting = getMeeting(ctx, result.meetingId);
+    expect(meeting.metadata).toMatchObject({
+      source: 'claude',
+      externalSessionId: 'session-abc-123',
+      sourceFilePath: 'C:/fake/.claude/projects/p/session-abc-123.jsonl',
+      sourceLastModified: '2026-08-01T10:01:00.000Z',
+      sourceSizeBytes: 1024,
+    });
+
+    const first = listMessages(ctx)
+      .filter((m) => m.meetingId === result.meetingId)
+      .find((m) => m.summary === '帮我修一下登录 bug');
+    expect(first?.metadata).toMatchObject({ externalLineId: 'line-uuid-1' });
+  });
+
+  it('stamps a groupName into metadata and the title prefix', () => {
+    const result = importExternalSession(ctx, {
+      source: 'claude',
+      sessionId: 'session-abc-123',
+      parsed: buildParsedSession(),
+      groupName: '总控接管',
+    });
+
+    const meeting = getMeeting(ctx, result.meetingId);
+    expect(meeting.title).toBe('[总控接管] 修登录 bug');
+    expect(meeting.metadata?.groupName).toBe('总控接管');
+
+    // Messages carry the group too (same provenance block).
+    const message = listMessages(ctx).find((m) => m.meetingId === result.meetingId);
+    expect(message?.metadata).toMatchObject({ groupName: '总控接管' });
+  });
+});
+
+describe('refreshImportedMeeting', () => {
+  /** Real Claude transcript fixture the refresh path can re-parse. */
+  function seedTranscript(sourceDir: string): string {
+    const filePath = join(sourceDir, 'session-refresh-1.jsonl');
+    writeFileSync(
+      filePath,
+      [
+        JSON.stringify({ type: 'user', uuid: 'u-1', timestamp: '2026-08-01T10:00:00.000Z', message: { content: 'first turn' } }),
+        JSON.stringify({ type: 'assistant', uuid: 'a-1', timestamp: '2026-08-01T10:00:01.000Z', message: { content: [{ type: 'text', text: 'first answer' }] } }),
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+    return filePath;
+  }
+
+  it('re-imports the source, replaces the snapshot and preserves user-authored messages', () => {
+    const sourceDir = mkdtempSync(join(tmpdir(), 'agentmesa-refresh-src-'));
+    try {
+      const filePath = seedTranscript(sourceDir);
+      const parsed = parseClaudeSession(filePath);
+      const { meetingId } = importExternalSession(ctx, {
+        source: 'claude',
+        sessionId: 'session-refresh-1',
+        parsed,
+      });
+
+      // A user message authored in the meeting AFTER the import.
+      appendMessage(ctx, {
+        meetingId,
+        type: 'general',
+        summary: '用户会后追问',
+        body: '用户会后追问',
+      });
+
+      // The external conversation continues.
+      writeFileSync(
+        filePath,
+        [
+          ...readFileSync(filePath, 'utf-8').split('\n').filter((line) => line !== ''),
+          JSON.stringify({ type: 'user', uuid: 'u-2', timestamp: '2026-08-01T11:00:00.000Z', message: { content: 'second turn' } }),
+          JSON.stringify({ type: 'assistant', uuid: 'a-2', timestamp: '2026-08-01T11:00:01.000Z', message: { content: [{ type: 'text', text: 'second answer' }] } }),
+          '',
+        ].join('\n'),
+        'utf-8',
+      );
+      utimesSync(filePath, new Date(), new Date(Date.now() + 60_000));
+
+      const refreshed = refreshImportedMeeting(ctx, meetingId);
+      expect(refreshed.meetingId).toBe(meetingId);
+      expect(refreshed.messageCount).toBe(4);
+
+      const messages = listMessages(ctx).filter((m) => m.meetingId === meetingId);
+      // Snapshot replaced: 4 imported + 1 user-authored = 5 (no stale copies).
+      expect(messages).toHaveLength(5);
+      expect(messages.some((m) => m.summary === 'second answer')).toBe(true);
+      expect(messages.filter((m) => m.summary === 'first answer')).toHaveLength(1);
+      expect(messages.some((m) => m.summary === '用户会后追问')).toBe(true);
+
+      // Meeting anchors moved to the new source state.
+      const meeting = getMeeting(ctx, meetingId);
+      expect(meeting.metadata?.sourceLastModified).not.toBe(parsed.summary.lastModified);
+      expect(meeting.metadata?.refreshedAt).toBeTruthy();
+
+      // One more meeting_imported event (refresh reuses the event type).
+      const importedEvents = ctx.eventStore.list({ type: 'meeting_imported' });
+      expect(importedEvents).toHaveLength(2);
+      expect(importedEvents[1]!.data).toMatchObject({ meetingId, messageCount: 4, refreshed: true });
+    } finally {
+      rmSync(sourceDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a meeting without import provenance', () => {
+    const meeting = createMeeting(ctx, { title: '普通会议' });
+    expect(() => refreshImportedMeeting(ctx, meeting.id)).toThrow(/no refreshable import provenance/);
+  });
+
+  it('rejects an unknown meeting id', () => {
+    expect(() => refreshImportedMeeting(ctx, 'meeting_missing')).toThrow(/not found/);
+  });
+});
+
+describe('listImportedExternalSessions', () => {
+  it('indexes imported meetings by source + external session id', () => {
+    importExternalSession(ctx, {
+      source: 'claude',
+      sessionId: 'session-abc-123',
+      parsed: buildParsedSession(),
+    });
+    createMeeting(ctx, { title: '普通会议' });
+
+    const imported = listImportedExternalSessions(ctx);
+    expect(imported).toHaveLength(1);
+    expect(imported[0]).toMatchObject({
+      source: 'claude',
+      externalSessionId: 'session-abc-123',
+      sourceLastModified: '2026-08-01T10:01:00.000Z',
+      sourceSizeBytes: 1024,
+    });
+    expect(imported[0]!.meetingId).toMatch(/^meeting_/);
   });
 });

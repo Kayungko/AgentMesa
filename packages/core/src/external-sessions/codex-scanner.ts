@@ -26,6 +26,8 @@ interface CodexSessionMeta {
   id?: unknown;
   cwd?: unknown;
   thread_source?: unknown;
+  /** Present on subagent threads: the spawning (parent) thread id. */
+  parent_thread_id?: unknown;
 }
 
 export function defaultCodexSessionsRoot(): string {
@@ -112,7 +114,7 @@ export function buildCodexTitle(filePath: string, cwd: string | undefined): stri
   return `codex ${time} ${cwdTail(cwd)}`.trim();
 }
 
-/** List Codex sessions, newest first. Only `thread_source === 'user'` sessions are listed. */
+/** List Codex sessions, newest first. Only `thread_source === 'user'` sessions are listed unless `includeSubagents` is set. */
 export function listCodexSessions(options?: ExternalSessionScanOptions): ExternalSessionSummary[] {
   const root = resolve(options?.rootDir ?? defaultCodexSessionsRoot());
   const modifiedSinceMs = options?.modifiedSince !== undefined
@@ -134,11 +136,13 @@ export function listCodexSessions(options?: ExternalSessionScanOptions): Externa
     if (!meta) {
       continue;
     }
-    // NOTE: only user threads are listed. Subagent / guardian_review rollout
-    // files are named by the CHILD thread id (not the resumable parent
-    // session id), so listing them would break both resume and import
-    // semantics. The parsers can still read them when addressed directly.
-    if (meta.thread_source !== 'user') {
+    // NOTE: only user threads are listed by default. Subagent /
+    // guardian_review rollout files are named by the CHILD thread id (not the
+    // resumable parent session id), so they are import-visible only when the
+    // caller explicitly opts in (`includeSubagents`) — adoption/resume still
+    // target the parent. The parsers can always read them when addressed
+    // directly.
+    if (meta.thread_source !== 'user' && options?.includeSubagents !== true) {
       continue;
     }
     if (typeof meta.id !== 'string' || meta.id.length === 0) {
@@ -154,6 +158,9 @@ export function listCodexSessions(options?: ExternalSessionScanOptions): Externa
       sizeBytes: stat.size,
       active: Date.now() - stat.mtimeMs < ACTIVE_WINDOW_MS,
       threadSource: typeof meta.thread_source === 'string' ? meta.thread_source : undefined,
+      ...(typeof meta.parent_thread_id === 'string' && meta.parent_thread_id.length > 0
+        ? { parentThreadId: meta.parent_thread_id }
+        : {}),
     });
   }
 

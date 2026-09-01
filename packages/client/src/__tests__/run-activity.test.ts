@@ -45,6 +45,13 @@ describe('runActivityFromProgress', () => {
     });
   });
 
+  it('maps the failed stage (e.g. strict-resume takeover failure)', () => {
+    expect(runActivityFromProgress('failed', 'strict resume failed for agent "agent:codex-external"')).toEqual({
+      kind: 'failed',
+      label: '运行失败：strict resume failed for agent "agent:codex-external"',
+    });
+  });
+
   it('ignores runner-internal stages', () => {
     expect(runActivityFromProgress('started', 'Run started')).toBeUndefined();
     expect(runActivityFromProgress('runner_invoked', 'Invoking session')).toBeUndefined();

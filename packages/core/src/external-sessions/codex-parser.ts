@@ -77,6 +77,8 @@ interface CodexPayload {
 interface CodexLine {
   timestamp?: unknown;
   type?: unknown;
+  /** Optional top-level ordinal on rollout records (monotonic per file). */
+  ordinal?: unknown;
   payload?: CodexPayload;
 }
 
@@ -102,16 +104,29 @@ export function parseCodexSession(
   // call_id -> tool name, so tool outputs can carry a toolName.
   const toolNames = new Map<string, string>();
 
-  const pushEncrypted = (createdAt: string): void => {
+  const pushEncrypted = (createdAt: string, externalLineId?: string): void => {
     messages.push({
       kind: 'encrypted',
       speaker: AGENT_SPEAKER,
       createdAt,
       summary: ENCRYPTED_SUMMARY,
+      ...(externalLineId !== undefined ? { externalLineId } : {}),
     });
   };
 
   const lines = readFileSync(absPath, 'utf8').split('\n');
+  // Stable line-level anchor: `payload.id` when present (msg_/ctc_/fco_…),
+  // otherwise `<file-derived id>#<line ordinal>`. Both forms survive re-parses
+  // of the same file unchanged, which is what incremental refresh keys on.
+  const fallbackIdPrefix = sessionIdFromFilename(absPath);
+  let lineOrdinal = 0;
+  const lineExternalId = (payload: CodexPayload | undefined): string => {
+    if (typeof payload?.id === 'string' && payload.id.length > 0) {
+      return payload.id;
+    }
+    return `${fallbackIdPrefix}#${lineOrdinal}`;
+  };
+
   for (const rawLine of lines) {
     const line = rawLine.trim();
     if (line.length === 0) {
@@ -123,6 +138,7 @@ export function parseCodexSession(
     } catch {
       continue;
     }
+    lineOrdinal += 1;
 
     if (obj.type === 'session_meta') {
       sessionMeta = obj.payload;
@@ -161,6 +177,7 @@ export function parseCodexSession(
                 createdAt,
                 summary: summarize(b.text),
                 body: truncate(b.text, maxBodyLength),
+                externalLineId: lineExternalId(payload),
               });
             }
           } else if (payload.role === 'user') {
@@ -175,6 +192,7 @@ export function parseCodexSession(
                 createdAt,
                 summary: summarize(b.text),
                 body: truncate(b.text, maxBodyLength),
+                externalLineId: lineExternalId(payload),
               });
             }
           }
@@ -198,6 +216,7 @@ export function parseCodexSession(
           toolName: name,
           summary: `${name}(${truncate(raw, ARGS_DIGEST_MAX_LENGTH)})`,
           body: truncate(raw, maxBodyLength),
+          externalLineId: lineExternalId(payload),
         });
       } else if (
         payload.type === 'custom_tool_call_output'
@@ -210,6 +229,7 @@ export function parseCodexSession(
           createdAt,
           summary: '工具结果',
           body: truncate(output, maxBodyLength),
+          externalLineId: lineExternalId(payload),
         };
         if (typeof payload.call_id === 'string' && toolNames.has(payload.call_id)) {
           message.toolName = toolNames.get(payload.call_id);
@@ -217,9 +237,9 @@ export function parseCodexSession(
         messages.push(message);
       } else if (payload.type === 'reasoning') {
         // encrypted_content is deliberately not read.
-        pushEncrypted(createdAt);
+        pushEncrypted(createdAt, lineExternalId(payload));
       } else if (payload.type === 'compaction' || payload.type === 'agent_message') {
-        pushEncrypted(createdAt);
+        pushEncrypted(createdAt, lineExternalId(payload));
       }
       continue;
     }
@@ -238,6 +258,7 @@ export function parseCodexSession(
           speaker: AGENT_SPEAKER,
           createdAt,
           summary: 'turn 开始',
+          externalLineId: lineExternalId(payload),
         });
       } else if (payload.type === 'task_complete') {
         messages.push({
@@ -245,6 +266,7 @@ export function parseCodexSession(
           speaker: AGENT_SPEAKER,
           createdAt,
           summary: 'turn 完成',
+          externalLineId: lineExternalId(payload),
         });
       }
     }
