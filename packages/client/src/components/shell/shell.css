@@ -156,6 +156,7 @@ button, input, textarea, select { font: inherit; }
 .workspace-switcher { display: flex; align-items: center; gap: var(--space-1); position: relative; }
 .workspace-switcher__adds { display: flex; gap: 2px; }
 .workspace-switcher .icon-button { width: 26px; height: 26px; }
+.titlebar__theme-toggle { width: 26px; height: 26px; }
 
 .workspace-register,
 .workspace-manage {

@@ -8,4 +8,12 @@ contextBridge.exposeInMainWorld('agentmesa', {
   minimizeMain: () => ipcRenderer.invoke('main:minimize'),
   toggleMaximizeMain: () => ipcRenderer.invoke('main:toggle-maximize'),
   closeMain: () => ipcRenderer.invoke('main:close'),
+  setTheme: (theme: 'light' | 'dark') => ipcRenderer.invoke('theme:set', theme),
+  onThemeChanged: (callback: (theme: 'light' | 'dark') => void) => {
+    const listener = (_event: unknown, theme: 'light' | 'dark') => callback(theme);
+    ipcRenderer.on('theme:changed', listener);
+    return () => {
+      ipcRenderer.off('theme:changed', listener);
+    };
+  },
 });

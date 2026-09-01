@@ -242,6 +242,16 @@ function registerIpc() {
     else mainWindow.maximize();
   });
   ipcMain.handle('main:close', () => mainWindow?.hide());
+  // Theme relay: no state in the main process — just broadcast the choice to
+  // every renderer so main window and widget flip in the same frame. The
+  // persisting store is the renderer's localStorage (shared, file:// origin).
+  ipcMain.handle('theme:set', (_event, theme: 'light' | 'dark') => {
+    for (const window of [mainWindow, widgetWindow]) {
+      if (window && !window.isDestroyed()) {
+        window.webContents.send('theme:changed', theme);
+      }
+    }
+  });
 }
 
 function resolveStartupWorkspace(): string {
@@ -329,5 +339,6 @@ app.on('will-quit', () => {
   ipcMain.removeHandler('main:minimize');
   ipcMain.removeHandler('main:toggle-maximize');
   ipcMain.removeHandler('main:close');
+  ipcMain.removeHandler('theme:set');
   desk?.stop().catch(console.error);
 });

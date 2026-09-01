@@ -1,10 +1,16 @@
 <!doctype html>
-<html lang="zh-CN" data-theme="light">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src http://127.0.0.1:*; img-src 'self' data:; font-src 'self'" />
+    <!--
+      Theme boot: classic (parser-blocking) script so data-theme is set before
+      first paint — no FOUC, no inline-script CSP violation. Light tokens are
+      the :root default, so a missing script degrades to a stable light theme.
+    -->
+    <script src="./theme-boot.js"></script>
     <title>AgentMesa</title>
   </head>
   <body>

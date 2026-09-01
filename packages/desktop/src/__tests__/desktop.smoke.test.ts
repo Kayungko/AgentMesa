@@ -73,6 +73,50 @@ test('launches widget, expands, and opens main workspace', async () => {
     await expect(main!.locator('.titlebar .connection')).toContainText('已连接');
     await main!.screenshot({ path: join(outputDir, 'agentmesa-main-window.png') });
 
+    // --- Theme toggle: boot script set a theme attr before paint; the
+    // titlebar button flips it, the Tier 2 tokens actually change, the widget
+    // follows via the theme:set IPC broadcast, and the choice persists.
+    // Playwright reuses the userData dir across runs, so restore light at the
+    // end to keep the next run's first paint deterministic.
+    const bootTheme = await main!.evaluate(() =>
+      (globalThis as unknown as { document: PageDocument }).document.documentElement.dataset.theme);
+    expect(['light', 'dark']).toContain(bootTheme);
+    await main!.getByRole('button', { name: /主题/ }).click();
+    await expect
+      .poll(() => main!.evaluate(() =>
+        (globalThis as unknown as { document: PageDocument }).document.documentElement.dataset.theme))
+      .toBe(bootTheme === 'dark' ? 'light' : 'dark');
+    // Tier 2 token really flipped: .titlebar rides on --color-surface, which
+    // is #f6f5f4 (light) / #1f1f1f (dark).
+    const titlebarBg = await main!.evaluate(() => {
+      const g = globalThis as unknown as {
+        document: PageDocument;
+        getComputedStyle: (el: unknown) => Record<string, string>;
+      };
+      return g.getComputedStyle(g.document.querySelector('.titlebar')).backgroundColor;
+    });
+    const darkBg = 'rgb(31, 31, 31)';
+    const lightBg = 'rgb(246, 245, 244)';
+    const toggledTo = bootTheme === 'dark' ? 'light' : 'dark';
+    expect(titlebarBg).toBe(toggledTo === 'dark' ? darkBg : lightBg);
+    // The widget window followed the IPC broadcast.
+    await expect
+      .poll(() => widget.evaluate(() =>
+        (globalThis as unknown as { document: PageDocument }).document.documentElement.dataset.theme))
+      .toBe(toggledTo);
+    // Persisted for the next launch.
+    expect(await main!.evaluate(() =>
+      (globalThis as unknown as { document: PageDocument & Storage }).document.documentElement.dataset.theme
+        && (globalThis as unknown as Storage).localStorage.getItem('agentmesa.theme')))
+      .toBe(toggledTo);
+    await main!.screenshot({ path: join(outputDir, `agentmesa-main-${toggledTo}.png`) });
+    // Restore — the toggle writes localStorage, so this also unpersists.
+    await main!.getByRole('button', { name: /主题/ }).click();
+    await expect
+      .poll(() => main!.evaluate(() =>
+        (globalThis as unknown as { document: PageDocument }).document.documentElement.dataset.theme))
+      .toBe(bootTheme);
+
     // New-session is a modal now: open it, assert, close with Escape.
     console.log('verifying new-session modal');
     await main!.getByRole('button', { name: '新建会话' }).first().click();

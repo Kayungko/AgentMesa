@@ -35,6 +35,10 @@ export interface DesktopBridge {
   minimizeMain(): Promise<void>;
   toggleMaximizeMain(): Promise<void>;
   closeMain(): Promise<void>;
+  /** Broadcast the theme choice to every renderer window. */
+  setTheme(theme: 'light' | 'dark'): Promise<void>;
+  /** Subscribe to theme broadcasts; returns an unsubscribe function. */
+  onThemeChanged(callback: (theme: 'light' | 'dark') => void): () => void;
 }
 
 export interface MesaSnapshot {

@@ -152,7 +152,7 @@
 }
 .import-row > .import-row__main:hover { background: var(--color-surface-hover); }
 .import-row__top { display: flex; align-items: center; gap: 7px; min-width: 0; }
-.import-row--selected > .import-row__main { background: color-mix(in srgb, var(--color-accent, #4a7dff) 8%, transparent); }
+.import-row--selected > .import-row__main { background: var(--color-surface-selected); }
 .import-row__check {
   display: flex;
   align-items: center;
@@ -177,7 +177,7 @@
   align-items: center;
   gap: 10px;
   padding: 10px 16px;
-  border-top: 1px solid var(--color-border, rgba(128, 128, 128, 0.2));
+  border-top: 1px solid var(--color-line);
 }
 .import-batch__group {
   flex: 1;
