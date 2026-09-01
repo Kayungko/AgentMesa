@@ -7,6 +7,7 @@ import { DownloadSimple, PencilSimple, UsersThree } from '../ui/icons.js';
 import { SearchInput } from '../ui/search.js';
 import { SkeletonStack } from '../ui/skeleton.js';
 import { ConvRow, type ConvRowData } from './conv-row.js';
+import { groupConvRows } from './conv-grouping.js';
 
 export function ConversationList({
   runtime,
@@ -63,24 +64,7 @@ export function ConversationList({
 
   // 成组导入的会议按 groupName 聚合：组内最新的会议决定组头的位置，
   // 组头之后依次跟该组的成员（保持排序不变，只插入组头标记）。
-  const renderItems = useMemo<Array<
-    | { type: 'group'; name: string; key: string }
-    | { type: 'row'; row: ConvRowData; key: string }
-  >>(() => {
-    const items: Array<{ type: 'group'; name: string; key: string } | { type: 'row'; row: ConvRowData; key: string }> = [];
-    const seenGroups = new Set<string>();
-    for (const row of rows) {
-      if (row.kind === 'meeting') {
-        const groupName = row.meeting.metadata?.groupName;
-        if (typeof groupName === 'string' && groupName.length > 0 && !seenGroups.has(groupName)) {
-          seenGroups.add(groupName);
-          items.push({ type: 'group', name: groupName, key: `group:${groupName}` });
-        }
-      }
-      items.push({ type: 'row', row, key: `${row.kind}:${row.id}` });
-    }
-    return items;
-  }, [rows]);
+  const renderItems = useMemo(() => groupConvRows(rows), [rows]);
 
   return (
     <aside className="conv-list no-drag">

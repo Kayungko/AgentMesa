@@ -156,6 +156,21 @@ export class CodexAppServerDriver implements AgentDriver {
     });
   }
 
+  /**
+   * Cheap adoption precheck: spawn an app-server, handshake, run
+   * `thread/resume` (excludeTurns) against the thread id, close. Throws when
+   * the resume cannot possibly succeed (unknown thread, protocol failure,
+   * command missing); resolves otherwise. No session object is created and no
+   * state is persisted — this is a probe, not a takeover.
+   */
+  async probeResume(threadId: string, cwd: string): Promise<void> {
+    const { connection } = await this.connectAndOpenThread({ cwd }, {
+      kind: 'resume',
+      threadId,
+    });
+    await connection.close(this.closeGraceMs ?? 1500);
+  }
+
   private async connectAndOpenThread(
     init: DriverSessionInit,
     target: { kind: 'start' } | { kind: 'resume'; threadId: string }

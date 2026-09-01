@@ -405,6 +405,24 @@ export function importExternalSession(
   });
 }
 
+/** POST /api/imports/precheck 返回的接管预检结果。 */
+export interface ImportPrecheckResult {
+  source: ExternalSessionSource;
+  sessionId: string;
+  adoptable: boolean;
+  checks: Array<{ name: string; ok: boolean; detail?: string }>;
+  warnings: string[];
+}
+
+/** 接管预检：导入前探测 adopt=true 是否真的立得住（codex 实测 resume；claude 探转录文件）。 */
+export function precheckExternalSessionAdoption(
+  config: RuntimeConfig,
+  source: ExternalSessionSource,
+  sessionId: string,
+): Promise<ImportPrecheckResult> {
+  return postJson<ImportPrecheckResult>(config, '/api/imports/precheck', { source, sessionId });
+}
+
 /** 刷新已导入会议的快照：重解析源文件并替换导入的消息（用户消息保留）。 */
 export function refreshImportedMeeting(
   config: RuntimeConfig,

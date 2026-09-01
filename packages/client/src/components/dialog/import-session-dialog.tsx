@@ -1,5 +1,12 @@
-import { useCallback, useState } from 'react';
-import { importExternalSession, listExternalSessions, previewExternalSession, refreshImportedMeeting } from '../../api.js';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  importExternalSession,
+  listExternalSessions,
+  precheckExternalSessionAdoption,
+  previewExternalSession,
+  refreshImportedMeeting,
+  type ImportPrecheckResult,
+} from '../../api.js';
 import type { ExternalSessionSource, ExternalSessionSummary, ImportSessionResult, RuntimeConfig } from '../../types.js';
 import { Button } from '../ui/button.js';
 import { SkeletonStack } from '../ui/skeleton.js';
@@ -51,6 +58,9 @@ export function ImportSessionDialog({
   const [importResult, setImportResult] = useState<ImportSessionResult>();
   // 快照刷新：某条已导入会话的源文件变化后，就地重拉快照（列表内操作）。
   const [refreshingId, setRefreshingId] = useState<string>();
+  // 接管预检：勾选"接管续跑"后对当前会话跑一次 adopt 预检（预览视图内联展示）。
+  const [precheck, setPrecheck] = useState<ImportPrecheckResult>();
+  const [prechecking, setPrechecking] = useState(false);
   // 多选成组导入：勾选 ≥1 条后可批量导入并打上同一组名。
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [groupName, setGroupName] = useState('');
@@ -143,6 +153,42 @@ export function ImportSessionDialog({
       setRefreshingId(undefined);
     }
   };
+
+  // 勾选"接管续跑"即对该会话跑一次预检（claude 探转录文件，codex 实测
+  // thread/resume + 流浪进程计数）；切换会话或取消勾选时清空。
+  useEffect(() => {
+    if (!adopt || !selected) {
+      setPrecheck(undefined);
+      setPrechecking(false);
+      return;
+    }
+    let cancelled = false;
+    const sessionId = selected.sessionId;
+    const source = selected.source;
+    setPrechecking(true);
+    setPrecheck(undefined);
+    precheckExternalSessionAdoption(config, source, sessionId)
+      .then((result) => {
+        if (!cancelled) setPrecheck(result);
+      })
+      .catch((reason) => {
+        if (!cancelled) {
+          setPrecheck({
+            source,
+            sessionId,
+            adoptable: false,
+            checks: [],
+            warnings: [reason instanceof Error ? reason.message : String(reason)],
+          });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setPrechecking(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [adopt, selected?.sessionId, selected?.source, config]);
 
   const openPreview = async (session: ExternalSessionSummary) => {
     setSelected(session);
@@ -375,6 +421,32 @@ export function ImportSessionDialog({
                 <small>导入后在深度驱动模式下继续原会话（resume 外部 session）</small>
               </span>
             </label>
+            {adopt ? (
+              <div className="import-precheck">
+                {prechecking ? (
+                  <p className="ctx-hint">接管预检中——探测 resume 是否可行…</p>
+                ) : precheck ? (
+                  precheck.adoptable ? (
+                    <>
+                      <p className="import-precheck__ok">接管预检通过——resume 探测成功。</p>
+                      {precheck.warnings.map((warning, index) => (
+                        <p key={index} className="import-precheck__warn">{warning}</p>
+                      ))}
+                    </>
+                  ) : (
+                    <>
+                      <p className="import-precheck__bad">接管预检未通过——resume 可能失败，导入快照不受影响。</p>
+                      {precheck.checks.filter((check) => !check.ok).map((check, index) => (
+                        <p key={index} className="import-precheck__bad">{check.detail ?? check.name}</p>
+                      ))}
+                      {precheck.warnings.map((warning, index) => (
+                        <p key={index} className="import-precheck__warn">{warning}</p>
+                      ))}
+                    </>
+                  )
+                ) : null}
+              </div>
+            ) : null}
             <p className="ctx-hint import-preview__hint">预览最多展示前 10 条消息；导入后会生成完整时间线。</p>
             <footer>
               <Button onClick={backToList} disabled={importing}>返回</Button>

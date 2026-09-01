@@ -206,6 +206,29 @@ describe('CodexAppServerDriver session lifecycle', () => {
   }, 20000);
 });
 
+describe('CodexAppServerDriver.probeResume', () => {
+  it('handshakes, resumes the thread and closes without starting a turn', async () => {
+    const driver = makeDriver('happy');
+    await driver.probeResume('thr_probe_1', dir);
+
+    const log = readLog();
+    expect(log.some((e) => e['dir'] === 'recv' && e['method'] === 'initialize')).toBe(true);
+    const resume = log.find((e) => e['dir'] === 'recv' && e['method'] === 'thread/resume');
+    expect((resume?.['params'] as { threadId?: string })?.threadId).toBe('thr_probe_1');
+    expect((resume?.['params'] as { excludeTurns?: boolean })?.excludeTurns).toBe(true);
+    // It's a probe, not a takeover: no turn was driven.
+    expect(log.some((e) => e['dir'] === 'recv' && e['method'] === 'turn/start')).toBe(false);
+  }, 20000);
+
+  it('rejects when the app-server dies before answering the handshake', async () => {
+    const driver = new CodexAppServerDriver({
+      command: 'node -e "process.exit(1)"',
+      requestTimeoutMs: 5_000,
+    });
+    await expect(driver.probeResume('thr_x', dir)).rejects.toThrow();
+  }, 20000);
+});
+
 describe('CodexAppServerDriver event stream', () => {
   it('maps item notifications to DriverEvents and ends with turn_complete', async () => {
     const driver = makeDriver('happy');

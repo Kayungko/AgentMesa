@@ -2,11 +2,16 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { initWorkspace } from '@agentmesa/core';
 import { DeskServer } from '../server.js';
 
 const SESSION_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const NESTED_SESSION_ID = '11111111-2222-3333-4444-555555555555';
+/** Runner 包的 mock codex app-server（预检端点的 codex 实测探测用）。 */
+const MOCK_CODEX_SERVER = fileURLToPath(
+  new URL('../../../runner/src/drivers/__tests__/fixtures/mock-codex-app-server.mjs', import.meta.url),
+);
 
 let testDir: string;
 let claudeRoot: string;
@@ -375,6 +380,101 @@ describe('DeskServer external-session imports', () => {
   });
 
   // --- Snapshot freshness: imported / hasUpdates / refresh ---
+
+  it('POST /api/imports/precheck validates source and sessionId', async () => {
+    server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
+    await server.start();
+
+    const badSource = await fetch(`${baseUrl()}/api/imports/precheck`, authed({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: 'bogus', sessionId: SESSION_ID }),
+    }));
+    expect(badSource.status).toBe(400);
+
+    const badSession = await fetch(`${baseUrl()}/api/imports/precheck`, authed({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: 'claude', sessionId: '' }),
+    }));
+    expect(badSession.status).toBe(400);
+  });
+
+  it('POST /api/imports/precheck probes claude transcripts (found / missing)', async () => {
+    server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
+    await server.start();
+
+    const okRes = await fetch(`${baseUrl()}/api/imports/precheck`, authed({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: 'claude', sessionId: SESSION_ID }),
+    }));
+    const ok = (await okRes.json()) as {
+      adoptable: boolean;
+      checks: Array<{ name: string; ok: boolean }>;
+      warnings: string[];
+    };
+    expect(okRes.status).toBe(200);
+    expect(ok.adoptable).toBe(true);
+    expect(ok.checks).toEqual([{ name: 'transcript', ok: true, detail: expect.any(String) }]);
+    expect(Array.isArray(ok.warnings)).toBe(true);
+
+    const missingRes = await fetch(`${baseUrl()}/api/imports/precheck`, authed({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: 'claude', sessionId: 'no-such-session' }),
+    }));
+    const missing = (await missingRes.json()) as { adoptable: boolean };
+    expect(missingRes.status).toBe(200);
+    expect(missing.adoptable).toBe(false);
+  });
+
+  it('POST /api/imports/precheck live-probes codex resume and reports failure gracefully', async () => {
+    const prevCmd = process.env.AGENTMESA_CODEX_APP_SERVER_CMD;
+    try {
+      // 可用命令 + mock app-server：resume 探测成功。
+      process.env.AGENTMESA_CODEX_APP_SERVER_CMD = `node ${MOCK_CODEX_SERVER}`;
+      server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
+      await server.start();
+
+      const okRes = await fetch(`${baseUrl()}/api/imports/precheck`, authed({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: 'codex', sessionId: 'thr_precheck_1' }),
+      }));
+      const ok = (await okRes.json()) as {
+        adoptable: boolean;
+        checks: Array<{ name: string; ok: boolean }>;
+        warnings: string[];
+      };
+      expect(okRes.status).toBe(200);
+      expect(ok.adoptable).toBe(true);
+      expect(ok.checks.map((check) => check.name)).toEqual(['command', 'resume']);
+      expect(Array.isArray(ok.warnings)).toBe(true);
+
+      // 不可用命令：command 检查失败，端点不 5xx。
+      await server.stop();
+      process.env.AGENTMESA_CODEX_APP_SERVER_CMD = 'definitely-missing-codex-binary-xyz';
+      server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
+      await server.start();
+
+      const badRes = await fetch(`${baseUrl()}/api/imports/precheck`, authed({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: 'codex', sessionId: 'thr_precheck_2' }),
+      }));
+      const bad = (await badRes.json()) as {
+        adoptable: boolean;
+        checks: Array<{ name: string; ok: boolean }>;
+      };
+      expect(badRes.status).toBe(200);
+      expect(bad.adoptable).toBe(false);
+      expect(bad.checks).toEqual([{ name: 'command', ok: false, detail: expect.any(String) }]);
+    } finally {
+      if (prevCmd === undefined) delete process.env.AGENTMESA_CODEX_APP_SERVER_CMD;
+      else process.env.AGENTMESA_CODEX_APP_SERVER_CMD = prevCmd;
+    }
+  }, 60_000);
 
   it('POST /api/meetings/import stamps groupName into the meeting title and metadata', async () => {
     server = new DeskServer(testDir, 0, { sessionToken: 'secret' });

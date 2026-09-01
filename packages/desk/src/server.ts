@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { existsSync, mkdirSync, watch, type FSWatcher } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import { join } from 'node:path';
 import {
@@ -70,6 +71,7 @@ import {
   resolveSessionDriverRegistry,
   shouldUseSessionDriver,
   attachPermissionResponder,
+  CodexAppServerDriver,
 } from '@agentmesa/runner';
 import {
   getSetupStatus,
@@ -182,6 +184,27 @@ function sessionAgentActor(agentId: string, agent: MesaAgent | undefined): MesaA
     roles: agent?.roles ?? ['builder'],
     client: agent?.client ?? 'claude-code',
   };
+}
+
+/**
+ * Count running `codex.exe` processes (Windows only; undefined elsewhere or
+ * when tasklist fails). Resident IDE app-servers and orphans alike compete
+ * for `~/.codex` state — the count feeds the adoption-precheck warning.
+ */
+function countCodexProcesses(): number | undefined {
+  if (process.platform !== 'win32') {
+    return undefined;
+  }
+  try {
+    const output = execSync('tasklist /FI "IMAGENAME eq codex.exe" /FO CSV /NH', {
+      encoding: 'utf8',
+      timeout: 5_000,
+      windowsHide: true,
+    });
+    return output.split('\n').filter((line) => line.includes('codex.exe')).length;
+  } catch {
+    return undefined;
+  }
 }
 
 export class DeskServer {
@@ -587,6 +610,75 @@ export class DeskServer {
     return raw && raw.trim().length > 0 ? raw : undefined;
   }
 
+  /**
+   * Precheck an external session for adoption (adopt=true) BEFORE importing:
+   * codex runs a live `thread/resume` probe (spawn app-server → handshake →
+   * resume → close) plus a stray-process census; claude probes the local
+   * transcript (the same check `adoptExternalDriverSession` applies at import
+   * time). Read-only — the caller surfaces the verdict inline so a takeover
+   * that cannot hold is visible before the user commits to it.
+   */
+  private async precheckExternalAdoption(
+    source: ExternalSessionSource,
+    sessionId: string,
+  ): Promise<{
+    source: ExternalSessionSource;
+    sessionId: string;
+    adoptable: boolean;
+    checks: Array<{ name: string; ok: boolean; detail?: string }>;
+    warnings: string[];
+  }> {
+    const checks: Array<{ name: string; ok: boolean; detail?: string }> = [];
+    const warnings: string[] = [];
+
+    if (source === 'claude') {
+      const rootDir = this.importRootDir(source);
+      const filePath = rootDir === undefined ? undefined : findClaudeSessionFile(sessionId, rootDir);
+      checks.push(
+        filePath
+          ? { name: 'transcript', ok: true, detail: filePath }
+          : { name: 'transcript', ok: false, detail: '未找到本地转录文件（resume 依赖 ~/.claude/projects 下的 JSONL）' },
+      );
+      return { source, sessionId, adoptable: checks.every((check) => check.ok), checks, warnings };
+    }
+
+    // codex: stray-process census first — the probe spawns its own app-server.
+    const stray = countCodexProcesses();
+    if (stray !== undefined && stray > 0) {
+      warnings.push(
+        `检测到 ${stray} 个运行中的 codex.exe 进程——流浪 app-server 会竞争 ~/.codex 状态，可能导致 resume 挂死或失败`,
+      );
+    }
+
+    const driver = new CodexAppServerDriver({ requestTimeoutMs: 30_000 });
+    let available = false;
+    try {
+      available = await driver.isAvailable();
+    } catch {
+      available = false;
+    }
+    checks.push(
+      available
+        ? { name: 'command', ok: true, detail: 'codex app-server 可用' }
+        : { name: 'command', ok: false, detail: 'codex app-server 命令不可用（检查 PATH 或 AGENTMESA_CODEX_APP_SERVER_CMD）' },
+    );
+    if (!available) {
+      return { source, sessionId, adoptable: false, checks, warnings };
+    }
+
+    try {
+      await driver.probeResume(sessionId, this.rootDir);
+      checks.push({ name: 'resume', ok: true, detail: 'thread/resume 探测成功' });
+    } catch (error) {
+      checks.push({
+        name: 'resume',
+        ok: false,
+        detail: `thread/resume 探测失败：${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+    return { source, sessionId, adoptable: checks.every((check) => check.ok), checks, warnings };
+  }
+
   /** List external sessions defensively: a missing/unreadable root lists empty. */
   private listExternalSessions(
     source: ExternalSessionSource,
@@ -891,6 +983,21 @@ export class DeskServer {
     if (pathname === '/api/meetings') {
       const input = CreateMeetingInputSchema.parse(await this.readJsonBody(req));
       this.sendJson(res, createMeeting(writeContext, input), 201);
+      return;
+    }
+
+    // Adoption precheck: probe whether adopt=true would actually hold BEFORE
+    // importing (codex: live thread/resume probe + stray-process census;
+    // claude: local transcript probe). Read-only — nothing is persisted.
+    if (pathname === '/api/imports/precheck') {
+      const body = await this.readJsonBody(req) as { source?: unknown; sessionId?: unknown };
+      if (body.source !== 'claude' && body.source !== 'codex') {
+        throw new MesaError('VALIDATION_ERROR', 'source must be "claude" or "codex"');
+      }
+      if (typeof body.sessionId !== 'string' || body.sessionId.trim().length === 0) {
+        throw new MesaError('VALIDATION_ERROR', 'sessionId is required');
+      }
+      this.sendJson(res, await this.precheckExternalAdoption(body.source, body.sessionId));
       return;
     }
 

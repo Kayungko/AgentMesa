@@ -260,6 +260,18 @@ a new one.
   snapshot (meeting + messages) still succeeds with `201`, the response just
   reports `adopted: false` plus `adoptError`. Codex has no synchronous local
   artifact to probe, so an invalid thread id surfaces at resume time.
+- **Adoption precheck endpoint (`POST /api/imports/precheck`, Phase 3).**
+  Probe whether `adopt=true` would actually hold BEFORE importing — read-only,
+  nothing is persisted. Claude re-runs the transcript probe; codex runs a live
+  `thread/resume` probe (`CodexAppServerDriver.probeResume`: spawn app-server
+  → handshake → resume → close, no session created, no turn driven) plus a
+  stray-process census (`tasklist`-counted `codex.exe` on Windows — resident
+  IDE app-servers and orphans alike compete for `~/.codex` state, so any
+  count > 0 becomes a warning). The import dialog fires this when the user
+  ticks 接管续跑 and shows the verdict inline (通过 / 未通过 + 原因 / 流浪进程
+  警告). Verified against the real binary: an invalid thread id fails the
+  probe with the server's own error (`invalid thread id: …`), so a takeover
+  that cannot hold is visible before the user commits to it.
 - **Strict resume.** `executeDriverTurn` (and the `RunExecutorOptions` /
   `SessionRunOptions` / `ActivateSessionAgentOptions` that funnel into it)
   accepts `resumeMode: 'fallback' | 'strict'` (default `fallback`). This
@@ -390,7 +402,7 @@ type DriverPermissionResponder =
 | Real driver assembly (`drivers/index.ts`) | **Done.** `createDefaultDriverRegistry()` builds the real Claude SDK + Codex app-server drivers. |
 | Env switch + call-site wiring (`drivers/env.ts`) | **Done.** `AGENTMESA_DRIVER` gates the registry at the MCP server / orchestrator / CLI call sites; `cli` disables deep drivers. |
 | Session-run deep-driver opt-in (`AGENTMESA_SESSION_DRIVER`) | **Done.** Default `cli`; `auto` claude-family only; explicit kinds full; unregistered agent ids fall back to CLI. Speech guard on; Desk askHuman bridge wired. |
-| External-session adoption (`drivers/adopt.ts`) | **Done.** Desk import `adopt: true` seeds the sidecar handle (`adoptExternalDriverSession`) with the `adopted` marker; desk activation passes `resumeMode: 'strict'` for adopted handles (fail-loud takeover) and strict failures surface as meeting-timeline failure bubbles. Live cross-client resume behavior unverified (see the adoption section). |
+| External-session adoption (`drivers/adopt.ts`) | **Done.** Desk import `adopt: true` seeds the sidecar handle (`adoptExternalDriverSession`) with the `adopted` marker; desk activation passes `resumeMode: 'strict'` for adopted handles (fail-loud takeover) and strict failures surface as meeting-timeline failure bubbles. `POST /api/imports/precheck` probes adoption before import (codex live resume probe + stray-process census; claude transcript probe). Live cross-client resume behavior unverified (see the adoption section). |
 | Speech guard (`permission-bridge.ts`) | **Done.** `speechGuard` option: read-only-by-default meeting-speech turns for every role; gated actions escalate to the askHuman approval gate (desk approval cards) instead of hard-denying — the takeover deadlock fix (Phase 3). |
 | askHuman bridges | **Done.** Desk `PermissionApprovalQueue` + client approval cards; CLI terminal gate on `mesa runs exec`. |
 
