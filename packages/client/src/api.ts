@@ -435,15 +435,32 @@ export function precheckExternalSessionAdoption(
   return postJson<ImportPrecheckResult>(config, '/api/imports/precheck', { source, sessionId });
 }
 
-/** 刷新已导入会议的快照：重解析源文件并替换导入的消息（用户消息保留）。 */
+/** 快照刷新结果：增量模式带 diff 计数（向后兼容的可选字段）。 */
+export interface RefreshImportedMeetingResult {
+  meetingId: string;
+  messageCount: number;
+  mode?: 'incremental' | 'replace';
+  /** 本次新增条数（replace 模式 = 全部重写数）。 */
+  appendedCount?: number;
+  /** 本次删除条数（源中消失，含 codex compaction）。 */
+  removedCount?: number;
+  /** 增量请求因快照缺行锚点而降级 replace 时为 true。 */
+  degradedToReplace?: boolean;
+}
+
+/**
+ * 刷新已导入会议的快照：默认增量（已存在消息保持 id、新行追加、源中
+ * 消失的行移除）；`mode: 'replace'` 强制全量重写。用户消息始终保留。
+ */
 export function refreshImportedMeeting(
   config: RuntimeConfig,
   meetingId: string,
-): Promise<{ meetingId: string; messageCount: number }> {
-  return postJson<{ meetingId: string; messageCount: number }>(
+  options?: { mode?: 'incremental' | 'replace' },
+): Promise<RefreshImportedMeetingResult> {
+  return postJson<RefreshImportedMeetingResult>(
     config,
     `/api/meetings/${encodeURIComponent(meetingId)}/refresh`,
-    {},
+    { mode: options?.mode ?? 'incremental' },
   );
 }
 

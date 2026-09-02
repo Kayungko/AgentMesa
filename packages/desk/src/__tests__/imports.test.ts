@@ -29,32 +29,38 @@ function writeClaudeFixture(): void {
     JSON.stringify({ type: 'ai-title', aiTitle: '修登录 bug' }),
     JSON.stringify({
       type: 'user',
+      uuid: 'u-1',
       cwd: 'E:\\FakeRepo',
       timestamp: '2026-08-01T10:00:00.000Z',
       message: { content: '帮我修登录 bug' },
     }),
     JSON.stringify({
       type: 'assistant',
+      uuid: 'a-1',
       timestamp: '2026-08-01T10:00:05.000Z',
       message: { content: [{ type: 'text', text: '我来看一下 auth 模块' }] },
     }),
     JSON.stringify({
       type: 'assistant',
+      uuid: 'a-2',
       timestamp: '2026-08-01T10:00:06.000Z',
       message: { content: [{ type: 'tool_use', id: 'toolu_1', name: 'Read', input: { file_path: 'auth.ts' } }] },
     }),
     JSON.stringify({
       type: 'user',
+      uuid: 'u-2',
       timestamp: '2026-08-01T10:00:07.000Z',
       message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'export function login() {}' }] },
     }),
     JSON.stringify({
       type: 'assistant',
+      uuid: 'a-3',
       timestamp: '2026-08-01T10:00:08.000Z',
       message: { content: [{ type: 'thinking', thinking: '内部推理，不应导入' }] },
     }),
     JSON.stringify({
       type: 'assistant',
+      uuid: 'a-4',
       timestamp: '2026-08-01T10:01:00.000Z',
       message: { content: [{ type: 'text', text: '修复完成' }] },
     }),
@@ -544,6 +550,7 @@ describe('DeskServer external-session imports', () => {
       transcript,
       `${readFileSync(transcript, 'utf-8')}${JSON.stringify({
         type: 'assistant',
+        uuid: 'a-99',
         timestamp: '2026-08-01T12:00:00.000Z',
         message: { content: [{ type: 'text', text: '续跑补充回复' }] },
       })}\n`,
@@ -576,5 +583,42 @@ describe('DeskServer external-session imports', () => {
     const plainMeeting = (await created.json()) as { id: string };
     const rejected = await fetch(`${baseUrl()}/api/meetings/${plainMeeting.id}/refresh`, authed({ method: 'POST' }));
     expect(rejected.status).toBe(400);
+  });
+
+  it('POST refresh defaults to incremental and honors {"mode":"replace"}', async () => {
+    server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
+    await server.start();
+
+    const importRes = await postImport({ source: 'claude', sessionId: SESSION_ID });
+    const { meetingId } = (await importRes.json()) as ImportResponseBody;
+
+    const incremental = await fetch(`${baseUrl()}/api/meetings/${meetingId}/refresh`, authed({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    }));
+    const incrementalBody = (await incremental.json()) as { mode?: string };
+    expect(incremental.status).toBe(200);
+    expect(incrementalBody.mode).toBe('incremental');
+
+    const replace = await fetch(`${baseUrl()}/api/meetings/${meetingId}/refresh`, authed({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'replace' }),
+    }));
+    const replaceBody = (await replace.json()) as { mode?: string; appendedCount?: number };
+    expect(replace.status).toBe(200);
+    expect(replaceBody.mode).toBe('replace');
+    expect(replaceBody.appendedCount).toBe(5);
+
+    // An invalid mode value falls back to incremental (lenient parsing).
+    const fallback = await fetch(`${baseUrl()}/api/meetings/${meetingId}/refresh`, authed({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'x' }),
+    }));
+    const fallbackBody = (await fallback.json()) as { mode?: string };
+    expect(fallback.status).toBe(200);
+    expect(fallbackBody.mode).toBe('incremental');
   });
 });

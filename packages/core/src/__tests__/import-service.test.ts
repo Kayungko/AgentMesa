@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { initWorkspace } from '../workspace.js';
 import { createRuntimeContext } from '../runtime/create-runtime-context.js';
@@ -365,6 +365,261 @@ describe('refreshImportedMeeting', () => {
 
   it('rejects an unknown meeting id', () => {
     expect(() => refreshImportedMeeting(ctx, 'meeting_missing')).toThrow(/not found/);
+  });
+
+  // --- P1 incremental refresh ---
+
+  /** Import from a seeded transcript and return (meetingId, filePath). */
+  function importFromSeed(): { meetingId: string; filePath: string } {
+    const sourceDir = mkdtempSync(join(tmpdir(), 'agentmesa-incr-src-'));
+    const filePath = seedTranscript(sourceDir);
+    const parsed = parseClaudeSession(filePath);
+    const { meetingId } = importExternalSession(ctx, {
+      source: 'claude',
+      sessionId: 'session-refresh-1',
+      parsed,
+    });
+    return { meetingId, filePath };
+  }
+
+  function appendLines(filePath: string, lines: Array<Record<string, unknown>>): void {
+    writeFileSync(
+      filePath,
+      [
+        ...readFileSync(filePath, 'utf-8').split('\n').filter((line) => line !== ''),
+        ...lines.map((line) => JSON.stringify(line)),
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+    utimesSync(filePath, new Date(), new Date(Date.now() + 60_000));
+  }
+
+  function snapshotIds(meetingId: string): string[] {
+    return listMessages(ctx)
+      .filter((m) => m.meetingId === meetingId)
+      .map((m) => m.id)
+      .sort();
+  }
+
+  it('appends incrementally: existing message ids stay stable, new lines get new files', () => {
+    const { meetingId, filePath } = importFromSeed();
+    try {
+      const before = snapshotIds(meetingId);
+
+      appendLines(filePath, [
+        { type: 'user', uuid: 'u-3', timestamp: '2026-08-01T12:00:00.000Z', message: { content: 'third turn' } },
+        { type: 'assistant', uuid: 'a-3', timestamp: '2026-08-01T12:00:01.000Z', message: { content: [{ type: 'text', text: 'third answer' }] } },
+      ]);
+
+      const result = refreshImportedMeeting(ctx, meetingId);
+      expect(result.mode).toBe('incremental');
+      expect(result.appendedCount).toBe(2);
+      expect(result.removedCount).toBe(0);
+      expect(result.messageCount).toBe(4);
+
+      const after = snapshotIds(meetingId);
+      expect(after).toHaveLength(before.length + 2);
+      // Id stability is THE point of P1: every pre-existing id survives.
+      for (const id of before) {
+        expect(after).toContain(id);
+      }
+      expect(listMessages(ctx).some((m) => m.meetingId === meetingId && m.summary === 'third answer')).toBe(true);
+
+      // Exactly one new meeting_imported event carrying the diff counts.
+      const events = ctx.eventStore.list({ type: 'meeting_imported' });
+      expect(events).toHaveLength(2);
+      expect(events[1]!.data).toMatchObject({
+        meetingId,
+        refreshed: true,
+        mode: 'incremental',
+        appendedCount: 2,
+        removedCount: 0,
+      });
+    } finally {
+      rmSync(dirname(filePath), { recursive: true, force: true });
+    }
+  });
+
+  it('zero-diff refresh: no new event, anchors still move', () => {
+    const { meetingId, filePath } = importFromSeed();
+    try {
+      const first = refreshImportedMeeting(ctx, meetingId);
+      expect(first.appendedCount).toBe(0);
+      expect(first.removedCount).toBe(0);
+
+      const eventsAfterFirst = ctx.eventStore.list({ type: 'meeting_imported' });
+      const idsAfterFirst = snapshotIds(meetingId);
+
+      const second = refreshImportedMeeting(ctx, meetingId);
+      expect(second.appendedCount).toBe(0);
+      expect(second.removedCount).toBe(0);
+
+      // No event for a no-op refresh — SSE clients must not reload.
+      expect(ctx.eventStore.list({ type: 'meeting_imported' })).toHaveLength(eventsAfterFirst.length);
+      expect(snapshotIds(meetingId)).toEqual(idsAfterFirst);
+
+      const meeting = getMeeting(ctx, meetingId);
+      expect(meeting.metadata?.refreshedAt).toBeTruthy();
+    } finally {
+      rmSync(dirname(filePath), { recursive: true, force: true });
+    }
+  });
+
+  it('removes messages whose line anchor vanished from the source (compaction)', () => {
+    const { meetingId, filePath } = importFromSeed();
+    try {
+      const before = snapshotIds(meetingId);
+
+      // Rewrite the source WITHOUT the second line (a-1 vanishes).
+      writeFileSync(
+        filePath,
+        [
+          JSON.stringify({ type: 'user', uuid: 'u-1', timestamp: '2026-08-01T10:00:00.000Z', message: { content: 'first turn' } }),
+          '',
+        ].join('\n'),
+        'utf-8',
+      );
+      utimesSync(filePath, new Date(), new Date(Date.now() + 60_000));
+
+      const result = refreshImportedMeeting(ctx, meetingId);
+      expect(result.mode).toBe('incremental');
+      expect(result.removedCount).toBe(1);
+      expect(result.appendedCount).toBe(0);
+      expect(result.messageCount).toBe(1);
+
+      const after = snapshotIds(meetingId);
+      expect(after).toHaveLength(before.length - 1);
+      expect(listMessages(ctx).some((m) => m.meetingId === meetingId && m.summary === 'first answer')).toBe(false);
+      expect(listMessages(ctx).some((m) => m.meetingId === meetingId && m.summary === 'first turn')).toBe(true);
+    } finally {
+      rmSync(dirname(filePath), { recursive: true, force: true });
+    }
+  });
+
+  it('handles a mixed append+remove refresh', () => {
+    const { meetingId, filePath } = importFromSeed();
+    try {
+      writeFileSync(
+        filePath,
+        [
+          JSON.stringify({ type: 'user', uuid: 'u-1', timestamp: '2026-08-01T10:00:00.000Z', message: { content: 'first turn' } }),
+          JSON.stringify({ type: 'user', uuid: 'u-9', timestamp: '2026-08-01T13:00:00.000Z', message: { content: 'new turn' } }),
+          JSON.stringify({ type: 'assistant', uuid: 'a-9', timestamp: '2026-08-01T13:00:01.000Z', message: { content: [{ type: 'text', text: 'new answer' }] } }),
+          '',
+        ].join('\n'),
+        'utf-8',
+      );
+      utimesSync(filePath, new Date(), new Date(Date.now() + 60_000));
+
+      const result = refreshImportedMeeting(ctx, meetingId);
+      expect(result.appendedCount).toBe(2);
+      expect(result.removedCount).toBe(1);
+      expect(result.messageCount).toBe(3);
+    } finally {
+      rmSync(dirname(filePath), { recursive: true, force: true });
+    }
+  });
+
+  it('degrades to replace when the snapshot holds messages without a line anchor', () => {
+    const { meetingId, filePath } = importFromSeed();
+    try {
+      // Corrupt one snapshot message: strip its externalLineId (simulates a
+      // pre-anchor import from an older version).
+      const messages = listMessages(ctx).filter((m) => m.meetingId === meetingId);
+      const victim = messages[0]!;
+      const victimFile = join(ctx.paths.messagesDir, `${victim.id}.json`);
+      const raw = JSON.parse(readFileSync(victimFile, 'utf-8')) as { metadata: Record<string, unknown> };
+      delete raw.metadata.externalLineId;
+      writeFileSync(victimFile, JSON.stringify(raw, null, 2), 'utf-8');
+
+      // A user message authored after the import must survive the degraded replace.
+      appendMessage(ctx, { meetingId, type: 'general', summary: '用户会后追问', body: '用户会后追问' });
+
+      const before = snapshotIds(meetingId);
+      const result = refreshImportedMeeting(ctx, meetingId);
+      expect(result.mode).toBe('replace');
+      expect(result.degradedToReplace).toBe(true);
+
+      const after = snapshotIds(meetingId);
+      // Snapshot ids regenerated; the user-authored message preserved.
+      expect(after).toHaveLength(3);
+      expect(listMessages(ctx).some((m) => m.meetingId === meetingId && m.summary === '用户会后追问')).toBe(true);
+      expect(before.length).toBeGreaterThan(0);
+    } finally {
+      rmSync(dirname(filePath), { recursive: true, force: true });
+    }
+  });
+
+  it('explicit replace mode regenerates ids like P0', () => {
+    const { meetingId, filePath } = importFromSeed();
+    try {
+      const before = snapshotIds(meetingId);
+      const result = refreshImportedMeeting(ctx, meetingId, { mode: 'replace' });
+      expect(result.mode).toBe('replace');
+      expect(result.degradedToReplace).toBeUndefined();
+      expect(result.messageCount).toBe(2);
+      expect(result.appendedCount).toBe(2);
+
+      const after = snapshotIds(meetingId);
+      expect(after).toHaveLength(before.length);
+      // Full rewrite: ids do not overlap with the previous set.
+      for (const id of after) {
+        expect(before).not.toContain(id);
+      }
+
+      const events = ctx.eventStore.list({ type: 'meeting_imported' });
+      expect(events[1]!.data).toMatchObject({ refreshed: true, mode: 'replace', appendedCount: 2, removedCount: 2 });
+    } finally {
+      rmSync(dirname(filePath), { recursive: true, force: true });
+    }
+  });
+
+  it('treats duplicate externalLineIds as a multiset (occurrence pairing)', () => {
+    const sourceDir = mkdtempSync(join(tmpdir(), 'agentmesa-multi-src-'));
+    try {
+      // Two lines share the uuid 'dup-1' — each yields one message.
+      const filePath = join(sourceDir, 'session-multi.jsonl');
+      writeFileSync(
+        filePath,
+        [
+          JSON.stringify({ type: 'user', uuid: 'dup-1', timestamp: '2026-08-01T10:00:00.000Z', message: { content: 'dup first' } }),
+          JSON.stringify({ type: 'user', uuid: 'dup-1', timestamp: '2026-08-01T10:00:01.000Z', message: { content: 'dup second' } }),
+          '',
+        ].join('\n'),
+        'utf-8',
+      );
+      const parsed = parseClaudeSession(filePath);
+      const { meetingId } = importExternalSession(ctx, { source: 'claude', sessionId: 'session-multi', parsed });
+      expect(snapshotIds(meetingId)).toHaveLength(2);
+
+      // Append a THIRD line with the same uuid → exactly one new message.
+      appendLines(filePath, [
+        { type: 'user', uuid: 'dup-1', timestamp: '2026-08-01T10:00:02.000Z', message: { content: 'dup third' } },
+      ]);
+      const grown = refreshImportedMeeting(ctx, meetingId);
+      expect(grown.appendedCount).toBe(1);
+      expect(grown.removedCount).toBe(0);
+      expect(grown.messageCount).toBe(3);
+
+      // Drop back to two lines → exactly one removed, the other survivor stays.
+      writeFileSync(
+        filePath,
+        [
+          JSON.stringify({ type: 'user', uuid: 'dup-1', timestamp: '2026-08-01T10:00:00.000Z', message: { content: 'dup first' } }),
+          JSON.stringify({ type: 'user', uuid: 'dup-1', timestamp: '2026-08-01T10:00:01.000Z', message: { content: 'dup second' } }),
+          '',
+        ].join('\n'),
+        'utf-8',
+      );
+      utimesSync(filePath, new Date(), new Date(Date.now() + 60_000));
+      const shrunk = refreshImportedMeeting(ctx, meetingId);
+      expect(shrunk.appendedCount).toBe(0);
+      expect(shrunk.removedCount).toBe(1);
+      expect(shrunk.messageCount).toBe(2);
+    } finally {
+      rmSync(sourceDir, { recursive: true, force: true });
+    }
   });
 });
 

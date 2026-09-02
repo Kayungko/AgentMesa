@@ -4,10 +4,12 @@
  *
  * Performance contract: a transcript can hold thousands of entries, and
  * `appendMessage` costs a full event-log re-read + fsync + cross-process lock
- * per call. This service therefore NEVER goes through `appendMessage`. It
- * creates the meeting once (one `meeting_created` event), then writes every
- * message file directly inside a single `event_log` lock and appends exactly
- * ONE `meeting_imported` event at the end so SSE clients reload the timeline.
+ * per call. This service therefore NEVER goes through `appendMessage` — on
+ * import AND on refresh (the P1 incremental refresh appends new lines
+ * directly inside the same single-lock batch pattern). It creates the meeting
+ * once (one `meeting_created` event), then writes every message file directly
+ * inside a single `event_log` lock and appends exactly ONE `meeting_imported`
+ * event at the end so SSE clients reload the timeline.
  */
 
 import { readdirSync, unlinkSync } from 'node:fs';
@@ -165,28 +167,126 @@ export function importExternalSession(
 }
 
 // ---------------------------------------------------------------------------
-// Snapshot refresh (P0: replace-style)
+// Snapshot refresh (P1: incremental by externalLineId, replace as fallback)
 // ---------------------------------------------------------------------------
+
+export interface RefreshImportedMeetingOptions {
+  /**
+   * `'incremental'` (default): diff the parsed source against the existing
+   * snapshot by `externalLineId` (multiset) — existing messages keep their
+   * ids, new lines are appended, lines that vanished from the source (codex
+   * compaction rewrites) are removed.
+   * `'replace'`: force the P0 full rewrite (anchor-drift / repair escape
+   * hatch; also the automatic fallback when the snapshot holds messages
+   * without a line anchor).
+   */
+  mode?: 'incremental' | 'replace';
+}
 
 export interface RefreshImportedMeetingResult {
   meetingId: string;
+  /** Total snapshot messages after the refresh (P0-compatible semantics). */
   messageCount: number;
+  mode: 'incremental' | 'replace';
+  /** Messages appended by this refresh (replace mode = the full rewrite count). */
+  appendedCount: number;
+  /** Messages removed by this refresh (vanished from the source, incl. compaction). */
+  removedCount: number;
+  /** True when an incremental request fell back to replace (unanchorable snapshot). */
+  degradedToReplace?: boolean;
+}
+
+/** Minimal record extracted from an existing snapshot message file for diffing. */
+export interface SnapshotMessageRecord {
+  /** File name under messagesDir. */
+  file: string;
+  /** Line-level anchor; absent on pre-anchor imports (unanchorable). */
+  externalLineId?: string;
+  createdAt: string;
+  id: string;
+}
+
+export interface SnapshotDiff {
+  /** Source messages with no counterpart in the snapshot → write as new. */
+  appended: ExternalMessage[];
+  /** Snapshot files whose line anchor vanished from the source → delete. */
+  removedFiles: string[];
+  /** The snapshot holds messages without externalLineId → caller must replace. */
+  unanchorable: boolean;
 }
 
 /**
- * Re-import the source transcript behind an imported meeting: re-parse the
- * recorded source file, replace the imported snapshot messages (messages
- * carrying this import's provenance metadata), refresh the meeting's source
- * anchors, and append one `meeting_imported` event so SSE clients reload.
- *
- * Replace-style by design (P0): message ids are regenerated from scratch, so
- * any consumer keying on message ids sees a fresh set. Messages the user
- * authored in the meeting AFTER the import are preserved — only snapshot
- * messages (same `metadata.externalSessionId`) are replaced.
+ * Pure multiset diff between the existing snapshot and a fresh parse, keyed
+ * by `externalLineId`. `externalLineId` is NOT unique per message (a codex
+ * payload or a claude line can yield several messages sharing one anchor), so
+ * occurrences are paired by ordinal: the i-th occurrence of a key on one side
+ * matches the i-th occurrence on the other. Relies on the parsers'
+ * determinism contract (same file → same parse order, see codex-parser's
+ * line-anchor comment). No IO — safe for unit tests and the P2 watcher's
+ * dry-run checks.
+ */
+export function diffSnapshot(
+  existing: SnapshotMessageRecord[],
+  parsed: ExternalMessage[]
+): SnapshotDiff {
+  const sorted = [...existing].sort((a, b) =>
+    a.createdAt === b.createdAt ? a.id.localeCompare(b.id) : a.createdAt.localeCompare(b.createdAt)
+  );
+  if (sorted.some((record) => record.externalLineId === undefined)) {
+    return { appended: [], removedFiles: [], unanchorable: true };
+  }
+
+  const importable = parsed.filter((message) => IMPORTABLE_KINDS.has(message.kind));
+  const newCounts = new Map<string, number>();
+  for (const message of importable) {
+    const key = message.externalLineId ?? '';
+    newCounts.set(key, (newCounts.get(key) ?? 0) + 1);
+  }
+  const oldCounts = new Map<string, number>();
+  for (const record of sorted) {
+    const key = record.externalLineId!;
+    oldCounts.set(key, (oldCounts.get(key) ?? 0) + 1);
+  }
+
+  // Pair occurrences by ordinal: the i-th occurrence of a key on the new side
+  // exists on the old side iff i < oldCount(key); otherwise it is new.
+  const appended: ExternalMessage[] = [];
+  const seenNew = new Map<string, number>();
+  for (const message of importable) {
+    const key = message.externalLineId ?? '';
+    const ordinal = seenNew.get(key) ?? 0;
+    seenNew.set(key, ordinal + 1);
+    if (ordinal >= (oldCounts.get(key) ?? 0)) {
+      appended.push(message);
+    }
+  }
+
+  // Symmetrically: the i-th occurrence on the old side is stale iff the new
+  // side has no i-th occurrence of that key.
+  const removedFiles: string[] = [];
+  const seenOld = new Map<string, number>();
+  for (const record of sorted) {
+    const key = record.externalLineId!;
+    const ordinal = seenOld.get(key) ?? 0;
+    seenOld.set(key, ordinal + 1);
+    if (ordinal >= (newCounts.get(key) ?? 0)) {
+      removedFiles.push(record.file);
+    }
+  }
+
+  return { appended, removedFiles, unanchorable: false };
+}
+
+/**
+ * Re-import the source transcript behind an imported meeting. P1 default is
+ * incremental (see {@link RefreshImportedMeetingOptions}); messages the user
+ * authored in the meeting AFTER the import are preserved in every mode — only
+ * snapshot messages (same `metadata.externalSessionId`) are touched.
  */
 export function refreshImportedMeeting(
   ctx: MesaRuntimeContext,
-  meetingId: string
+  meetingId: string,
+  options?: RefreshImportedMeetingOptions
 ): RefreshImportedMeetingResult {
   const meetingFile = readJsonFromStorage<Record<string, unknown>>(
     ctx,
@@ -221,56 +321,152 @@ export function refreshImportedMeeting(
     sourceSizeBytes: parsed.summary.sizeBytes,
   };
 
-  const messageCount = withLock(ctx, 'event_log', () => {
-    // 1. Delete the previous snapshot's messages (provenance-matched only).
-    const staleFiles = collectSnapshotMessageFiles(ctx, meetingId, metadata.externalSessionId);
-    for (const file of staleFiles) {
-      try {
-        unlinkSync(join(ctx.paths.messagesDir, file));
-      } catch {
-        // Already gone — nothing to do.
-      }
+  const mode = options?.mode === 'replace' ? 'replace' : 'incremental';
+
+  return withLock(ctx, 'event_log', () => {
+    const existing = collectSnapshotMessages(ctx, meetingId, metadata.externalSessionId);
+
+    // Unanchorable snapshots (pre-anchor imports) cannot be diffed — fall
+    // back to a full replace, correctness first.
+    const diff = mode === 'incremental'
+      ? diffSnapshot(existing.map(snapshotRecordOf), parsed.messages)
+      : undefined;
+    if (diff?.unanchorable) {
+      return executeReplaceRefresh(ctx, meetingId, meetingFile, metadata, parsed.messages, {
+        degradedToReplace: true,
+      });
     }
-
-    // 2. Write the fresh snapshot.
-    let count = 0;
-    for (const message of parsed.messages) {
-      if (!IMPORTABLE_KINDS.has(message.kind)) {
-        continue;
-      }
-      const imported = buildImportedMessage(meetingId, message, metadata);
-      writeJsonToStorage(ctx, join(ctx.paths.messagesDir, `${imported.id}.json`), imported);
-      count += 1;
+    if (mode === 'replace') {
+      return executeReplaceRefresh(ctx, meetingId, meetingFile, metadata, parsed.messages, {});
     }
-
-    // 3. Refresh the meeting's source anchors (title/purpose stay untouched).
-    writeJsonToStorage(ctx, join(ctx.paths.meetingsDir, `${meetingId}.json`), {
-      ...meetingFile,
-      metadata,
-    });
-
-    // 4. One event so SSE clients reload the timeline.
-    appendMeetingImportedEvent(ctx, meetingId, metadata, count, refreshedAt, { refreshed: true });
-
-    return count;
+    return executeIncrementalRefresh(ctx, meetingId, meetingFile, metadata, existing, diff!);
   });
-
-  return { meetingId, messageCount };
 }
 
-/** Message files in the flat store belonging to this import snapshot. */
-function collectSnapshotMessageFiles(
+function executeReplaceRefresh(
+  ctx: MesaRuntimeContext,
+  meetingId: string,
+  meetingFile: Record<string, unknown>,
+  metadata: ImportMetadata,
+  messages: ExternalMessage[],
+  flags: { degradedToReplace?: boolean }
+): RefreshImportedMeetingResult {
+  // 1. Delete the previous snapshot's messages (provenance-matched only).
+  const staleFiles = collectSnapshotMessages(ctx, meetingId, metadata.externalSessionId)
+    .map((record) => record.file);
+  for (const file of staleFiles) {
+    try {
+      unlinkSync(join(ctx.paths.messagesDir, file));
+    } catch {
+      // Already gone — nothing to do.
+    }
+  }
+
+  // 2. Write the fresh snapshot (message ids regenerate from scratch).
+  let count = 0;
+  for (const message of messages) {
+    if (!IMPORTABLE_KINDS.has(message.kind)) {
+      continue;
+    }
+    const imported = buildImportedMessage(meetingId, message, metadata);
+    writeJsonToStorage(ctx, join(ctx.paths.messagesDir, `${imported.id}.json`), imported);
+    count += 1;
+  }
+
+  // 3. Refresh the meeting's source anchors (title/purpose stay untouched).
+  writeJsonToStorage(ctx, join(ctx.paths.meetingsDir, `${meetingId}.json`), {
+    ...meetingFile,
+    metadata,
+  });
+
+  // 4. One event so SSE clients reload the timeline.
+  appendMeetingImportedEvent(ctx, meetingId, metadata, count, metadata.refreshedAt!, {
+    refreshed: true,
+    mode: 'replace',
+    appendedCount: count,
+    removedCount: staleFiles.length,
+  });
+
+  return {
+    meetingId,
+    messageCount: count,
+    mode: 'replace',
+    appendedCount: count,
+    removedCount: staleFiles.length,
+    ...(flags.degradedToReplace === true ? { degradedToReplace: true } : {}),
+  };
+}
+
+function executeIncrementalRefresh(
+  ctx: MesaRuntimeContext,
+  meetingId: string,
+  meetingFile: Record<string, unknown>,
+  metadata: ImportMetadata,
+  existing: Array<{ file: string; message: Record<string, unknown> }>,
+  diff: SnapshotDiff
+): RefreshImportedMeetingResult {
+  // 1. Remove snapshot messages whose line anchor vanished from the source
+  //    (codex compaction rewrites the file — dropped lines must not linger).
+  for (const file of diff.removedFiles) {
+    try {
+      unlinkSync(join(ctx.paths.messagesDir, file));
+    } catch {
+      // Already gone — nothing to do.
+    }
+  }
+
+  // 2. Append the new lines with their source timestamps — the client sorts
+  //    by createdAt, so history lands in the right place automatically.
+  for (const message of diff.appended) {
+    const imported = buildImportedMessage(meetingId, message, metadata);
+    writeJsonToStorage(ctx, join(ctx.paths.messagesDir, `${imported.id}.json`), imported);
+  }
+
+  // 3. Refresh the anchors (also the only write on a zero-diff refresh).
+  writeJsonToStorage(ctx, join(ctx.paths.meetingsDir, `${meetingId}.json`), {
+    ...meetingFile,
+    metadata,
+  });
+
+  const messageCount = existing.length - diff.removedFiles.length + diff.appended.length;
+
+  // 4. One event ONLY when something actually changed — a zero-diff refresh
+  //    must not trigger a pointless SSE reload for every connected client.
+  if (diff.appended.length > 0 || diff.removedFiles.length > 0) {
+    appendMeetingImportedEvent(ctx, meetingId, metadata, messageCount, metadata.refreshedAt!, {
+      refreshed: true,
+      mode: 'incremental',
+      appendedCount: diff.appended.length,
+      removedCount: diff.removedFiles.length,
+    });
+  }
+
+  return {
+    meetingId,
+    messageCount,
+    mode: 'incremental',
+    appendedCount: diff.appended.length,
+    removedCount: diff.removedFiles.length,
+  };
+}
+
+/**
+ * Snapshot message files (provenance-matched) with their parsed records —
+ * one pass for both the replace path (file names) and the incremental path
+ * (anchors for diffing).
+ */
+function collectSnapshotMessages(
   ctx: MesaRuntimeContext,
   meetingId: string,
   externalSessionId: string | undefined
-): string[] {
+): Array<{ file: string; message: Record<string, unknown> }> {
   let files: string[];
   try {
     files = readdirSync(ctx.paths.messagesDir);
   } catch {
     return [];
   }
-  const stale: string[] = [];
+  const snapshot: Array<{ file: string; message: Record<string, unknown> }> = [];
   for (const file of files) {
     if (!file.endsWith('.json')) {
       continue;
@@ -289,9 +485,27 @@ function collectSnapshotMessageFiles(
     if (externalSessionId !== undefined && meta.externalSessionId !== externalSessionId) {
       continue; // different import's snapshot
     }
-    stale.push(file);
+    if (message) {
+      snapshot.push({ file, message });
+    }
   }
-  return stale;
+  return snapshot;
+}
+
+/** Extract the diffable record shape from a collected snapshot message. */
+export function snapshotRecordOf(
+  entry: { file: string; message: Record<string, unknown> }
+): SnapshotMessageRecord {
+  // `externalLineId` is stamped by buildImportedMessage on top of the shared
+  // ImportMetadata shape, so read it defensively from the raw record.
+  const meta = entry.message.metadata as (Partial<ImportMetadata> & { externalLineId?: unknown }) | undefined;
+  const lineId = meta?.externalLineId;
+  return {
+    file: entry.file,
+    id: String(entry.message.id ?? ''),
+    createdAt: String(entry.message.createdAt ?? ''),
+    ...(typeof lineId === 'string' && lineId.length > 0 ? { externalLineId: lineId } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -359,7 +573,12 @@ function appendMeetingImportedEvent(
   metadata: ImportMetadata,
   messageCount: number,
   timestamp: string,
-  extra?: { refreshed?: boolean }
+  extra?: {
+    refreshed?: boolean;
+    mode?: 'incremental' | 'replace';
+    appendedCount?: number;
+    removedCount?: number;
+  }
 ): void {
   // Bypass appendRuntimeEvent (it would re-acquire the event_log lock the
   // caller already holds) — mirror its append shape exactly instead.
@@ -378,6 +597,9 @@ function appendMeetingImportedEvent(
         externalSessionId: metadata.externalSessionId,
         messageCount,
         ...(extra?.refreshed === true ? { refreshed: true } : {}),
+        ...(extra?.mode !== undefined ? { mode: extra.mode } : {}),
+        ...(extra?.appendedCount !== undefined ? { appendedCount: extra.appendedCount } : {}),
+        ...(extra?.removedCount !== undefined ? { removedCount: extra.removedCount } : {}),
       },
       actor: ctx.actor.id,
       sequence,
@@ -405,8 +627,10 @@ function buildImportedMessage(
     createdAt: message.createdAt,
     metadata: {
       ...metadata,
-      // Line-level anchor: survives re-imports so P1 incremental refresh can
-      // diff on it (codex payload.id / claude line uuid).
+      // Line-level anchor (codex payload.id / claude line uuid): the key the
+      // incremental refresh diffs on. NOT unique per message — one source
+      // line can yield several messages sharing it, so the diff treats it as
+      // a multiset (see diffSnapshot).
       ...(message.externalLineId !== undefined
         ? { externalLineId: message.externalLineId }
         : {}),

@@ -1123,11 +1123,25 @@ export class DeskServer {
       return;
     }
 
-    // Snapshot refresh: re-parse the recorded source transcript and replace
-    // the imported snapshot (user-authored meeting messages are preserved).
+    // Snapshot refresh (P1 incremental by default): re-parse the recorded
+    // source transcript and sync the imported snapshot — existing messages
+    // keep their ids, new lines are appended, vanished lines removed.
+    // `{"mode":"replace"}` forces the P0 full rewrite (repair escape hatch).
+    // The client posts `{}`; an empty body also means incremental.
     const meetingRefreshMatch = pathname.match(/^\/api\/meetings\/([^/]+)\/refresh$/);
     if (meetingRefreshMatch) {
-      const result = refreshImportedMeeting(writeContext, decodeURIComponent(meetingRefreshMatch[1]!));
+      let mode: 'incremental' | 'replace' = 'incremental';
+      try {
+        const body = (await this.readJsonBody(req)) as { mode?: unknown };
+        if (body?.mode === 'replace') mode = 'replace';
+      } catch {
+        // Empty body — keep the default.
+      }
+      const result = refreshImportedMeeting(
+        writeContext,
+        decodeURIComponent(meetingRefreshMatch[1]!),
+        { mode },
+      );
       this.sendJson(res, result);
       return;
     }

@@ -47,6 +47,8 @@ export function ImportSessionDialog({
   const [sessions, setSessions] = useState<ExternalSessionSummary[]>([]);
   const [listLoading, setListLoading] = useState(false);
   const [listError, setListError] = useState<string>();
+  /** 刷新快照后的同步结果提示（新增/移除计数）。 */
+  const [notice, setNotice] = useState<string>();
   const [selected, setSelected] = useState<ExternalSessionSummary>();
   const [preview, setPreview] = useState<NormalizedPreviewItem[]>();
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -142,7 +144,15 @@ export function ImportSessionDialog({
     setRefreshingId(session.sessionId);
     setListError(undefined);
     try {
-      await refreshImportedMeeting(config, session.imported.meetingId);
+      const result = await refreshImportedMeeting(config, session.imported.meetingId);
+      // 增量结果对用户可见：新增/移除计数（降级 replace 时说明原因）。
+      if (result.mode === 'incremental' && (result.appendedCount ?? 0) + (result.removedCount ?? 0) > 0) {
+        setNotice(`已同步：新增 ${result.appendedCount ?? 0} 条，移除 ${result.removedCount ?? 0} 条`);
+      } else if (result.degradedToReplace) {
+        setNotice('快照缺行锚点，已全量重建');
+      } else {
+        setNotice('已是最新，无变化');
+      }
       // 重新拉取列表：刷新后源锚点对齐，hasUpdates 徽标消失。
       if (source) {
         await loadSessions(source, includeSubagents);
@@ -279,6 +289,7 @@ export function ImportSessionDialog({
               <button type="button" className="import-back" onClick={backToSource}>切换来源</button>
             </div>
             <div className="import-list">
+              {notice ? <p className="import-empty">{notice}</p> : null}
               {listLoading ? (
                 <SkeletonStack count={3} compact />
               ) : listError ? (
