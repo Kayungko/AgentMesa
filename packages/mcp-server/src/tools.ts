@@ -39,6 +39,7 @@ import {
   getArtifact,
   explainTask,
   explainMeeting,
+  runAllDiagnostics,
   assertPolicy,
   MesaError,
   REMOTE_WORKSPACE_ID,
@@ -52,7 +53,7 @@ import {
   shouldUseSessionDriver,
   attachPermissionResponder,
 } from '@agentmesa/runner';
-import type { MesaActor } from '@agentmesa/core';
+import type { DiagnosticFinding, MesaActor } from '@agentmesa/core';
 import {
   WorkflowEngine,
   getWorkflowDefinition,
@@ -1398,4 +1399,104 @@ export async function handleImportCiResults(
     rethrowConnectorError('mesa_import_ci_results', error);
   }
   return JSON.stringify(result);
+}
+
+// --- Ops / diagnostics tools (read-only) ---
+
+export const doctorInputSchema = {};
+
+export const getEventsInputSchema = {
+  streamId: z.string().optional(),
+  type: z.string().optional(),
+  limit: z.number().int().min(1).optional(),
+};
+
+const DEFAULT_EVENTS_LIMIT = 50;
+const MAX_EVENTS_LIMIT = 500;
+const DATA_SUMMARY_MAX_LENGTH = 200;
+
+/**
+ * mesa_doctor: run the full diagnostics suite (event log validity, projection
+ * consistency, transport envelopes, agent run consistency, orphaned locks) and
+ * return a summary plus findings grouped by severity. Strictly read-only —
+ * the fixable findings tell the operator to run `mesa rebuild` / `mesa doctor
+ * --fix` on the CLI; this tool never applies any fix itself.
+ */
+export function handleDoctor(ctx: MesaRuntimeContext): string {
+  const findings = runAllDiagnostics(ctx);
+  const byLevel: Record<DiagnosticFinding['level'], DiagnosticFinding[]> = {
+    error: [],
+    warn: [],
+    ok: [],
+  };
+  for (const finding of findings) {
+    byLevel[finding.level].push(finding);
+  }
+  return JSON.stringify({
+    summary: {
+      total: findings.length,
+      ok: byLevel.ok.length,
+      warn: byLevel.warn.length,
+      error: byLevel.error.length,
+    },
+    // Severity first: a caller scanning the top of the response sees the
+    // actionable findings before the all-clear ones.
+    findings: {
+      error: byLevel.error,
+      warn: byLevel.warn,
+      ok: byLevel.ok,
+    },
+  });
+}
+
+/**
+ * mesa_get_events: bounded, compact view over the event stream for
+ * operational inspection. Unlike mesa_list_events (full event objects,
+ * unbounded) this returns the most recent `limit` events as one-line
+ * summaries plus a total count, so a large workspace cannot blow up the
+ * caller's context.
+ */
+export function handleGetEvents(
+  ctx: MesaRuntimeContext,
+  args: { streamId?: string; type?: string; limit?: number }
+): string {
+  // A typo'd type would otherwise filter to a silent empty list.
+  if (args.type !== undefined) {
+    assertEnumParam('type', args.type, EVENT_TYPES);
+  }
+  // Clamp instead of reject: an over-large limit expresses a paging intent,
+  // not a caller error — the effective limit is echoed back in the response.
+  const limit = Math.min(args.limit ?? DEFAULT_EVENTS_LIMIT, MAX_EVENTS_LIMIT);
+  const matching = listEvents(ctx, {
+    streamId: args.streamId,
+    type: args.type as MesaEvent['type'] | undefined,
+  });
+  // Tail window: operational queries care about what happened lately; the
+  // head of a long stream is rarely the interesting part.
+  const events = matching.slice(-limit);
+  return JSON.stringify({
+    total: matching.length,
+    returned: events.length,
+    limit,
+    truncated: matching.length > events.length,
+    events: events.map((event) => ({
+      id: event.id,
+      type: event.type,
+      actor: event.actor,
+      timestamp: event.timestamp,
+      streamId: event.streamId,
+      streamType: event.streamType,
+      sequence: event.sequence,
+      dataSummary: summarizeEventData(event.data),
+    })),
+  });
+}
+
+/** Compact one-line event payload summary; empty string for payload-less events. */
+function summarizeEventData(data: Record<string, unknown>): string {
+  if (Object.keys(data).length === 0) return '';
+  const json = JSON.stringify(data);
+  return json.length > DATA_SUMMARY_MAX_LENGTH
+    ? `${json.slice(0, DATA_SUMMARY_MAX_LENGTH)}…`
+    : json;
 }

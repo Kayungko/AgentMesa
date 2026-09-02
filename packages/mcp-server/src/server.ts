@@ -50,6 +50,10 @@ import {
   sendRoomMessageInputSchema,
   listRoomMessagesInputSchema,
   pollRoomsInputSchema,
+  doctorInputSchema,
+  getEventsInputSchema,
+  handleDoctor,
+  handleGetEvents,
   handleCreateRoom,
   handleListRooms,
   handleInviteToRoom,
@@ -430,6 +434,17 @@ export function createMcpServer(rootDir: string, options?: McpServerOptions): Mc
     description: 'Poll all Rooms the calling member belongs to: new messages per room since a cursor (message id), plus each room\'s current cursor. Pass cursors per roomId to read incrementally; omit for a summary plus the latest message.',
     inputSchema: pollRoomsInputSchema,
   }, handlePollRooms);
+
+  // Ops / diagnostics tools (read-only)
+  register('mesa_doctor', {
+    description: 'Run read-only workspace diagnostics (event log validity, projection consistency, transport envelopes, agent run consistency, orphaned locks) and report a summary plus findings grouped by severity — never modifies any state',
+    inputSchema: doctorInputSchema,
+  }, handleDoctor);
+
+  register('mesa_get_events', {
+    description: 'Query the event stream (read-only): the most recent events as compact summaries (id/type/actor/timestamp/data digest), optionally filtered by stream or event type; limit defaults to 50 and is capped at 500',
+    inputSchema: getEventsInputSchema,
+  }, handleGetEvents);
 
   return server;
 }

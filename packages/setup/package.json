@@ -28,7 +28,8 @@
     "@agentmesa/core": "workspace:*",
     "@agentmesa/mcp-server": "workspace:*",
     "@agentmesa/plugin-claude": "workspace:*",
-    "@agentmesa/plugin-codex": "workspace:*"
+    "@agentmesa/plugin-codex": "workspace:*",
+    "@agentmesa/protocol": "workspace:*"
   },
   "devDependencies": {
     "tsup": "^8.3.5",

@@ -4,6 +4,7 @@ import {
   listAgentReadModels,
   getAgentReadModel,
 } from '@agentmesa/core';
+import { installAgentProfile, listAgentProfiles } from '@agentmesa/setup';
 import type { AgentRole } from '@agentmesa/protocol';
 import type { ParsedArgs } from '../parse-args.js';
 import { printSuccess, printError, outputResult } from '../output.js';
@@ -60,6 +61,38 @@ export function runAgent(args: ParsedArgs): void {
         return;
       }
 
+      case 'install': {
+        const profileName = args.positional[0];
+        if (!profileName) {
+          console.log('Usage: mesa agent install <profile> [--project <dir>] [--mcp]');
+          console.log(`  Profiles: ${listAgentProfiles().map((p) => p.name).join(', ')}`);
+          console.log('  Example: mesa agent install claude --mcp');
+          return;
+        }
+        const project = args.flags['project'];
+        const result = installAgentProfile(ctx, profileName, {
+          ...(typeof project === 'string' ? { projectDir: project } : {}),
+          mcp: args.flags['mcp'] === true,
+        });
+        outputResult(result, json, () => {
+          const state = result.registered ? 'Registered' : 'Already registered';
+          printSuccess(`Installed profile "${result.profile}" — ${state}: ${result.agentId}`);
+          console.log(`  Project files (${result.filesWritten.length}):`);
+          for (const file of result.filesWritten) {
+            console.log(`    ${file}`);
+          }
+          if (result.mcpInstalled) {
+            printSuccess(`MCP server registered with ${result.profile} (user scope)`);
+          } else if (result.mcpError) {
+            printError(`MCP registration failed: ${result.mcpError}`);
+          }
+        });
+        if (result.mcpError) {
+          process.exitCode = 1;
+        }
+        return;
+      }
+
       case 'show': {
         const agentId = args.positional[0];
         if (!agentId) {
@@ -80,6 +113,9 @@ export function runAgent(args: ParsedArgs): void {
         console.log('');
         console.log('Subcommands:');
         console.log('  add <id> <name> [roles]   Register an agent');
+        console.log('  install <profile>         Install a built-in agent profile');
+        console.log('                 --project <dir>  Write project files into <dir> (default: cwd)');
+        console.log('                 --mcp            Also register the MCP server (user scope)');
         console.log('  list                      List all agents');
         console.log('  show <id>                 Show agent details');
     }

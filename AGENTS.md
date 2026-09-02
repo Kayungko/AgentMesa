@@ -28,6 +28,12 @@ local event log.
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Historical phase roadmap (implementation stages). |
 | [docs/RELEASE_PLAN.md](docs/RELEASE_PLAN.md) | Release staging, including Release 1.1–1.3 (M1–M3) and the 1.x universal-collaboration acceptance scenario. |
 
+### Onboarding (external agents)
+
+| Doc | Purpose |
+|---|---|
+| [docs/AGENT_ONBOARDING.md](docs/AGENT_ONBOARDING.md) | Single entry guide for external AI agents and their configurators: MCP (stdio/HTTP), CLI, and deep-driving integration levels. |
+
 ### Architecture & domain (read before touching code)
 
 | Doc | Purpose |

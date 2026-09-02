@@ -27,6 +27,7 @@ import { runDoctor } from '../commands/doctor.js';
 import { runChecks } from '../commands/checks.js';
 import { runGithub } from '../commands/github.js';
 import { runPlugin } from '../commands/plugin.js';
+import { runAgent } from '../commands/agent.js';
 import type { ParsedArgs } from '../parse-args.js';
 
 let testDir: string;
@@ -1009,6 +1010,84 @@ describe('CLI github commands', () => {
         logSpy.mockRestore();
       }
     });
+  });
+});
+
+describe('CLI agent install', () => {
+  function runInstallInCwd(positional: string[], flags: Record<string, string | boolean> = {}): void {
+    const origCwd = process.cwd;
+    process.cwd = () => testDir;
+    try {
+      runAgent({ command: 'agent', subcommand: 'install', positional, flags });
+    } finally {
+      process.cwd = origCwd;
+    }
+  }
+
+  it('installs the claude profile into the cwd workspace as JSON', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      runInstallInCwd(['claude'], { json: true });
+      const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+      const parsed = JSON.parse(stdout) as {
+        profile: string;
+        agentId: string;
+        registered: boolean;
+        filesWritten: string[];
+        mcpInstalled: boolean;
+      };
+      expect(parsed.profile).toBe('claude');
+      expect(parsed.agentId).toBe('agent:claude');
+      expect(parsed.registered).toBe(true);
+      expect(parsed.mcpInstalled).toBe(false);
+      expect(parsed.filesWritten.some((file) => file.endsWith('CLAUDE.md'))).toBe(true);
+
+      const agents = listAgents(ctx);
+      expect(agents.some((a) => a.id === 'agent:claude')).toBe(true);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it('is idempotent — a second install reports an already-registered agent', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      runInstallInCwd(['codex'], { json: true });
+      runInstallInCwd(['codex'], { json: true });
+      const lines = logSpy.mock.calls.map((c) => c.join(' ')).filter((l) => l.trimStart().startsWith('{'));
+      const parsed = JSON.parse(lines[lines.length - 1]!) as { registered: boolean };
+      expect(parsed.registered).toBe(false);
+      expect(listAgents(ctx)).toHaveLength(1);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it('prints usage when the profile name is missing', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      runInstallInCwd([]);
+      const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+      expect(stdout).toContain('Usage: mesa agent install');
+      expect(stdout).toContain('claude');
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it('sets exitCode=1 for an unknown profile', () => {
+    const prevExitCode = process.exitCode;
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.exitCode = 0;
+    try {
+      runInstallInCwd(['cursor']);
+      expect(process.exitCode).toBe(1);
+      const stderr = errorSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+      expect(stderr).toContain('Unknown agent profile');
+    } finally {
+      process.exitCode = prevExitCode;
+      errorSpy.mockRestore();
+    }
   });
 });
 

@@ -363,6 +363,9 @@ importers:
       '@agentmesa/plugin-codex':
         specifier: workspace:*
         version: link:../../plugins/codex
+      '@agentmesa/protocol':
+        specifier: workspace:*
+        version: link:../protocol
     devDependencies:
       tsup:
         specifier: ^8.3.5
