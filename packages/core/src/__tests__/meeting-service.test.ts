@@ -163,14 +163,25 @@ describe('meeting service', () => {
     expect(events.map((event) => event.type)).not.toContain('meeting_trust_level_changed');
   });
 
-  it('denies trust level changes for actors without manage_meetings', () => {
+  it('denies trust level changes for actors without manage_trust_level', () => {
+    // The capability is deliberately split out of manage_meetings: changing a
+    // meeting's trust level alters what other permissions mean, so only
+    // owner/admin may do it (2026-09-03 hardening).
     const meeting = createMeeting(ctx, { title: 'Guarded' });
     const documenterCtx = createRuntimeContext({
       rootDir: testDir,
       actor: { id: 'agent:doc', type: 'agent', roles: ['documenter'] },
     });
+    const builderCtx = createRuntimeContext({
+      rootDir: testDir,
+      actor: { id: 'agent:build', type: 'agent', roles: ['builder'] },
+    });
 
     expect(() => updateMeetingTrustLevel(documenterCtx, meeting.id, 'trusted')).toThrow();
+    // builder keeps manage_meetings (it can still create/update meetings)
+    // but must NOT be able to flip the trust level.
+    expect(() => updateMeetingTrustLevel(builderCtx, meeting.id, 'trusted')).toThrow();
+    expect(() => updateMeetingStatus(builderCtx, meeting.id, 'active')).not.toThrow();
   });
 
   it('rejects meeting mutation denied by policy', () => {

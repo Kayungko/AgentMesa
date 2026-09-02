@@ -150,19 +150,32 @@ stay transport-agnostic.
 - Sessions are stateful: the server assigns an `mcp-session-id` at `initialize` and routes every subsequent request to that session's transport + server pair.
 
 **Per-connection actor binding.** Each session owns its own `McpServer`
-instance whose actor is read from the connection's headers at initialize
-time — never the shared env-derived actor that stdio uses:
+instance whose actor is adjudicated at initialize time — never the shared
+env-derived actor that stdio uses:
 
 - `x-agentmesa-actor-id` — the actor id (e.g. `agent:codex`). Omitted: a
   connection-scoped fallback `agent:http-<sessionId prefix>`, unique per
   connection.
-- `x-agentmesa-actor-roles` — comma-separated roles, validated against the
-  protocol role enum. Omitted: `builder`, the same least-privilege default as
-  stdio.
+- `x-agentmesa-actor-roles` — **not trusted.** Roles are adjudicated
+  server-side from the agent registry (2026-09-03 hardening): a registered
+  id gets its registered roles; an unregistered id is downgraded to
+  `read_only`. Garbage values in the header still fail loudly with a 400,
+  but valid-looking values are ignored. The initialize response's
+  `instructions` field tells the client which identity and roles it actually
+  got, and how to bootstrap (self-register) if downgraded.
+
+Migration for clients that previously relied on header-declared roles: have
+the operator pre-register the client's actor id
+(`mesa agent add <id> <name> <roles...>`), or connect once and call
+`mesa_register_agent` to self-register under non-privileged roles, then
+reconnect. There is no header-trust escape hatch by design.
 
 Because room tools normalize the actor id to a member ref, a remote agent
 connecting as `agent:remote-bot` can only speak as `remote-bot` — the M1
-anti-spoofing rules hold unchanged over HTTP.
+anti-spoofing rules hold unchanged over HTTP. (Note: the actor id itself
+remains connection-declared; the registry adjudication bounds what it can
+DO, and per-member credentials remain the follow-up for strong identity
+guarantees — see SECURITY.md.)
 
 **Remote member registration.** `mesa_register_remote_member` registers a
 remote agent in the agent registry (`client: "remote"`, optional
@@ -287,7 +300,7 @@ Each transport enforces its own security boundary:
 | File | OS file permissions on `.agentmesa/`. An agent must have read/write access to the project directory. |
 | MCP | Local-only by default. The MCP server runs on stdio and has the same filesystem access as the calling process. |
 | HTTP | Auth required. A local token in `.agentmesa/config.json` must be included in the `Authorization` header. |
-| MCP streamable HTTP | Loopback (`127.0.0.1`) by default. Non-loopback binds refuse to start without a token; with one, every request must carry `Authorization: Bearer <token>`. Each connection binds its own actor from initialize-time headers — never a shared env-derived actor. |
+| MCP streamable HTTP | Loopback (`127.0.0.1`) by default. Non-loopback binds refuse to start without a token; with one, every request must carry `Authorization: Bearer <token>`. Each connection's actor id comes from initialize-time headers but its ROLES are adjudicated server-side from the agent registry (unregistered ids are read-only). |
 | WebSocket | Auth required. Same local token mechanism as HTTP. |
 | GitHub | Webhook signature verification. The GitHub App validates HMAC signatures against the configured secret. |
 | CI | Token-based. The CI provider receives a one-time write token scoped to the specific pipeline run. |

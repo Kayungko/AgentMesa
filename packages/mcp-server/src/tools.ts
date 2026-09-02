@@ -15,6 +15,9 @@ import {
   createMeeting,
   listMeetings,
   registerAgent,
+  selfRegisterAgent,
+  actorRefOf,
+  PRIVILEGED_REGISTRATION_ROLES,
   listAgents,
   createAgentRun,
   getAgentRun,
@@ -506,9 +509,8 @@ function roomStore() {
  * ref 是 "codex"。取第一个冒号后的部分；不含冒号的裸 id（如 "user"）原样返回。
  */
 function actorRefFor(ctx: MesaRuntimeContext): string {
-  const id = ctx.actor.id;
-  const idx = id.indexOf(':');
-  return idx === -1 ? id : id.slice(idx + 1);
+  // Single source of truth lives in core (`actorRefOf`).
+  return actorRefOf(ctx.actor.id);
 }
 
 function resolveMemberLabel(
@@ -718,6 +720,25 @@ export function handlePollRooms(
   return JSON.stringify({ ref: args.ref, rooms });
 }
 
+/**
+ * Privileged roles may only be granted by an owner/admin actor. Used by both
+ * registration tools — a builder-level actor (including a self-declared HTTP
+ * session before server-side adjudication) must not be able to mint
+ * owner/admin/chair/maintainer/system agents.
+ */
+function assertRegistrableRoles(ctx: MesaRuntimeContext, roles: readonly string[]): void {
+  if (roles.some((role) => PRIVILEGED_REGISTRATION_ROLES.has(role))) {
+    const canGrant = ctx.actor.roles.some((role) => role === 'owner' || role === 'admin');
+    if (!canGrant) {
+      throw toolError(
+        'permission_denied',
+        `registering an agent with privileged roles (${roles.filter((r) => PRIVILEGED_REGISTRATION_ROLES.has(r)).join(', ')})`,
+        'privileged roles (owner, admin, chair, maintainer, system) may only be granted by an owner/admin actor — run "mesa agent add <id> <name> <roles...>" as the workspace operator, or reconnect with an owner/admin actor',
+      );
+    }
+  }
+}
+
 export function handleRegisterAgent(
   ctx: MesaRuntimeContext,
   args: { id: string; name: string; client: string; roles: string[] }
@@ -725,6 +746,23 @@ export function handleRegisterAgent(
   for (const role of args.roles) {
     assertEnumParam('roles', role, AGENT_ROLE_VALUES);
   }
+  // Self-registration bootstrap: an actor registering ITS OWN id under
+  // non-privileged roles goes through the structural selfRegisterAgent
+  // channel — no manage_agents capability needed (that is what lets a
+  // read-only downgraded HTTP session bootstrap itself). Anything else is a
+  // third-party registration and needs the manage_agents capability.
+  if (actorRefOf(args.id) === actorRefOf(ctx.actor.id)) {
+    const agent = selfRegisterAgent(ctx, {
+      id: args.id,
+      name: args.name,
+      client: args.client,
+      status: 'available',
+      roles: args.roles as AgentRole[],
+    });
+    return JSON.stringify(agent);
+  }
+  assertPolicy(ctx, 'agent.register', `agent:${args.id}`);
+  assertRegistrableRoles(ctx, args.roles);
   const agent = registerAgent(ctx, {
     id: args.id,
     name: args.name,
@@ -763,12 +801,16 @@ export function handleRegisterRemoteMember(
   },
 ): string {
   assertPolicy(ctx, 'agent.register', `agent:${args.id}`);
+  const requestedRoles = args.roles && args.roles.length > 0 ? args.roles : ['builder'];
+  // Same privileged-role fence as handleRegisterAgent — a builder-level actor
+  // must not mint owner/admin remote members either.
+  assertRegistrableRoles(ctx, requestedRoles);
   const agent = registerAgent(ctx, {
     id: args.id,
     name: args.name,
     client: 'remote',
     status: 'available',
-    roles: args.roles && args.roles.length > 0 ? args.roles : ['builder'],
+    roles: requestedRoles,
     ...(args.endpoint ? { metadata: { endpoint: args.endpoint } } : {}),
   });
 

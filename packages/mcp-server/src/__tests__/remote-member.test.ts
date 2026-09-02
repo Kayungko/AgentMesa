@@ -53,6 +53,19 @@ describe('handleRegisterRemoteMember', () => {
     expect(agents.some((a) => a.id === 'remote-bot')).toBe(true);
   });
 
+  it('denies a builder registering a remote member with privileged roles', () => {
+    // Same privileged-role fence as handleRegisterAgent: a builder-level
+    // actor must not be able to mint an owner/admin remote member (2026-09-03
+    // hardening — see docs/SECURITY.md HTTP identity boundary).
+    expect(() =>
+      handleRegisterRemoteMember(ctx, {
+        id: 'remote-kingpin',
+        name: 'Remote Kingpin',
+        roles: ['owner'],
+      })
+    ).toThrow(/privileged/);
+  });
+
   it('defaults roles to builder when omitted', () => {
     const result = JSON.parse(handleRegisterRemoteMember(ctx, {
       id: 'remote-bot',

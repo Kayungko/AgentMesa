@@ -139,6 +139,17 @@ describe('RoleBasedPolicyEngine', () => {
     expect(policy.can(actor({ roles: ['builder'] }), 'meeting.create', 'm1').allowed).toBe(true);
   });
 
+  it('restricts meeting.updateTrustLevel to owner and admin only', () => {
+    // Trust-level changes alter what OTHER permissions mean (the trusted
+    // posture lets role capabilities judge writes without approval cards),
+    // so the capability is deliberately split out of manage_meetings.
+    expect(policy.can(actor({ roles: ['owner'] }), 'meeting.updateTrustLevel', 'm1').allowed).toBe(true);
+    expect(policy.can(actor({ roles: ['admin'] }), 'meeting.updateTrustLevel', 'm1').allowed).toBe(true);
+    expect(policy.can(actor({ roles: ['builder'] }), 'meeting.updateTrustLevel', 'm1').allowed).toBe(false);
+    expect(policy.can(actor({ roles: ['chair'] }), 'meeting.updateTrustLevel', 'm1').allowed).toBe(false);
+    expect(policy.can(actor({ roles: ['maintainer'] }), 'meeting.updateTrustLevel', 'm1').allowed).toBe(false);
+  });
+
   it('allows maintainer to do everything', () => {
     const m = actor({ roles: ['maintainer'] });
     expect(policy.can(m, 'task.create', 't1').allowed).toBe(true);

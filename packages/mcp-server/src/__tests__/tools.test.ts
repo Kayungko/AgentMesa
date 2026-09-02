@@ -393,6 +393,95 @@ describe('handleRegisterAgent', () => {
     expect(result.client).toBe('claude-code');
     expect(result.roles).toEqual(['builder', 'planner']);
   });
+
+  function ctxAs(actorId: string, roles: string[]): MesaRuntimeContext {
+    return createRuntimeContext({
+      rootDir: testDir,
+      actor: { id: actorId, type: 'agent', roles: roles as MesaRuntimeContext['actor']['roles'], client: 'mcp-http' },
+    });
+  }
+
+  it('lets a builder register third-party agents with non-privileged roles (out-of-the-box path)', () => {
+    const result = parse<MesaAgent>(
+      handleRegisterAgent(ctxAs('agent:mcp', ['builder']), {
+        id: 'agent:codex',
+        name: 'Codex',
+        client: 'codex',
+        roles: ['reviewer'],
+      })
+    );
+    expect(result.roles).toEqual(['reviewer']);
+  });
+
+  it('routes self-registration through the bootstrap channel (no manage_agents needed)', () => {
+    // A read-only downgraded HTTP session registering its own id — this is
+    // the bootstrap path that keeps first-time connections usable.
+    const result = parse<MesaAgent>(
+      handleRegisterAgent(ctxAs('agent:remote-bot', ['read_only']), {
+        id: 'agent:remote-bot',
+        name: 'Remote Bot',
+        client: 'remote',
+        roles: ['builder'],
+      })
+    );
+    expect(result.id).toBe('agent:remote-bot');
+    expect(result.roles).toEqual(['builder']);
+  });
+
+  it('denies a read-only actor registering a third-party agent', () => {
+    expect(() =>
+      handleRegisterAgent(ctxAs('agent:remote-bot', ['read_only']), {
+        id: 'agent:someone-else',
+        name: 'Other',
+        client: 'remote',
+        roles: ['builder'],
+      })
+    ).toThrow();
+  });
+
+  it('denies a builder registering a privileged role', () => {
+    expect(() =>
+      handleRegisterAgent(ctxAs('agent:mcp', ['builder']), {
+        id: 'agent:kingpin',
+        name: 'Kingpin',
+        client: 'mcp-http',
+        roles: ['owner'],
+      })
+    ).toThrow(/privileged/);
+    // chair/maintainer are implicit high-power roles (near-full capability
+    // sets) and are fenced the same way.
+    expect(() =>
+      handleRegisterAgent(ctxAs('agent:mcp', ['builder']), {
+        id: 'agent:chairman',
+        name: 'Chairman',
+        client: 'mcp-http',
+        roles: ['chair'],
+      })
+    ).toThrow(/privileged/);
+  });
+
+  it('also denies self-registration of a privileged role (structural check)', () => {
+    expect(() =>
+      handleRegisterAgent(ctxAs('agent:remote-bot', ['read_only']), {
+        id: 'agent:remote-bot',
+        name: 'Escalating Bot',
+        client: 'remote',
+        roles: ['admin'],
+      })
+    ).toThrow(/privileged/);
+  });
+
+  it('allows an owner actor to register privileged roles (operator channel)', () => {
+    const result = parse<MesaAgent>(
+      handleRegisterAgent(ctxAs('user:operator', ['owner']), {
+        id: 'agent:chairman',
+        name: 'Chairman',
+        client: 'mcp',
+        roles: ['chair'],
+      })
+    );
+    expect(result.roles).toEqual(['chair']);
+  });
 });
 
 describe('handleListAgents', () => {

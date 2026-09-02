@@ -122,7 +122,12 @@ convention:
   increment (`listAfter`).
 - Room MCP tools go through `assertPolicy` (no more policy bypass).
 - Member identity anti-spoofing: `from.ref` must match the MCP actor;
-  per-member credentials.
+  server-side role adjudication for HTTP connections (registry-resolved
+  roles, read-only downgrade for unregistered ids, self-registration
+  bootstrap — 2026-09-03). Per-member credentials remain deferred and are
+  **signal-triggered**: revisit when a real multi-tenant / cross-trust-domain
+  deployment or audit-compliance need appears (see SECURITY.md's HTTP
+  identity boundary section).
 - New `mesa_poll_rooms` tool + "poll at turn start" convention in generated
   CLAUDE.md / AGENTS.md.
 - Room `invite`/`leave` under `withLock`; CLI runner Windows `shell:true`

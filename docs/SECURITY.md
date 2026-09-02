@@ -37,6 +37,7 @@ AgentMesa is local-first and permission-aware by default. The policy engine enfo
 | projection.read | Y | Y | Y | Y | Y | Y | Y | Y |
 | projection.rebuild | Y | Y | — | — | — | — | Y | — |
 | transport.inspect | Y | Y | — | — | — | — | — | — |
+| meeting.updateTrustLevel | Y | Y | — | — | — | — | — | — |
 | run.create / run.updateStatus / run.read | Y | Y | Y | Y | — | Y | — | Y |
 | handoff.write / handoff.read | Y | Y | Y | Y | — | Y | — | Y |
 | check.create / check.read | Y | Y | Y | Y | — | Y | — | Y |
@@ -45,13 +46,45 @@ AgentMesa is local-first and permission-aware by default. The policy engine enfo
 
 `run.*`/`handoff.*`/`check.*` all share one coarse-grained `manage_runs` capability (read and write are not split) — this is a known, documented limitation, not a bug. `read_only` (used by Mesa Desk) is granted `manage_runs` only so it can read handoffs; it never calls the write-side functions.
 
+`meeting.updateTrustLevel` is deliberately split out of `manage_meetings` (2026-09-03): changing a meeting's trust level alters what OTHER permissions mean (the trusted posture lets role capabilities judge writes without approval cards), so it requires the dedicated `manage_trust_level` capability held only by owner/admin. Chair/maintainer/planner/builder lost this action in the split — they can still create/update meetings.
+
 ## Key Security Boundaries
 
 - **Connector** (e.g., GitHub webhook, Git hook) — can post messages and create artifacts, but cannot create/delete tasks or manage meetings. This prevents external triggers from corrupting project state.
 - **CI** (e.g., GitHub Actions) — can post messages and create `check_result` artifacts, but cannot modify tasks or meetings.
-- **Builder** — can create and modify tasks, register agents, and create meetings, but cannot delete or archive tasks. Hard-delete is a privileged operation. (This is also the MCP server's default actor role when `AGENTMESA_MCP_ACTOR_ROLES` is unset — `manage_agents`/`manage_meetings` were added specifically so `mesa_register_agent`/`mesa_create_meeting` work out of the box.)
+- **Builder** — can create and modify tasks, register agents, and create meetings, but cannot delete or archive tasks. Hard-delete is a privileged operation. (This is also the MCP server's default actor role when `AGENTMESA_MCP_ACTOR_ROLES` is unset — `manage_agents`/`manage_meetings` were added specifically so `mesa_register_agent`/`mesa_create_meeting` work out of the box.) Since the 2026-09-03 hardening, `mesa_register_agent` additionally requires an owner/admin actor for PRIVILEGED roles (owner, admin, chair, maintainer, system) — a builder can still register ordinary agents, including itself, out of the box.
 - **System** — can rebuild projections and read events but cannot write tasks, post messages, or create artifacts. Internal-only role.
 - **Read-only** (e.g., Mesa Desk's dashboard actor) — can read tasks, events, projections, runs, workflows, checks, and handoffs, but cannot write anything. Not a full security model — grouped under the same coarse-grained `manage_runs` capability as the write side, since Desk's code path never calls the write functions.
+
+## HTTP Transport Identity Boundary (2026-09-03)
+
+The MCP streamable HTTP transport never trusts connection-declared roles:
+
+- **`x-agentmesa-actor-roles` is not adopted.** Roles are adjudicated
+  server-side from the agent registry at initialize time: a registered id
+  gets its registered roles; an unregistered id is downgraded to `read_only`
+  (the session can still bootstrap itself — see below). Garbage values in the
+  header still fail loudly with a 400, but valid-looking values are ignored.
+- **The downgrade holds regardless of workspace policy mode.** Downgraded
+  sessions get the role-based policy engine forced into their runtime
+  context, so a legacy allow-all workspace cannot silently re-grant write
+  access to an unregistered connection.
+- **Self-registration bootstrap.** A downgraded session may call
+  `mesa_register_agent` to register ITS OWN id under non-privileged roles
+  (planner/builder/reviewer/tester/documenter/researcher/custom/connector/ci)
+  — a new connection with the same id then adjudicates to those roles.
+  Privileged roles (owner/admin/chair/maintainer/system) can only be granted
+  by an owner/admin actor or the operator CLI (`mesa agent add`). The
+  classification lists live in `packages/core/src/services/agent-registry.ts`;
+  when the protocol role enum grows, new roles must be classified into
+  exactly one of the two sets — never defaulted into the self-registrable
+  side.
+- **Known residual limitation.** The actor ID itself remains
+  connection-declared: a client that knows the shared token can still SPEAK
+  as a registered agent id (subject to that agent's registry roles). This is
+  accepted for the local-first single-token model; per-member credentials
+  (release-plan debt) are the signal-triggered follow-up for real
+  multi-tenant deployments.
 
 ## Permission Levels
 

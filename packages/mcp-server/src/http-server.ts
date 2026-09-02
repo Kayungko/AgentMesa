@@ -3,9 +3,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { agentRoleSchema } from '@agentmesa/protocol';
-import type { AgentRole } from '@agentmesa/protocol';
-import { MesaError } from '@agentmesa/core';
-import type { MesaActor } from '@agentmesa/core';
+import { MesaError, createRuntimeContext, getAgent, actorRefOf } from '@agentmesa/core';
+import type { MesaActor, MesaRuntimeContext } from '@agentmesa/core';
 import { createMcpServer } from './server.js';
 
 /**
@@ -90,37 +89,65 @@ export function isAuthorized(req: IncomingMessage, token: string | undefined): b
 }
 
 /**
- * Build the per-connection actor from initialize-time headers.
+ * Adjudicate the per-connection actor at initialize time (M3 identity
+ * hardening, 2026-09-03).
  *
  * - id: `x-agentmesa-actor-id`, or a connection-scoped fallback
  *   `agent:http-<sessionId prefix>` when absent — unique per connection, so
  *   two clients never share an actor by accident.
- * - roles: `x-agentmesa-actor-roles` (comma-separated), validated against the
- *   protocol's role enum; invalid values are rejected, not silently dropped.
- *   Defaults to `builder`, the same least-privilege default as stdio.
+ * - roles: **never trusted from the wire.** The agent registry is the single
+ *   source of truth: a registered id gets its registered roles, an
+ *   unregistered id is downgraded to `read_only` (the session can still
+ *   bootstrap itself via `mesa_register_agent` self-registration). The
+ *   `x-agentmesa-actor-roles` header is still enum-validated so garbage fails
+ *   loudly with a 400 instead of being silently ignored, but its values are
+ *   not adopted.
  */
-export function actorFromHeaders(
+export function adjudicateHttpActor(
+  registryCtx: MesaRuntimeContext,
   headers: IncomingMessage['headers'],
   sessionId: string,
-): MesaActor {
+): { actor: MesaActor; registered: boolean } {
   const headerId = firstHeaderValue(headers, ACTOR_ID_HEADER)?.trim();
   const id = headerId && headerId.length > 0 ? headerId : `agent:http-${sessionId.slice(0, 8)}`;
 
   const rolesHeader = firstHeaderValue(headers, ACTOR_ROLES_HEADER)?.trim();
-  let roles: MesaActor['roles'] = ['builder'];
   if (rolesHeader) {
     const requested = rolesHeader.split(',').map((r) => r.trim()).filter(Boolean);
     for (const role of requested) {
       if (!agentRoleSchema.safeParse(role).success) {
         throw new MesaError(
           'VALIDATION_ERROR',
-          `Unknown agent role "${role}" in ${ACTOR_ROLES_HEADER}. Valid roles: ${agentRoleSchema.options.join(', ')}.`,
+          `Unknown agent role "${role}" in ${ACTOR_ROLES_HEADER}. Note: roles are adjudicated server-side from the agent registry; this header is not trusted.`,
         );
       }
     }
-    if (requested.length > 0) roles = requested as AgentRole[];
   }
-  return { id, type: 'agent', roles, client: 'mcp-http' };
+
+  // Registry lookup tries the id as given and its normalized ref (remote
+  // members are registered under the bare ref, e.g. "remote-bot", while the
+  // connection header carries "agent:remote-bot").
+  for (const candidate of new Set([id, actorRefOf(id)])) {
+    try {
+      const roles = getAgent(registryCtx, candidate).roles;
+      return { actor: { id, type: 'agent', roles, client: 'mcp-http' }, registered: true };
+    } catch {
+      // try the next form
+    }
+  }
+  return { actor: { id, type: 'agent', roles: ['read_only'], client: 'mcp-http' }, registered: false };
+}
+
+/** Build the per-session initialize `instructions` so clients can see their adjudicated identity. */
+export function sessionInstructions(actor: MesaActor, registered: boolean): string {
+  if (registered) {
+    return `Connected as ${actor.id} (roles: ${actor.roles.join(', ')}, adjudicated from the agent registry).`;
+  }
+  return (
+    `Connected as ${actor.id} — this id is not registered, so the session is downgraded to read-only. ` +
+    'Roles declared in headers are not trusted. To gain write access, call mesa_register_agent to register ' +
+    'your own id with non-privileged roles (self-registration bootstrap), then reconnect.'
+  );
 }
 
 function firstHeaderValue(
@@ -186,10 +213,16 @@ export async function startHttpServer(
   const endpoint = options.endpoint ?? '/mcp';
   const token = options.token?.trim() || undefined;
   const sessions = new Map<string, HttpSession>();
+  // Registry adjudication context: `getAgent` performs no policy assertion
+  // (pure storage read), so a minimal read-only system actor is enough.
+  const registryCtx = createRuntimeContext({
+    rootDir,
+    actor: { id: 'system:http-adjudicator', type: 'system', roles: ['read_only'] },
+  });
 
   function createSession(req: IncomingMessage): { session: HttpSession; sessionId: string } {
     const sessionId = randomUUID();
-    const actor = actorFromHeaders(req.headers, sessionId);
+    const { actor, registered } = adjudicateHttpActor(registryCtx, req.headers, sessionId);
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => sessionId,
       // Plain JSON request/response over a single POST endpoint. SSE streaming
@@ -200,7 +233,14 @@ export async function startHttpServer(
         sessions.delete(closedId);
       },
     });
-    const server = createMcpServer(rootDir, { actor });
+    const server = createMcpServer(rootDir, {
+      actor,
+      instructions: sessionInstructions(actor, registered),
+      // Downgraded (unregistered) sessions must stay read-only even in a
+      // legacy allow-all workspace — the transport's promise must not depend
+      // on the workspace's policy mode.
+      ...(registered ? {} : { forceRolePolicy: true }),
+    });
     return { session: { transport, server, actor }, sessionId };
   }
 

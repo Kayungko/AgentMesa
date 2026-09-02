@@ -69,7 +69,9 @@ Any other MCP host can declare the server directly. The shape written to
   event (e.g. `agent:claude`, `agent:my-bot`).
 - `AGENTMESA_MCP_ACTOR_ROLES` — comma-separated roles used for policy checks
   (`builder`, `reviewer`, `chair`, `planner`, `tester`, ...). Defaults to
-  least-privilege `builder`.
+  least-privilege `builder`. Registering agents with PRIVILEGED roles
+  (owner/admin/chair/maintainer/system) additionally requires this env to be
+  `owner` or `admin` — or use the operator CLI `mesa agent add`.
 - `AGENTMESA_WORKSPACE` — optional explicit workspace pin. Without it the
   server resolves the workspace as: `AGENTMESA_WORKSPACE` env > the registry's
   active workspace > the process cwd.
@@ -90,9 +92,14 @@ mesa-mcp --transport http --port 8765 --token <secret>
 - Default bind is `127.0.0.1:8765`, endpoint `/mcp` — strictly local-first.
 - Binding a non-loopback host **requires** a token; the server refuses to
   start otherwise. Requests must then carry `Authorization: Bearer <token>`.
-- Actor identity is bound per connection from initialize-time headers:
-  `x-agentmesa-actor-id` and `x-agentmesa-actor-roles` (same role enum as
-  stdio; defaults to a connection-unique `agent:http-*` builder actor).
+- Actor identity is bound per connection: `x-agentmesa-actor-id` selects your
+  id, but your **roles are adjudicated server-side** from the agent registry —
+  `x-agentmesa-actor-roles` is not trusted (garbage values still 400). An
+  unregistered id connects as read-only; the initialize response's
+  `instructions` field says which identity/roles you got. To gain write
+  access: call `mesa_register_agent` to self-register your own id under
+  non-privileged roles, then reconnect (or have the operator pre-register you
+  with `mesa agent add`).
 
 Once connected over HTTP, any workspace member can register the remote agent
 and invite it into a cross-workspace Room with `mesa_register_remote_member`;

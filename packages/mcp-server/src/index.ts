@@ -5,7 +5,8 @@ export {
   isLoopbackHost,
   validateHttpServerOptions,
   isAuthorized,
-  actorFromHeaders,
+  adjudicateHttpActor,
+  sessionInstructions,
   ACTOR_ID_HEADER,
   ACTOR_ROLES_HEADER,
 } from './http-server.js';

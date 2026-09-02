@@ -1,13 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { initWorkspace } from '@agentmesa/core';
+import { initWorkspace, createRuntimeContext, registerAgent } from '@agentmesa/core';
+import type { MesaRuntimeContext } from '@agentmesa/core';
 import {
   startHttpServer,
   validateHttpServerOptions,
-  actorFromHeaders,
+  adjudicateHttpActor,
   isLoopbackHost,
   ACTOR_ID_HEADER,
   ACTOR_ROLES_HEADER,
@@ -140,26 +141,171 @@ describe('http server bind rules (local-first isolation)', () => {
   });
 });
 
+describe('HTTP actor adjudication (server-side role resolution)', () => {
+  function setupCtx(): MesaRuntimeContext {
+    return createRuntimeContext({
+      rootDir: testDir,
+      actor: { id: 'user:setup', type: 'user', roles: ['owner'] },
+    });
+  }
+
+  it('end-to-end: a registered id keeps registry roles even with a spoofed roles header', async () => {
+    registerAgent(setupCtx(), {
+      id: 'agent:codex',
+      name: 'Codex',
+      client: 'codex',
+      status: 'available',
+      roles: ['builder'],
+    });
+    server = await startHttpServer(testDir, { port: 0 });
+    const sid = await openSession(server.url, {
+      [ACTOR_ID_HEADER]: 'agent:codex',
+      [ACTOR_ROLES_HEADER]: 'owner',
+    });
+    expect(server.actorForSession(sid)?.roles).toEqual(['builder']);
+
+    const createRes = await post(
+      server.url,
+      toolCallRequest(2, 'mesa_create_task', { title: 'adjudicated write', createdBy: 'agent:codex' }),
+      { 'mcp-session-id': sid },
+    );
+    expect(toolPayload(createRes.json).isError).toBeFalsy();
+  });
+
+  it('end-to-end: an unregistered id with a spoofed owner header is read-only', async () => {
+    server = await startHttpServer(testDir, { port: 0 });
+    const sid = await openSession(server.url, {
+      [ACTOR_ID_HEADER]: 'agent:ghost',
+      [ACTOR_ROLES_HEADER]: 'owner',
+    });
+    expect(server.actorForSession(sid)?.roles).toEqual(['read_only']);
+
+    const writeRes = await post(
+      server.url,
+      toolCallRequest(2, 'mesa_create_task', { title: 'should fail', createdBy: 'agent:ghost' }),
+      { 'mcp-session-id': sid },
+    );
+    expect(toolPayload(writeRes.json).isError).toBe(true);
+    const readRes = await post(
+      server.url,
+      toolCallRequest(3, 'mesa_list_tasks', {}),
+      { 'mcp-session-id': sid },
+    );
+    expect(toolPayload(readRes.json).isError).toBeFalsy();
+  });
+
+  it('end-to-end: bootstrap — a downgraded session self-registers, then a NEW session gains write access', async () => {
+    server = await startHttpServer(testDir, { port: 0 });
+
+    // First connection: unregistered → read-only, but can self-register.
+    const boot = await openSession(server.url, { [ACTOR_ID_HEADER]: 'agent:remote-bot' });
+    expect(server.actorForSession(boot)?.roles).toEqual(['read_only']);
+    const regRes = await post(
+      server.url,
+      toolCallRequest(2, 'mesa_register_agent', {
+        id: 'agent:remote-bot',
+        name: 'Remote Bot',
+        client: 'remote',
+        roles: ['builder'],
+      }),
+      { 'mcp-session-id': boot },
+    );
+    expect(toolPayload(regRes.json).isError).toBeFalsy();
+
+    // A NEW session with the same id adjudicates to the registered roles.
+    const second = await openSession(server.url, { [ACTOR_ID_HEADER]: 'agent:remote-bot' });
+    expect(server.actorForSession(second)?.roles).toEqual(['builder']);
+    const writeRes = await post(
+      server.url,
+      toolCallRequest(2, 'mesa_create_task', { title: 'bootstrapped write', createdBy: 'agent:remote-bot' }),
+      { 'mcp-session-id': second },
+    );
+    expect(toolPayload(writeRes.json).isError).toBeFalsy();
+  });
+
+  it('initialize result carries downgrade instructions for unregistered fallback ids', async () => {
+    server = await startHttpServer(testDir, { port: 0 });
+    const res = await post(server.url, initializeRequest(1));
+    const instructions = (res.json?.result as { instructions?: string }).instructions;
+    expect(instructions).toContain('read-only');
+    expect(instructions).toContain('mesa_register_agent');
+  });
+
+  it('forces the role-based engine for downgraded sessions even in a legacy allow-all workspace', async () => {
+    // Simulate a pre-policy workspaces: config.json without a policy field
+    // resolves to AllowAllMesaPolicyEngine.
+    writeFileSync(
+      join(testDir, '.agentmesa', 'config.json'),
+      JSON.stringify({ protocolVersion: '0.2.0' }, null, 2),
+      'utf-8',
+    );
+    server = await startHttpServer(testDir, { port: 0 });
+    const sid = await openSession(server.url, { [ACTOR_ID_HEADER]: 'agent:legacy-ghost' });
+    expect(server.actorForSession(sid)?.roles).toEqual(['read_only']);
+
+    // The read-only downgrade must hold despite the allow-all config.
+    const writeRes = await post(
+      server.url,
+      toolCallRequest(2, 'mesa_create_task', { title: 'should still fail', createdBy: 'agent:legacy-ghost' }),
+      { 'mcp-session-id': sid },
+    );
+    expect(toolPayload(writeRes.json).isError).toBe(true);
+  });
+});
+
 describe('actor binding from connection headers', () => {
-  it('uses the actor id and roles headers', () => {
-    const actor = actorFromHeaders(
-      { [ACTOR_ID_HEADER]: 'agent:codex', [ACTOR_ROLES_HEADER]: 'reviewer, builder' },
+  let registryCtx: MesaRuntimeContext;
+
+  beforeEach(() => {
+    registryCtx = createRuntimeContext({
+      rootDir: testDir,
+      actor: { id: 'system:http-adjudicator', type: 'system', roles: ['read_only'] },
+    });
+  });
+
+  it('adjudicates roles from the registry for a registered id (header roles ignored)', () => {
+    // Pre-register via an owner actor (the registry adjudication ctx itself
+    // is deliberately minimal/read-only).
+    const ownerCtx = createRuntimeContext({
+      rootDir: testDir,
+      actor: { id: 'user:setup', type: 'user', roles: ['owner'] },
+    });
+    registerAgent(ownerCtx, {
+      id: 'agent:codex',
+      name: 'Codex',
+      client: 'codex',
+      status: 'available',
+      roles: ['reviewer'],
+    });
+    const { actor, registered } = adjudicateHttpActor(
+      registryCtx,
+      { [ACTOR_ID_HEADER]: 'agent:codex', [ACTOR_ROLES_HEADER]: 'owner, admin' },
       '11111111-2222-3333-4444-555555555555',
     );
     expect(actor.id).toBe('agent:codex');
-    expect(actor.roles).toEqual(['reviewer', 'builder']);
-    expect(actor.client).toBe('mcp-http');
+    // The self-declared owner/admin header must NOT be adopted.
+    expect(actor.roles).toEqual(['reviewer']);
+    expect(registered).toBe(true);
   });
 
-  it('falls back to a connection-scoped actor id (never a shared default)', () => {
-    const actor = actorFromHeaders({}, '11111111-2222-3333-4444-555555555555');
+  it('downgrades unregistered ids to read-only (never a shared default)', () => {
+    const { actor, registered } = adjudicateHttpActor(
+      registryCtx,
+      { [ACTOR_ROLES_HEADER]: 'owner' },
+      '11111111-2222-3333-4444-555555555555',
+    );
     expect(actor.id).toBe('agent:http-11111111');
-    expect(actor.roles).toEqual(['builder']);
+    expect(actor.roles).toEqual(['read_only']);
+    expect(registered).toBe(false);
   });
 
-  it('rejects unknown roles', () => {
+  it('still rejects garbage roles headers loudly (they are not silently ignored)', () => {
     expect(() =>
-      actorFromHeaders({ [ACTOR_ROLES_HEADER]: 'superadmin' }, '11111111-2222-3333-4444-555555555555'),
+      adjudicateHttpActor(
+        registryCtx,
+        { [ACTOR_ROLES_HEADER]: 'superadmin' },
+        '11111111-2222-3333-4444-555555555555',
+      ),
     ).toThrow(/Unknown agent role/);
   });
 });
@@ -272,6 +418,20 @@ describe('http server transport', () => {
 
   it('supports remote member registration end-to-end: room + remote actor conversation', async () => {
     server = await startHttpServer(testDir, { port: 0 });
+
+    // Pre-register the operator id so its session adjudicates to real roles
+    // (unregistered ids are downgraded to read-only since the M3 hardening).
+    const setupCtx = createRuntimeContext({
+      rootDir: testDir,
+      actor: { id: 'user:setup', type: 'user', roles: ['owner'] },
+    });
+    registerAgent(setupCtx, {
+      id: 'agent:codex',
+      name: 'Codex',
+      client: 'codex',
+      status: 'available',
+      roles: ['builder'],
+    });
 
     // Operator session creates the room and registers the remote member.
     const operator = await openSession(server.url, { [ACTOR_ID_HEADER]: 'agent:codex' });

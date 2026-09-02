@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { currentProtocolVersion } from '@agentmesa/protocol';
-import { createRuntimeContext, getWorkspace } from '@agentmesa/core';
+import { createRuntimeContext, getWorkspace, RoleBasedPolicyEngine } from '@agentmesa/core';
 import type { MesaActor, MesaRuntimeContext } from '@agentmesa/core';
 import {
   createTaskInputSchema,
@@ -130,18 +130,32 @@ export interface McpServerOptions {
    * env-derived one.
    */
   actor?: MesaActor;
+  /** Human/machine-facing connection instructions surfaced in the initialize result. */
+  instructions?: string;
+  /**
+   * Force the role-based policy engine for this server instance regardless of
+   * the workspace's configured policy mode. Used for downgraded (unregistered)
+   * HTTP sessions so the read-only downgrade holds even in a legacy allow-all
+   * workspace.
+   */
+  forceRolePolicy?: boolean;
 }
 
 function createMcpContextFactory(
   rootDir: string,
   actor: MesaActor,
+  forceRolePolicy = false,
 ): (args?: Record<string, unknown>) => MesaRuntimeContext {
   return (args) => {
     // A per-call `workspaceId` lets a tool operate on another workspace's
     // data (used by room tools); absent that, fall back to the server root.
     const workspaceId = typeof args?.workspaceId === 'string' ? args.workspaceId : undefined;
     const targetRoot = workspaceId ? getWorkspace(workspaceId)?.rootDir ?? rootDir : rootDir;
-    return createRuntimeContext({ rootDir: targetRoot, actor });
+    return createRuntimeContext({
+      rootDir: targetRoot,
+      actor,
+      ...(forceRolePolicy ? { policy: new RoleBasedPolicyEngine() } : {}),
+    });
   };
 }
 
@@ -178,12 +192,20 @@ function registerMesaTool(
 }
 
 export function createMcpServer(rootDir: string, options?: McpServerOptions): McpServer {
-  const server = new McpServer({
-    name: 'agentmesa',
-    version: currentProtocolVersion,
-  });
+  const server = new McpServer(
+    {
+      name: 'agentmesa',
+      version: currentProtocolVersion,
+    },
+    // ServerOptions (second arg) carries the initialize-result instructions.
+    ...(options?.instructions ? [{ instructions: options.instructions }] : []),
+  );
 
-  const makeCtx = createMcpContextFactory(rootDir, options?.actor ?? resolveActor());
+  const makeCtx = createMcpContextFactory(
+    rootDir,
+    options?.actor ?? resolveActor(),
+    options?.forceRolePolicy === true,
+  );
 
   // Every tool goes through registerMesaTool so failures uniformly return the
   // what/why/fix error envelope instead of a bare message string.

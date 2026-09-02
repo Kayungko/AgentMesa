@@ -33,6 +33,7 @@ type Capability =
   | 'delete_task'
   | 'manage_agents'
   | 'manage_meetings'
+  | 'manage_trust_level'
   | 'read_events'
   | 'read_projections'
   | 'rebuild_projections'
@@ -53,7 +54,7 @@ const ACTION_CAPABILITY: Record<string, Capability> = {
   'task.delete': 'delete_task',
   'meeting.create': 'manage_meetings',
   'meeting.updateStatus': 'manage_meetings',
-  'meeting.updateTrustLevel': 'manage_meetings',
+  'meeting.updateTrustLevel': 'manage_trust_level',
   'meeting.addTask': 'manage_meetings',
   'meeting.addAgent': 'manage_meetings',
   'message.append': 'post_message',
@@ -90,6 +91,7 @@ const ROLE_CAPABILITIES: Record<string, Capability[]> = {
     'delete_task',
     'manage_agents',
     'manage_meetings',
+    'manage_trust_level',
     'read_events',
     'read_projections',
     'rebuild_projections',
@@ -108,6 +110,7 @@ const ROLE_CAPABILITIES: Record<string, Capability[]> = {
     'delete_task',
     'manage_agents',
     'manage_meetings',
+    'manage_trust_level',
     'read_events',
     'read_projections',
     'rebuild_projections',
