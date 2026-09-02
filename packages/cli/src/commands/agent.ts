@@ -39,7 +39,10 @@ export function runAgent(args: ParsedArgs): void {
 
         const client = typeof args.flags['client'] === 'string' ? args.flags['client'] : id;
         const agent = registerAgent(ctx, { id, name, client, status: 'available', roles });
-        outputResult(agent, json, () => printSuccess(`Registered agent: ${agent.id} (${agent.name})`));
+        outputResult(agent, json, () => {
+          printSuccess(`Registered agent: ${agent.id} (${agent.name})`);
+          console.log(`  For an independent HTTP identity, run: mesa token grant ${agent.id}`);
+        });
         return;
       }
 

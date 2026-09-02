@@ -28,6 +28,7 @@ import { runChecks } from '../commands/checks.js';
 import { runGithub } from '../commands/github.js';
 import { runPlugin } from '../commands/plugin.js';
 import { runAgent } from '../commands/agent.js';
+import { runToken } from '../commands/token.js';
 import type { ParsedArgs } from '../parse-args.js';
 
 let testDir: string;
@@ -1174,6 +1175,125 @@ describe('CLI plugin commands', () => {
       expect(typeof parsed.codex.mcpInstalled).toBe('boolean');
       expect(['env', 'config', 'stub']).toContain(parsed.runnerSources.claude);
       expect(['env', 'config', 'stub']).toContain(parsed.runnerSources.codex);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+});
+
+describe('CLI token subcommands', () => {
+  function makeArgs(overrides: Partial<ParsedArgs> = {}): ParsedArgs {
+    return {
+      command: 'token',
+      subcommand: 'list',
+      positional: [],
+      flags: {},
+      ...overrides,
+    };
+  }
+
+  function capture(fn: () => void): string {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      fn();
+      return logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+    } finally {
+      logSpy.mockRestore();
+    }
+  }
+
+  beforeEach(() => {
+    registerAgent(ctx, {
+      id: 'agent:bot1',
+      name: 'Bot One',
+      client: 'remote',
+      status: 'available',
+      roles: ['builder'],
+    });
+  });
+
+  it('grant shows the token exactly once with a save-it warning', () => {
+    const stdout = capture(() =>
+      runToken(makeArgs({ subcommand: 'grant', positional: ['agent:bot1'] }), ctx),
+    );
+    expect(stdout).toMatch(/Token granted for agent:bot1/);
+    expect(stdout).toMatch(/save it now/i);
+    expect(stdout).toMatch(/[0-9a-f]{64}/);
+  });
+
+  it('rotate says the previous token is invalid', () => {
+    capture(() => runToken(makeArgs({ subcommand: 'grant', positional: ['agent:bot1'] }), ctx));
+    const stdout = capture(() =>
+      runToken(makeArgs({ subcommand: 'rotate', positional: ['agent:bot1'] }), ctx),
+    );
+    expect(stdout).toMatch(/rotated for agent:bot1/);
+    expect(stdout).toMatch(/Previous token .*INVALID/);
+  });
+
+  it('revoke reports the next-request effect and accepts --reason', () => {
+    capture(() => runToken(makeArgs({ subcommand: 'grant', positional: ['agent:bot1'] }), ctx));
+    const stdout = capture(() =>
+      runToken(
+        makeArgs({ subcommand: 'revoke', positional: ['agent:bot1'], flags: { reason: 'offboarded' } }),
+        ctx,
+      ),
+    );
+    expect(stdout).toMatch(/Token revoked for agent:bot1/);
+    expect(stdout).toMatch(/next HTTP request will be rejected/);
+  });
+
+  it('revoke without an active token fails (exit code 1)', () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      runToken(makeArgs({ subcommand: 'revoke', positional: ['agent:bot1'] }), ctx);
+      expect(process.exitCode).toBe(1);
+      process.exitCode = 0;
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  it('grant for an unregistered agent fails', () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      runToken(makeArgs({ subcommand: 'grant', positional: ['agent:ghost'] }), ctx);
+      expect(process.exitCode).toBe(1);
+      process.exitCode = 0;
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  it('list shows active/revoked status and never a token value', () => {
+    const granted = capture(() =>
+      runToken(makeArgs({ subcommand: 'grant', positional: ['agent:bot1'] }), ctx),
+    );
+    const tokenValue = /[0-9a-f]{64}/.exec(granted)?.[0]!;
+
+    const listed = capture(() => runToken(makeArgs({ subcommand: 'list' }), ctx));
+    expect(listed).toContain('agent:bot1');
+    expect(listed).toContain('active');
+    expect(listed).not.toContain(tokenValue);
+
+    capture(() => runToken(makeArgs({ subcommand: 'revoke', positional: ['agent:bot1'] }), ctx));
+    const listedAfter = capture(() => runToken(makeArgs({ subcommand: 'list' }), ctx));
+    expect(listedAfter).toContain('revoked');
+  });
+
+  it('agent add output mentions the token grant follow-up', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const origCwd = process.cwd;
+      process.cwd = () => testDir;
+      runAgent({
+        command: 'agent',
+        subcommand: 'add',
+        positional: ['agent:hinted', 'Hinted', 'builder'],
+        flags: {},
+      });
+      const stdout = logSpy.mock.calls.map((c) => c.join(' ')).join('\n');
+      expect(stdout).toContain('mesa token grant agent:hinted');
+      process.cwd = origCwd;
     } finally {
       logSpy.mockRestore();
     }

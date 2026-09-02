@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { agentRoleSchema } from '@agentmesa/protocol';
-import { MesaError, createRuntimeContext, getAgent, actorRefOf } from '@agentmesa/core';
+import { MesaError, createRuntimeContext, getAgent, actorRefOf, findMemberToken, listMemberTokens } from '@agentmesa/core';
 import type { MesaActor, MesaRuntimeContext } from '@agentmesa/core';
 import { createMcpServer } from './server.js';
 
@@ -19,7 +19,14 @@ import { createMcpServer } from './server.js';
  *   `McpServer` instance whose actor is read from the connection's
  *   initialize-time headers — never the shared env-derived actor.
  * - **Local-first isolation.** The listener defaults to 127.0.0.1. Binding a
- *   non-loopback host requires a token; requests must then carry it.
+ *   non-loopback host requires an auth credential (shared token or at least
+ *   one active member token); requests must then carry it.
+ * - **Per-member tokens (M3 phase 2).** Agents may hold individual tokens
+ *   (`.agentmesa/tokens/`, granted by owner/admin via `mesa token grant`).
+ *   A member token fixes the identity — the actor id it maps to cannot be
+ *   overridden by headers — while roles are still adjudicated from the agent
+ *   registry on every connection. The legacy shared token keeps working
+ *   unchanged (dual-track).
  */
 
 /** Header carrying the actor id for a connection (read once, at initialize). */
@@ -49,18 +56,31 @@ export interface HttpServerOptions {
 }
 
 /**
- * Local-first isolation rule: a non-loopback bind must present a token, or the
- * server refuses to start. An empty/whitespace token counts as absent.
+ * Local-first isolation rule: a non-loopback bind must present an auth
+ * credential, or the server refuses to start. A shared token (--token /
+ * AGENTMESA_HTTP_TOKEN) or at least one active member token in the workspace
+ * both satisfy the gate. An empty/whitespace token counts as absent.
  */
-export function validateHttpServerOptions(options: HttpServerOptions): void {
+export function validateHttpServerOptions(options: HttpServerOptions, rootDir?: string): void {
   const host = options.host ?? '127.0.0.1';
   const token = options.token?.trim();
   if (!isLoopbackHost(host) && !token) {
-    throw new MesaError(
-      'VALIDATION_ERROR',
-      `Refusing to bind HTTP server to non-loopback host "${host}" without a token. ` +
-        'Provide a token (--token / AGENTMESA_HTTP_TOKEN) or bind 127.0.0.1.',
-    );
+    const hasMemberTokens =
+      rootDir !== undefined &&
+      listMemberTokens(
+        createRuntimeContext({
+          rootDir,
+          actor: { id: 'system:http-validator', type: 'system', roles: ['read_only'] },
+        }),
+      ).some((t) => !t.revokedAt);
+    if (!hasMemberTokens) {
+      throw new MesaError(
+        'VALIDATION_ERROR',
+        `Refusing to bind HTTP server to non-loopback host "${host}" without any auth credential. ` +
+          'Provide a shared token (--token / AGENTMESA_HTTP_TOKEN), grant at least one member token ' +
+          '("mesa token grant <agentId>"), or bind 127.0.0.1.',
+      );
+    }
   }
 }
 
@@ -89,27 +109,111 @@ export function isAuthorized(req: IncomingMessage, token: string | undefined): b
 }
 
 /**
+ * How a request authenticated (M3 phase 2, option B — per-member tokens).
+ *
+ * - `member`: a per-agent token matched — the identity is fixed to that agent
+ *   and cannot be overridden by the actor-id header.
+ * - `shared`: the legacy shared token matched — identity falls back to
+ *   header self-declaration + registry adjudication (unchanged behavior).
+ * - `anonymous`: loopback only, no shared token configured, nothing
+ *   presented — the pre-existing local-first default.
+ */
+export type HttpAuthIdentity =
+  | { kind: 'member'; agentId: string }
+  | { kind: 'shared' }
+  | { kind: 'anonymous' };
+
+/**
+ * Unified request authentication. Returns `null` when the request must be
+ * rejected with 401. Precedence:
+ *
+ * 1. no Authorization header → allowed only when there is no gate at all
+ *    (loopback, no shared token configured) — `anonymous`;
+ * 2. presented token equals the shared token (when one is configured) → `shared`;
+ * 3. presented token resolves to a non-revoked member token → `member`;
+ * 4. anything else → `null` (401).
+ *
+ * Note the deliberate tightening vs. the pre-member-token era: on loopback
+ * without a shared token, a *presented but invalid* token used to be ignored
+ * (the gate simply was not armed). It now 401s — anyone actively presenting
+ * credentials should get a truthful verdict, and this closes accidental
+ * misconfiguration ("member token revoked, client still sends it") from
+ * silently downgrading to anonymous-loopback access.
+ */
+export function authenticateRequest(
+  req: IncomingMessage,
+  sharedToken: string | undefined,
+  tokenCtx: MesaRuntimeContext,
+  loopback: boolean,
+): HttpAuthIdentity | null {
+  const expected = sharedToken?.trim();
+  const presented = bearerTokenFromRequest(req);
+
+  if (presented === null) {
+    if (expected) return null;
+    // No shared-token gate. Loopback keeps the anonymous local-first default.
+    // Non-loopback without a shared token means member tokens are the only
+    // credential — an anonymous request has then presented nothing and is
+    // rejected (validateHttpServerOptions guarantees the bind is not naked).
+    return loopback ? { kind: 'anonymous' } : null;
+  }
+
+  if (expected && tokensMatch(presented, expected)) {
+    return { kind: 'shared' };
+  }
+
+  const member = findMemberToken(tokenCtx, presented);
+  if (member) {
+    return { kind: 'member', agentId: member.agentId };
+  }
+
+  return null;
+}
+
+/**
  * Adjudicate the per-connection actor at initialize time (M3 identity
- * hardening, 2026-09-03).
+ * hardening, 2026-09-03; per-member tokens 2026-09).
  *
  * - id: `x-agentmesa-actor-id`, or a connection-scoped fallback
  *   `agent:http-<sessionId prefix>` when absent — unique per connection, so
  *   two clients never share an actor by accident.
+ * - **token identity wins (when the connection authenticated with a member
+ *   token):** the actor id is pinned to the token's agent. A header id that
+ *   disagrees (prefix-normalized) is rejected with a 400 — that is someone
+ *   presenting bot1's token while claiming to be bot2, exactly the
+ *   impersonation this phase closes. Without the header, the token alone
+ *   fixes the identity (that is its point).
  * - roles: **never trusted from the wire.** The agent registry is the single
  *   source of truth: a registered id gets its registered roles, an
  *   unregistered id is downgraded to `read_only` (the session can still
  *   bootstrap itself via `mesa_register_agent` self-registration). The
  *   `x-agentmesa-actor-roles` header is still enum-validated so garbage fails
  *   loudly with a 400 instead of being silently ignored, but its values are
- *   not adopted.
+ *   not adopted. This holds for member-token connections too: the token fixes
+ *   WHO you are, the registry fixes WHAT you may do.
  */
 export function adjudicateHttpActor(
   registryCtx: MesaRuntimeContext,
   headers: IncomingMessage['headers'],
   sessionId: string,
-): { actor: MesaActor; registered: boolean } {
+  tokenIdentity?: HttpAuthIdentity,
+): { actor: MesaActor; registered: boolean; tokenLocked: boolean } {
   const headerId = firstHeaderValue(headers, ACTOR_ID_HEADER)?.trim();
-  const id = headerId && headerId.length > 0 ? headerId : `agent:http-${sessionId.slice(0, 8)}`;
+
+  let id = headerId && headerId.length > 0 ? headerId : `agent:http-${sessionId.slice(0, 8)}`;
+  let tokenLocked = false;
+
+  if (tokenIdentity?.kind === 'member') {
+    if (headerId && actorRefOf(headerId) !== actorRefOf(tokenIdentity.agentId)) {
+      throw new MesaError(
+        'VALIDATION_ERROR',
+        `Actor id "${headerId}" contradicts the presented member token (locked to "${tokenIdentity.agentId}"). ` +
+          'The token fixes the connection identity; reconnect with the matching actor id or without the header.',
+      );
+    }
+    id = tokenIdentity.agentId;
+    tokenLocked = true;
+  }
 
   const rolesHeader = firstHeaderValue(headers, ACTOR_ROLES_HEADER)?.trim();
   if (rolesHeader) {
@@ -130,23 +234,25 @@ export function adjudicateHttpActor(
   for (const candidate of new Set([id, actorRefOf(id)])) {
     try {
       const roles = getAgent(registryCtx, candidate).roles;
-      return { actor: { id, type: 'agent', roles, client: 'mcp-http' }, registered: true };
+      return { actor: { id, type: 'agent', roles, client: 'mcp-http' }, registered: true, tokenLocked };
     } catch {
       // try the next form
     }
   }
-  return { actor: { id, type: 'agent', roles: ['read_only'], client: 'mcp-http' }, registered: false };
+  return { actor: { id, type: 'agent', roles: ['read_only'], client: 'mcp-http' }, registered: false, tokenLocked };
 }
 
 /** Build the per-session initialize `instructions` so clients can see their adjudicated identity. */
-export function sessionInstructions(actor: MesaActor, registered: boolean): string {
+export function sessionInstructions(actor: MesaActor, registered: boolean, tokenLocked = false): string {
+  const lockNote = tokenLocked ? ' Your identity is locked to the member token you presented.' : '';
   if (registered) {
-    return `Connected as ${actor.id} (roles: ${actor.roles.join(', ')}, adjudicated from the agent registry).`;
+    return `Connected as ${actor.id} (roles: ${actor.roles.join(', ')}, adjudicated from the agent registry).${lockNote}`;
   }
   return (
     `Connected as ${actor.id} — this id is not registered, so the session is downgraded to read-only. ` +
     'Roles declared in headers are not trusted. To gain write access, call mesa_register_agent to register ' +
-    'your own id with non-privileged roles (self-registration bootstrap), then reconnect.'
+    'your own id with non-privileged roles (self-registration bootstrap), then reconnect.' +
+    lockNote
   );
 }
 
@@ -207,22 +313,29 @@ export async function startHttpServer(
   rootDir: string,
   options: HttpServerOptions = {},
 ): Promise<HttpServerHandle> {
-  validateHttpServerOptions(options);
+  validateHttpServerOptions(options, rootDir);
 
   const host = options.host ?? '127.0.0.1';
   const endpoint = options.endpoint ?? '/mcp';
   const token = options.token?.trim() || undefined;
+  const loopback = isLoopbackHost(host);
   const sessions = new Map<string, HttpSession>();
-  // Registry adjudication context: `getAgent` performs no policy assertion
-  // (pure storage read), so a minimal read-only system actor is enough.
+  // Registry adjudication context: `getAgent` / `findMemberToken` perform no
+  // policy assertion (pure storage reads), so a minimal read-only system
+  // actor is enough.
   const registryCtx = createRuntimeContext({
     rootDir,
     actor: { id: 'system:http-adjudicator', type: 'system', roles: ['read_only'] },
   });
 
-  function createSession(req: IncomingMessage): { session: HttpSession; sessionId: string } {
+  function createSession(req: IncomingMessage, identity: HttpAuthIdentity): { session: HttpSession; sessionId: string } {
     const sessionId = randomUUID();
-    const { actor, registered } = adjudicateHttpActor(registryCtx, req.headers, sessionId);
+    const { actor, registered, tokenLocked } = adjudicateHttpActor(
+      registryCtx,
+      req.headers,
+      sessionId,
+      identity,
+    );
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => sessionId,
       // Plain JSON request/response over a single POST endpoint. SSE streaming
@@ -235,7 +348,7 @@ export async function startHttpServer(
     });
     const server = createMcpServer(rootDir, {
       actor,
-      instructions: sessionInstructions(actor, registered),
+      instructions: sessionInstructions(actor, registered, tokenLocked),
       // Downgraded (unregistered) sessions must stay read-only even in a
       // legacy allow-all workspace — the transport's promise must not depend
       // on the workspace's policy mode.
@@ -258,8 +371,11 @@ export async function startHttpServer(
   );
 
   async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    // Token gate comes before anything else: no protocol access without it.
-    if (!isAuthorized(req, token)) {
+    // Auth gate comes before anything else: every request re-authenticates,
+    // which is what makes token revocation take effect on the very next
+    // request (no session tearing needed).
+    const identity = authenticateRequest(req, token, registryCtx, loopback);
+    if (identity === null) {
       jsonRpcError(res, 401, -32001, 'Unauthorized: missing or invalid bearer token');
       return;
     }
@@ -285,7 +401,7 @@ export async function startHttpServer(
       // session and binds the connection's actor for its whole lifetime.
       if (isInitializeMessage(body) && sessionHeader === undefined) {
         try {
-          const { session, sessionId } = createSession(req);
+          const { session, sessionId } = createSession(req, identity);
           await session.server.connect(session.transport);
           sessions.set(sessionId, session);
           await session.transport.handleRequest(req, res, body);

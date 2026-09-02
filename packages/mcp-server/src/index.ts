@@ -5,12 +5,13 @@ export {
   isLoopbackHost,
   validateHttpServerOptions,
   isAuthorized,
+  authenticateRequest,
   adjudicateHttpActor,
   sessionInstructions,
   ACTOR_ID_HEADER,
   ACTOR_ROLES_HEADER,
 } from './http-server.js';
-export type { HttpServerOptions, HttpServerHandle } from './http-server.js';
+export type { HttpServerOptions, HttpServerHandle, HttpAuthIdentity } from './http-server.js';
 export { parseServerConfig } from './config.js';
 export type { ServerConfig, McpTransportKind } from './config.js';
 export {
@@ -28,6 +29,9 @@ export {
   handleListMeetings,
   handleRegisterAgent,
   handleListAgents,
+  handleTokenGrant,
+  handleTokenRevoke,
+  handleTokenList,
   handleRegisterRemoteMember,
   handleCreateRun,
   handleListRuns,

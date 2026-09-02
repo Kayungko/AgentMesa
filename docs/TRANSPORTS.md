@@ -172,22 +172,37 @@ reconnect. There is no header-trust escape hatch by design.
 
 Because room tools normalize the actor id to a member ref, a remote agent
 connecting as `agent:remote-bot` can only speak as `remote-bot` — the M1
-anti-spoofing rules hold unchanged over HTTP. (Note: the actor id itself
-remains connection-declared; the registry adjudication bounds what it can
-DO, and per-member credentials remain the follow-up for strong identity
-guarantees — see SECURITY.md.)
+anti-spoofing rules hold unchanged over HTTP.
+
+**Per-member tokens (2026-09-03).** For strong identity guarantees, grant an
+agent its own credential with `mesa token grant <agentId>` (owner/admin
+only). The agent then connects with `Authorization: Bearer <member-token>`:
+its actor id is pinned to the token's agent — no actor-id header needed, and
+a contradicting one is rejected with 400. Roles still come from the
+registry. Rotation (`mesa token rotate`) kills the old token immediately;
+revocation takes effect on the agent's next request. See SECURITY.md
+"Per-Member Tokens" for the storage model and residual limits.
 
 **Remote member registration.** `mesa_register_remote_member` registers a
 remote agent in the agent registry (`client: "remote"`, optional
 `metadata.endpoint`) and optionally invites it into a room under the reserved
 `remote` workspace id — member triple `("remote", "agent", <agentId>)`.
 
-**Local-first isolation:**
+**Local-first isolation & authentication matrix:**
 - The listener binds `127.0.0.1` by default.
-- Binding a non-loopback host without a token refuses to start.
-- When a token is configured, every request must carry
-  `Authorization: Bearer <token>`; failures are rejected with `401` before any
-  protocol handling.
+- Binding a non-loopback host without ANY auth credential refuses to start —
+  a shared token (`--token` / `AGENTMESA_HTTP_TOKEN`) or at least one active
+  member token both satisfy the gate.
+
+| Credential presented | Loopback, no shared token | Shared token configured | Non-loopback, member tokens only |
+|---|---|---|---|
+| *(none)* | allowed (anonymous, local-first default) | **401** | **401** |
+| Shared token | allowed (`shared` identity) | allowed (`shared` identity) | — *(no shared token configured)* |
+| Valid member token | allowed (`member` identity, id pinned) | allowed (`member` identity, id pinned) | allowed (`member` identity, id pinned) |
+| Invalid / revoked / rotated-out token | **401** (tightened 2026-09-03; previously ignored) | **401** | **401** |
+
+Every request re-authenticates — that is what makes revocation and rotation
+take effect on the very next request, with no session-tearing API.
 
 **Capabilities:** full read/write (same tools as stdio). Push support is
 available through the optional SSE stream but not required by clients.
@@ -300,7 +315,7 @@ Each transport enforces its own security boundary:
 | File | OS file permissions on `.agentmesa/`. An agent must have read/write access to the project directory. |
 | MCP | Local-only by default. The MCP server runs on stdio and has the same filesystem access as the calling process. |
 | HTTP | Auth required. A local token in `.agentmesa/config.json` must be included in the `Authorization` header. |
-| MCP streamable HTTP | Loopback (`127.0.0.1`) by default. Non-loopback binds refuse to start without a token; with one, every request must carry `Authorization: Bearer <token>`. Each connection's actor id comes from initialize-time headers but its ROLES are adjudicated server-side from the agent registry (unregistered ids are read-only). |
+| MCP streamable HTTP | Loopback (`127.0.0.1`) by default. Non-loopback binds refuse to start without an auth credential (shared token or active member token); every request must then authenticate. Shared token: header actor id + registry-adjudicated roles (unregistered ids are read-only). Member token (`mesa token grant`): identity pinned to the token's agent, roles from the registry. |
 | WebSocket | Auth required. Same local token mechanism as HTTP. |
 | GitHub | Webhook signature verification. The GitHub App validates HMAC signatures against the configured secret. |
 | CI | Token-based. The CI provider receives a one-time write token scoped to the specific pipeline run. |

@@ -152,6 +152,11 @@ export const eventTypeSchema = z.enum([
   'thread_created',
   'thread_resolved',
   'meeting_imported',
+  // 逐成员凭据（M3 B 方案）：token 明文永不入事件流——data 只含
+  // agentId/grantedBy 等审计元数据，token 本体只以 sha256 哈希存在于
+  // .agentmesa/tokens/<hash>.json 存储文件名。
+  'token_granted',
+  'token_revoked',
 ]);
 
 const transportKindSchema = z.enum(['file', 'mcp', 'http', 'websocket', 'github', 'ci']);

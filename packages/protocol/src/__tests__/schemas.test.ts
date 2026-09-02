@@ -544,6 +544,8 @@ describe('MesaEventSchema', () => {
       'thread_created',
       'thread_resolved',
       'meeting_imported',
+      'token_granted',
+      'token_revoked',
     ]);
   });
 });

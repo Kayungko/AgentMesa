@@ -40,7 +40,8 @@ type Capability =
   | 'inspect_transports'
   | 'manage_runs'
   | 'manage_workflows'
-  | 'manage_rooms';
+  | 'manage_rooms'
+  | 'manage_credentials';
 
 /**
  * Maps core service action keys to the least-privilege capability required.
@@ -61,6 +62,10 @@ const ACTION_CAPABILITY: Record<string, Capability> = {
   'message.append': 'post_message',
   'artifact.create': 'create_artifact',
   'agent.register': 'manage_agents',
+  // 逐成员凭据（M3 B 方案）：token 只定身份，roles 仍由注册表裁决——
+  // 授予/吊销凭据是最敏感的运维动作，仅 owner/admin（见 ROLE_CAPABILITIES）。
+  'token.grant': 'manage_credentials',
+  'token.revoke': 'manage_credentials',
   'event.read': 'read_events',
   'projection.read': 'read_projections',
   'projection.rebuild': 'rebuild_projections',
@@ -100,6 +105,7 @@ const ROLE_CAPABILITIES: Record<string, Capability[]> = {
     'manage_runs',
     'manage_workflows',
     'manage_rooms',
+    'manage_credentials',
   ],
   admin: [
     'read_task',
@@ -119,6 +125,7 @@ const ROLE_CAPABILITIES: Record<string, Capability[]> = {
     'manage_runs',
     'manage_workflows',
     'manage_rooms',
+    'manage_credentials',
   ],
   builder: [
     'read_task',

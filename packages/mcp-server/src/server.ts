@@ -18,6 +18,9 @@ import {
   listMeetingsInputSchema,
   registerAgentInputSchema,
   listAgentsInputSchema,
+  tokenGrantInputSchema,
+  tokenRevokeInputSchema,
+  tokenListInputSchema,
   registerRemoteMemberInputSchema,
   createRunInputSchema,
   listRunsInputSchema,
@@ -75,6 +78,9 @@ import {
   handleListMeetings,
   handleRegisterAgent,
   handleListAgents,
+  handleTokenGrant,
+  handleTokenRevoke,
+  handleTokenList,
   handleRegisterRemoteMember,
   handleCreateRun,
   handleListRuns,
@@ -288,6 +294,23 @@ export function createMcpServer(rootDir: string, options?: McpServerOptions): Mc
     description: 'List all registered AgentMesa agents',
     inputSchema: listAgentsInputSchema,
   }, handleListAgents);
+
+  // Per-member tokens (M3 phase 2): token fixes the identity, the registry
+  // fixes the permissions. Grant/revoke are owner/admin only.
+  register('mesa_token_grant', {
+    description: 'Issue (or rotate) the per-member HTTP token of a registered agent. The token is returned exactly once — save it immediately. Owner/admin only.',
+    inputSchema: tokenGrantInputSchema,
+  }, handleTokenGrant);
+
+  register('mesa_token_revoke', {
+    description: 'Revoke the active per-member HTTP token of an agent. Takes effect on the agent\'s next HTTP request. Owner/admin only.',
+    inputSchema: tokenRevokeInputSchema,
+  }, handleTokenRevoke);
+
+  register('mesa_token_list', {
+    description: 'List per-member tokens (agent, granted at/by, revoked at) — never the token values themselves.',
+    inputSchema: tokenListInputSchema,
+  }, handleTokenList);
 
   // Remote member registration (M3 Broad Access)
   register('mesa_register_remote_member', {

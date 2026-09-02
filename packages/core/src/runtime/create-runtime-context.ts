@@ -39,6 +39,7 @@ export function createRuntimeContext(
     paths.inboxDir,
     paths.outboxDir,
     paths.runsDir,
+    paths.tokensDir,
   ]) {
     storage.ensureDirectory(directory);
   }

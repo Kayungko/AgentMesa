@@ -38,6 +38,7 @@ AgentMesa is local-first and permission-aware by default. The policy engine enfo
 | projection.rebuild | Y | Y | — | — | — | — | Y | — |
 | transport.inspect | Y | Y | — | — | — | — | — | — |
 | meeting.updateTrustLevel | Y | Y | — | — | — | — | — | — |
+| token.grant / token.revoke | Y | Y | — | — | — | — | — | — |
 | run.create / run.updateStatus / run.read | Y | Y | Y | Y | — | Y | — | Y |
 | handoff.write / handoff.read | Y | Y | Y | Y | — | Y | — | Y |
 | check.create / check.read | Y | Y | Y | Y | — | Y | — | Y |
@@ -79,12 +80,51 @@ The MCP streamable HTTP transport never trusts connection-declared roles:
   when the protocol role enum grows, new roles must be classified into
   exactly one of the two sets — never defaulted into the self-registrable
   side.
-- **Known residual limitation.** The actor ID itself remains
-  connection-declared: a client that knows the shared token can still SPEAK
-  as a registered agent id (subject to that agent's registry roles). This is
-  accepted for the local-first single-token model; per-member credentials
-  (release-plan debt) are the signal-triggered follow-up for real
-  multi-tenant deployments.
+
+## Per-Member Tokens (2026-09-03, M3 phase 2)
+
+Individual agents can hold their own HTTP credential — **token fixes the
+identity, the registry fixes the permissions**:
+
+- **Grant / rotate / revoke** (owner/admin only, `manage_credentials`
+  capability): `mesa token grant <agentId>` / `mesa token rotate <agentId>` /
+  `mesa token revoke <agentId> [--reason <text>]`, or the MCP equivalents
+  `mesa_token_grant` / `mesa_token_revoke` / `mesa_token_list`. The grant
+  requires the agent to already be registered.
+- **Token pinning.** A member-token connection's actor id is pinned to the
+  token's agent — no `x-agentmesa-actor-id` header needed, and a
+  contradicting one is rejected with 400. Roles still come from the registry:
+  a token grants at most the powers of the one agent it was issued to, and
+  audit attribution is truthful.
+- **Storage.** One JSON file per token under `.agentmesa/tokens/`, named by
+  the sha256 hex of the token — lookup is a direct filename probe, never a
+  comparison loop. The plaintext exists ONLY in the grant command's output;
+  it is never written to the event log, projections, or any file. The event
+  stream carries `token_granted` / `token_revoked` with agent/grantedBy
+  metadata only.
+- **Rotation is overwrite.** One agent holds at most one active token;
+  re-granting deletes the previous hash file — the old token dies
+  immediately, no grace window. A deliberate trade-off: no dual-token
+  overlap for zero-downtime rotation; rotate at a quiet moment.
+- **Revocation is per-request.** Every HTTP request re-authenticates, so a
+  revoked token fails on the very next request (401). Established sessions
+  are not actively torn down mid-stream — their next request is the boundary
+  (server restart clears them anyway).
+- **Dual-track.** The legacy shared token (`--token` / `AGENTMESA_HTTP_TOKEN`)
+  keeps working unchanged: it authenticates as `shared`, and the identity
+  then follows the header + registry adjudication path above. A non-loopback
+  bind now accepts EITHER a shared token or at least one active member token
+  as its auth credential.
+- **Deliberate tightening.** On loopback without a shared token, a presented
+  but invalid token used to be ignored (the gate was not armed); it now 401s.
+  Anyone actively presenting credentials gets a truthful verdict.
+
+**Known residual limitations.** Revocation does not interrupt an
+already-established streamable HTTP session (its next request fails instead).
+Member tokens, like the shared token, are bearer credentials — transport
+security beyond loopback relies on the operator (TLS termination, network
+isolation). The token files themselves are as sensitive as the tokens; the
+`.agentmesa` directory must not be committed or shared.
 
 ## Permission Levels
 

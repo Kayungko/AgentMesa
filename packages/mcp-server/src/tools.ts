@@ -19,6 +19,9 @@ import {
   actorRefOf,
   PRIVILEGED_REGISTRATION_ROLES,
   listAgents,
+  grantMemberToken,
+  revokeMemberToken,
+  listMemberTokens,
   createAgentRun,
   getAgentRun,
   listAgentRuns,
@@ -219,6 +222,19 @@ export const registerRemoteMemberInputSchema = {
 };
 
 export const listAgentsInputSchema = {};
+
+// --- Per-member tokens (M3 phase 2, option B) ---
+
+export const tokenGrantInputSchema = {
+  agentId: z.string().min(1),
+};
+
+export const tokenRevokeInputSchema = {
+  agentId: z.string().min(1),
+  reason: z.string().optional(),
+};
+
+export const tokenListInputSchema = {};
 
 // --- Closed value sets (error guidance) ---
 //
@@ -779,6 +795,33 @@ export function handleListAgents(ctx: MesaRuntimeContext): string {
 }
 
 /**
+ * mesa_token_grant（M3 B 方案）：给已注册 agent 发放/轮换独立 HTTP token。
+ * 返回值是明文 token 的**唯一一次出现**——不落事件日志、不落任何存储。
+ * 权限围栏在 service 内（manage_credentials，仅 owner/admin）。
+ */
+export function handleTokenGrant(ctx: MesaRuntimeContext, args: { agentId: string }): string {
+  const { token, record } = grantMemberToken(ctx, args.agentId);
+  return JSON.stringify({
+    agentId: record.agentId,
+    token,
+    // Shown once; never retrievable again (storage keeps only the sha256 hash).
+    notice: 'Save this token now — it cannot be shown again. Present it as a Bearer token on MCP HTTP connections.',
+  });
+}
+
+export function handleTokenRevoke(
+  ctx: MesaRuntimeContext,
+  args: { agentId: string; reason?: string },
+): string {
+  const summary = revokeMemberToken(ctx, args.agentId, args.reason);
+  return JSON.stringify(summary);
+}
+
+export function handleTokenList(ctx: MesaRuntimeContext): string {
+  return JSON.stringify(listMemberTokens(ctx));
+}
+
+/**
  * mesa_register_remote_member（M3 Broad Access）：把一个远程 agent 注册成
  * room/meeting 成员。
  *
@@ -801,7 +844,7 @@ export function handleRegisterRemoteMember(
   },
 ): string {
   assertPolicy(ctx, 'agent.register', `agent:${args.id}`);
-  const requestedRoles = args.roles && args.roles.length > 0 ? args.roles : ['builder'];
+  const requestedRoles: AgentRole[] = args.roles && args.roles.length > 0 ? args.roles : ['builder'];
   // Same privileged-role fence as handleRegisterAgent — a builder-level actor
   // must not mint owner/admin remote members either.
   assertRegistrableRoles(ctx, requestedRoles);

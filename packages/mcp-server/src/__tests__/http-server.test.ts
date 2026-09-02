@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { initWorkspace, createRuntimeContext, registerAgent } from '@agentmesa/core';
+import { initWorkspace, createRuntimeContext, registerAgent, grantMemberToken, revokeMemberToken } from '@agentmesa/core';
 import type { MesaRuntimeContext } from '@agentmesa/core';
 import {
   startHttpServer,
@@ -118,6 +118,13 @@ async function openSession(
 }
 
 describe('http server bind rules (local-first isolation)', () => {
+  function setupCtxForBindRules(): MesaRuntimeContext {
+    return createRuntimeContext({
+      rootDir: testDir,
+      actor: { id: 'user:setup', type: 'user', roles: ['owner'] },
+    });
+  }
+
   it('recognizes loopback hosts', () => {
     expect(isLoopbackHost('127.0.0.1')).toBe(true);
     expect(isLoopbackHost('localhost')).toBe(true);
@@ -126,18 +133,38 @@ describe('http server bind rules (local-first isolation)', () => {
     expect(isLoopbackHost('192.168.1.10')).toBe(false);
   });
 
-  it('refuses a non-loopback bind without a token', () => {
-    expect(() => validateHttpServerOptions({ host: '0.0.0.0' })).toThrow(/without a token/);
-    expect(() => validateHttpServerOptions({ host: '192.168.1.10' })).toThrow(/without a token/);
+  it('refuses a non-loopback bind without any auth credential', () => {
+    expect(() => validateHttpServerOptions({ host: '0.0.0.0' })).toThrow(/without any auth credential/);
+    expect(() => validateHttpServerOptions({ host: '192.168.1.10' })).toThrow(/without any auth credential/);
     // Loopback (the default) needs no token; non-loopback with one is fine.
     expect(() => validateHttpServerOptions({})).not.toThrow();
     expect(() => validateHttpServerOptions({ host: '0.0.0.0', token: 'x' })).not.toThrow();
   });
 
-  it('startHttpServer refuses to start on a non-loopback host without a token', async () => {
+  it('startHttpServer refuses to start on a non-loopback host without a token or member tokens', async () => {
     await expect(
       startHttpServer(testDir, { host: '0.0.0.0', port: 0 }),
-    ).rejects.toThrow(/without a token/);
+    ).rejects.toThrow(/without any auth credential/);
+  });
+
+  it('a non-loopback bind is allowed when the workspace has an active member token', async () => {
+    registerAgent(setupCtxForBindRules(), {
+      id: 'agent:bot1',
+      name: 'Bot One',
+      client: 'remote',
+      status: 'available',
+      roles: ['builder'],
+    });
+    grantMemberToken(setupCtxForBindRules(), 'agent:bot1');
+
+    // No shared token — the member token alone satisfies the non-loopback gate.
+    expect(() => validateHttpServerOptions({ host: '0.0.0.0' }, testDir)).not.toThrow();
+
+    // Revoking the only token re-arms the refusal.
+    revokeMemberToken(setupCtxForBindRules(), 'agent:bot1');
+    expect(() => validateHttpServerOptions({ host: '0.0.0.0' }, testDir)).toThrow(
+      /without any auth credential/,
+    );
   });
 });
 
@@ -250,6 +277,144 @@ describe('HTTP actor adjudication (server-side role resolution)', () => {
       { 'mcp-session-id': sid },
     );
     expect(toolPayload(writeRes.json).isError).toBe(true);
+  });
+});
+
+describe('HTTP per-member tokens (M3 phase 2)', () => {
+  function ownerCtx(): MesaRuntimeContext {
+    return createRuntimeContext({
+      rootDir: testDir,
+      actor: { id: 'user:setup', type: 'user', roles: ['owner'] },
+    });
+  }
+
+  function registerBot1(): void {
+    registerAgent(ownerCtx(), {
+      id: 'agent:bot1',
+      name: 'Bot One',
+      client: 'remote',
+      status: 'available',
+      roles: ['builder'],
+    });
+  }
+
+  it('a member token pins the identity (no header needed) and keeps registry roles', async () => {
+    registerBot1();
+    const { token } = grantMemberToken(ownerCtx(), 'agent:bot1');
+    server = await startHttpServer(testDir, { port: 0 });
+
+    // No actor-id header at all — the token alone fixes who this is.
+    const sid = await openSession(server.url, { authorization: `Bearer ${token}` });
+    const actor = server.actorForSession(sid);
+    expect(actor?.id).toBe('agent:bot1');
+    expect(actor?.roles).toEqual(['builder']);
+
+    const writeRes = await post(
+      server.url,
+      toolCallRequest(2, 'mesa_create_task', { title: 'member token write', createdBy: 'agent:bot1' }),
+      { 'mcp-session-id': sid },
+    );
+    expect(toolPayload(writeRes.json).isError).toBeFalsy();
+  });
+
+  it('a matching actor-id header is accepted; a contradicting one is rejected with 400', async () => {
+    registerBot1();
+    const { token } = grantMemberToken(ownerCtx(), 'agent:bot1');
+    server = await startHttpServer(testDir, { port: 0 });
+
+    const auth = { authorization: `Bearer ${token}` };
+    const ok = await openSession(server.url, { ...auth, [ACTOR_ID_HEADER]: 'agent:bot1' });
+    expect(server.actorForSession(ok)?.id).toBe('agent:bot1');
+
+    // Someone presenting bot1's token while claiming to be bot2 → connection refused.
+    const res = await post(
+      server.url,
+      initializeRequest(1),
+      { ...auth, [ACTOR_ID_HEADER]: 'agent:bot2' },
+    );
+    expect(res.status).toBe(400);
+    expect(res.json?.error?.message).toContain('contradicts the presented member token');
+  });
+
+  it('revocation takes effect on the very next request of an established session', async () => {
+    registerBot1();
+    const { token } = grantMemberToken(ownerCtx(), 'agent:bot1');
+    server = await startHttpServer(testDir, { port: 0 });
+
+    const auth = { authorization: `Bearer ${token}` };
+    const sid = await openSession(server.url, auth);
+
+    // Revoke after the session is live — the session is not torn down, but…
+    revokeMemberToken(ownerCtx(), 'agent:bot1');
+    const res = await post(
+      server.url,
+      toolCallRequest(2, 'mesa_list_tasks', {}),
+      { ...auth, 'mcp-session-id': sid },
+    );
+    // …its next request re-authenticates and now fails.
+    expect(res.status).toBe(401);
+  });
+
+  it('dual-track: the shared token keeps working alongside member tokens', async () => {
+    registerBot1();
+    registerAgent(ownerCtx(), {
+      id: 'agent:shared-user',
+      name: 'Shared User',
+      client: 'remote',
+      status: 'available',
+      roles: ['reviewer'],
+    });
+    grantMemberToken(ownerCtx(), 'agent:bot1');
+    server = await startHttpServer(testDir, { port: 0, token: 'shared-secret' });
+
+    // Shared token + self-declared id → legacy header adjudication path.
+    const sid = await openSession(server.url, {
+      authorization: 'Bearer shared-secret',
+      [ACTOR_ID_HEADER]: 'agent:shared-user',
+    });
+    expect(server.actorForSession(sid)?.id).toBe('agent:shared-user');
+    expect(server.actorForSession(sid)?.roles).toEqual(['reviewer']);
+
+    // The member token still works on the same server.
+    const { token } = grantMemberToken(ownerCtx(), 'agent:bot1');
+    const member = await openSession(server.url, { authorization: `Bearer ${token}` });
+    expect(server.actorForSession(member)?.id).toBe('agent:bot1');
+  });
+
+  it('tightened loopback: a presented but invalid token is rejected even without a shared token', async () => {
+    server = await startHttpServer(testDir, { port: 0 });
+    // Pre-member-token this was silently ignored (the gate was not armed).
+    const res = await post(server.url, initializeRequest(1), {
+      authorization: 'Bearer not-a-real-token',
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it('initialize instructions note the token-locked identity', async () => {
+    registerBot1();
+    const { token } = grantMemberToken(ownerCtx(), 'agent:bot1');
+    server = await startHttpServer(testDir, { port: 0 });
+
+    const res = await post(server.url, initializeRequest(1), {
+      authorization: `Bearer ${token}`,
+    });
+    const instructions = (res.json?.result as { instructions?: string }).instructions;
+    expect(instructions).toContain('locked to the member token');
+  });
+
+  it('rotate: the old token dies immediately, the new one works', async () => {
+    registerBot1();
+    const first = grantMemberToken(ownerCtx(), 'agent:bot1');
+    server = await startHttpServer(testDir, { port: 0 });
+
+    const second = grantMemberToken(ownerCtx(), 'agent:bot1');
+    const dead = await post(server.url, initializeRequest(1), {
+      authorization: `Bearer ${first.token}`,
+    });
+    expect(dead.status).toBe(401);
+
+    const alive = await openSession(server.url, { authorization: `Bearer ${second.token}` });
+    expect(server.actorForSession(alive)?.id).toBe('agent:bot1');
   });
 });
 

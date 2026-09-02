@@ -8,6 +8,7 @@ import { runMessage } from './commands/message.js';
 import { runArtifact } from './commands/artifact.js';
 import { runMeeting } from './commands/meeting.js';
 import { runAgent } from './commands/agent.js';
+import { runToken } from './commands/token.js';
 import { runEvents, runTimeline } from './commands/events.js';
 import { runWhy } from './commands/why.js';
 import { runTransports } from './commands/transports.js';
@@ -55,6 +56,10 @@ switch (args.command) {
 
   case 'agent':
     runAgent(args);
+    break;
+
+  case 'token':
+    runToken(args);
     break;
 
   case 'events':
@@ -143,6 +148,10 @@ State Commands:
   agent add <id> <name>       Register an agent
   agent list                  List registered agents
   agent show <id>             Show agent details
+  token grant <agentId>       Issue a member HTTP token (shown once)
+  token rotate <agentId>      Replace the member token (old dies immediately)
+  token revoke <agentId>      Revoke the member token [--reason <text>]
+  token list                  List member tokens (never the values)
 
 Inspection Commands:
   doctor [--fix]              Check workspace health (--fix removes orphaned temp files)

@@ -24,6 +24,8 @@ export interface MesaWorkspacePaths {
   outboxDir: string;
   runsDir: string;
   checksDir: string;
+  /** 逐成员 token 存储（sha256 哈希即文件名，M3 B 方案）。 */
+  tokensDir: string;
 }
 
 export function createWorkspacePaths(rootDir: string): MesaWorkspacePaths {
@@ -48,6 +50,7 @@ export function createWorkspacePaths(rootDir: string): MesaWorkspacePaths {
     outboxDir: join(mesaDir, 'outbox'),
     runsDir: join(mesaDir, 'runs'),
     checksDir: join(mesaDir, 'checks'),
+    tokensDir: join(mesaDir, 'tokens'),
   };
 }
 
@@ -80,6 +83,7 @@ export function initWorkspace(rootDir: string): MesaWorkspacePaths {
   ensureDir(paths.outboxDir);
   ensureDir(paths.runsDir);
   ensureDir(paths.checksDir);
+  ensureDir(paths.tokensDir);
 
   const config: MesaConfig = {
     protocolVersion: currentProtocolVersion,
