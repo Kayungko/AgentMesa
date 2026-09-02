@@ -128,6 +128,89 @@ describe('PermissionApprovalQueue', () => {
     expect(resources[4]).toBeUndefined();
     queue.clear();
   });
+
+  it('allow_session grants auto-approve the same (meeting, kind) without queueing', async () => {
+    const grantHits: Array<{ meetingId: string; kind: string; requestId: string }> = [];
+    const queue = new PermissionApprovalQueue({
+      onGrantHit: (info) => grantHits.push(info),
+    });
+    // First request: queued, decided allow_session.
+    const first = queue.enqueue(request({ requestId: 'req_s1', kind: 'tool' }), { meetingId: 'meet-grant', timeoutMs: 5_000 });
+    queue.decide('req_s1', 'allow_session');
+    await expect(first).resolves.toBe('allow');
+
+    // Second request of the same kind + meeting: short-circuits the queue —
+    // no entry, no 5-minute timer, resolves allow immediately.
+    const second = queue.enqueue(request({ requestId: 'req_s2', kind: 'tool' }), { meetingId: 'meet-grant', timeoutMs: 20 });
+    await expect(second).resolves.toBe('allow');
+    expect(queue.list()).toEqual([]);
+    expect(grantHits).toHaveLength(1);
+    expect(grantHits[0]).toMatchObject({ meetingId: 'meet-grant', kind: 'tool', requestId: 'req_s2' });
+  });
+
+  it('session grants are keyed by (meetingId, kind) and skip nothing else', async () => {
+    const queue = new PermissionApprovalQueue();
+    const first = queue.enqueue(request({ requestId: 'req_k1', kind: 'tool' }), { meetingId: 'meet-a', timeoutMs: 5_000 });
+    queue.decide('req_k1', 'allow_session');
+    await expect(first).resolves.toBe('allow');
+
+    // Different meeting: still queued normally.
+    const otherMeeting = queue.enqueue(request({ requestId: 'req_k2', kind: 'tool' }), { meetingId: 'meet-b', timeoutMs: 5_000 });
+    expect(queue.list()).toHaveLength(1);
+    queue.decide('req_k2', 'deny');
+    await expect(otherMeeting).resolves.toBe('deny');
+
+    // Same meeting, different kind: still queued normally.
+    const otherKind = queue.enqueue(request({ requestId: 'req_k3', kind: 'command' }), { meetingId: 'meet-a', timeoutMs: 5_000 });
+    expect(queue.list()).toHaveLength(1);
+    queue.decide('req_k3', 'deny');
+    await expect(otherKind).resolves.toBe('deny');
+  });
+
+  it('plain allow and deny do not create session grants', async () => {
+    const queue = new PermissionApprovalQueue();
+    const allowed = queue.enqueue(request({ requestId: 'req_p1' }), { meetingId: 'meet-plain', timeoutMs: 5_000 });
+    queue.decide('req_p1', 'allow');
+    await expect(allowed).resolves.toBe('allow');
+
+    const denied = queue.enqueue(request({ requestId: 'req_p2' }), { meetingId: 'meet-plain', timeoutMs: 5_000 });
+    queue.decide('req_p2', 'deny');
+    await expect(denied).resolves.toBe('deny');
+
+    // No grant recorded: the next request still queues.
+    const next = queue.enqueue(request({ requestId: 'req_p3' }), { meetingId: 'meet-plain', timeoutMs: 5_000 });
+    expect(queue.list()).toHaveLength(1);
+    queue.decide('req_p3', 'deny');
+    await expect(next).resolves.toBe('deny');
+  });
+
+  it('clear() revokes session grants along with pending entries', async () => {
+    const queue = new PermissionApprovalQueue();
+    const first = queue.enqueue(request({ requestId: 'req_c1', kind: 'patch' }), { meetingId: 'meet-clear', timeoutMs: 5_000 });
+    queue.decide('req_c1', 'allow_session');
+    await expect(first).resolves.toBe('allow');
+
+    queue.clear();
+
+    const second = queue.enqueue(request({ requestId: 'req_c2', kind: 'patch' }), { meetingId: 'meet-clear', timeoutMs: 5_000 });
+    expect(queue.list()).toHaveLength(1);
+    queue.decide('req_c2', 'deny');
+    await expect(second).resolves.toBe('deny');
+  });
+
+  it('allow_session on an entry without meetingId degrades to a plain allow', async () => {
+    const queue = new PermissionApprovalQueue();
+    const promise = queue.enqueue(request({ requestId: 'req_nm' }), { timeoutMs: 5_000 });
+
+    expect(queue.decide('req_nm', 'allow_session')).toBe(true);
+    await expect(promise).resolves.toBe('allow');
+
+    // No grant was recorded (nowhere to scope it to).
+    const next = queue.enqueue(request({ requestId: 'req_nm2' }), { timeoutMs: 5_000 });
+    expect(queue.list()).toHaveLength(1);
+    queue.decide('req_nm2', 'deny');
+    await expect(next).resolves.toBe('deny');
+  });
 });
 
 describe('createDeskAskHuman', () => {
@@ -207,6 +290,40 @@ describe('DeskServer permission approval API', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
     await expect(promise).resolves.toBe('allow');
+  });
+
+  it('POST decide accepts allow_session and grants the meeting+kind', async () => {
+    server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
+    await server.start();
+    const askHuman = createDeskAskHuman(server.permissionApprovals, { meetingId: 'meet-sess', timeoutMs: 5_000 });
+    const first = askHuman(request({ requestId: 'req_sess_1', kind: 'tool' }));
+
+    const base = `http://localhost:${server.getPort()}`;
+    const headers = { Authorization: 'Bearer secret', 'Content-Type': 'application/json' };
+
+    const res = await fetch(`${base}/api/permissions/req_sess_1/decide`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ decision: 'allow_session' }),
+    });
+    expect(res.status).toBe(200);
+    await expect(first).resolves.toBe('allow');
+
+    // The grant is live: a second same-kind request for that meeting never
+    // reaches the pending list.
+    const second = askHuman(request({ requestId: 'req_sess_2', kind: 'tool' }));
+    await expect(second).resolves.toBe('allow');
+    const pending = (await (await fetch(`${base}/api/permissions/pending`, { headers })).json()) as { pending: unknown[] };
+    expect(pending.pending).toEqual([]);
+
+    // Invalid decision values (including the old two-value vocabulary only)
+    // still 400 for anything else.
+    const bad = await fetch(`${base}/api/permissions/whatever/decide`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ decision: 'allow_for_day' }),
+    });
+    expect(bad.status).toBe(400);
   });
 
   it('returns 404 for an unknown permission id and 400 for a bad decision', async () => {

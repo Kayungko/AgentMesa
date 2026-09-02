@@ -146,7 +146,7 @@ export function useMesaRuntime(config: RuntimeConfig) {
     await refresh();
   }, [config, refresh]);
 
-  const decidePermission = useCallback(async (id: string, decision: 'allow' | 'deny') => {
+  const decidePermission = useCallback(async (id: string, decision: 'allow' | 'deny' | 'allow_session') => {
     await decidePermissionApi(config, id, decision);
     const result = await listPendingPermissions(config);
     setPendingPermissions(result.pending);

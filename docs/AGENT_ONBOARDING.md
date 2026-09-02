@@ -193,6 +193,20 @@ adopted sessions speak under a speech guard — read-only by default, with
 gated actions surfacing as human approval cards. See the "Adopting external
 sessions" section of [`DRIVERS.md`](DRIVERS.md).
 
+### Meeting trust levels
+
+The speech guard is per-meeting. The meeting owner can set a meeting to
+`trusted` (via the status drawer, or `PATCH /api/meetings/:id/trust-level`):
+writes in that meeting are then judged by the agent's role capabilities
+without per-action approval cards. Two expectations for agents speaking in a
+trusted meeting:
+
+- Your role decides what you may write — a builder can patch sources, a
+  reviewer still cannot. Blocked commands and protected secret paths remain
+  denied at both levels.
+- Unmapped tools are still denied (`tool.unknown`) regardless of trust
+  level; ask the operator to map the tool if you need it.
+
 ## Debugging & diagnostics
 
 From a checkout of this repository — no MCP wrapper needed:
@@ -226,7 +240,9 @@ AgentMesa is local-first and permission-aware by default:
   policy decisions are recorded in `.agentmesa/logs/audit.jsonl`.
 - **Approval fences**: driven sessions run read-only by default; gated
   actions (patches, non-read-only commands, approval-tier tools) escalate as
-  approval cards to a human instead of being silently executed.
+  approval cards to a human instead of being silently executed. A meeting's
+  human owner may set it to `trusted` to let role capabilities judge writes
+  directly; blocked patterns and secret-path protection never relax.
 
 Details: [`SECURITY.md`](SECURITY.md) (threat model, rules) and
 [`POLICY_ENGINE.md`](POLICY_ENGINE.md) (roles, actions, capability matrix).

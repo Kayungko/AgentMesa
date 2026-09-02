@@ -5,7 +5,7 @@ import {
   currentProtocolVersion,
   generateMeetingId,
 } from '@agentmesa/protocol';
-import type { MesaMeeting, CreateMeetingInput, MeetingStatus } from '@agentmesa/protocol';
+import type { MesaMeeting, CreateMeetingInput, MeetingStatus, MeetingTrustLevel } from '@agentmesa/protocol';
 import { InvalidStatusTransitionError, MeetingNotFoundError } from '../errors.js';
 import type { MesaRuntimeContext } from '../runtime/types.js';
 import {
@@ -26,6 +26,7 @@ export function createMeeting(ctx: MesaRuntimeContext, input: CreateMeetingInput
     id: generateMeetingId(),
     title: validated.title,
     status: 'open',
+    trustLevel: validated.trustLevel ?? 'approval',
     tasks: validated.tasks ?? [],
     agents: validated.agents ?? [],
     createdAt: now,
@@ -91,6 +92,46 @@ export function updateMeetingStatus(
     streamId: meetingId,
     streamType: 'meeting',
     data: { oldStatus: meeting.status, newStatus: status },
+  });
+
+  return result;
+}
+
+/**
+ * Update the meeting's trust level. Unlike status, the trust level is not a
+ * lifecycle — it is a human-set posture switch and may flip freely in both
+ * directions (no transition table). Setting the same level is idempotent:
+ * no write, no event. Blocked-pattern and secret-path protection apply at
+ * BOTH levels; `trusted` only lifts the per-action human-approval fence for
+ * session speech turns (writes are then judged by role capabilities).
+ */
+export function updateMeetingTrustLevel(
+  ctx: MesaRuntimeContext,
+  meetingId: string,
+  trustLevel: MeetingTrustLevel
+): MesaMeeting {
+  assertPolicy(ctx, 'meeting.updateTrustLevel', `meeting:${meetingId}`);
+  const meeting = getMeeting(ctx, meetingId);
+
+  if (meeting.trustLevel === trustLevel) {
+    return meeting;
+  }
+
+  const updated: MesaMeeting = {
+    ...meeting,
+    trustLevel,
+    updatedAt: new Date().toISOString(),
+  };
+
+  const result = MesaMeetingSchema.parse(updated);
+  writeMeeting(ctx, result);
+
+  appendRuntimeEvent(ctx, {
+    meetingId,
+    type: 'meeting_trust_level_changed',
+    streamId: meetingId,
+    streamType: 'meeting',
+    data: { oldTrustLevel: meeting.trustLevel, newTrustLevel: trustLevel },
   });
 
   return result;

@@ -21,13 +21,13 @@ export function PermissionApprovalCard({
   fresh = false,
 }: {
   approval: PendingPermissionApproval;
-  onDecide: (decision: 'allow' | 'deny') => Promise<void>;
+  onDecide: (decision: 'allow' | 'deny' | 'allow_session') => Promise<void>;
   fresh?: boolean;
 }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string>();
 
-  const submit = async (decision: 'allow' | 'deny') => {
+  const submit = async (decision: 'allow' | 'deny' | 'allow_session') => {
     setSubmitting(true);
     setError(undefined);
     try {
@@ -55,6 +55,13 @@ export function PermissionApprovalCard({
       {error ? <p className="inline-error">{error}</p> : null}
       <div className="approval-card__actions">
         <Button disabled={submitting} onClick={() => void submit('deny')}>拒绝</Button>
+        <Button
+          disabled={submitting}
+          title="本次允许，且本会话内同类操作自动放行（重启后失效）"
+          onClick={() => void submit('allow_session')}
+        >
+          本会话允许
+        </Button>
         <Button variant="primary" disabled={submitting} onClick={() => void submit('allow')}>允许</Button>
       </div>
     </article>

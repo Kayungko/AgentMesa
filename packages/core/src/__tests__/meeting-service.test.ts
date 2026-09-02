@@ -14,6 +14,7 @@ import {
   listMeetings,
   removeAgentFromMeeting,
   updateMeetingStatus,
+  updateMeetingTrustLevel,
 } from '../services/meeting-service.js';
 import { InvalidStatusTransitionError, MeetingNotFoundError } from '../errors.js';
 
@@ -125,6 +126,51 @@ describe('meeting service', () => {
     expect(result.agents).toHaveLength(0);
     const events = ctx.eventStore.list({ streamId: meeting.id });
     expect(events.map((event) => event.type)).not.toContain('meeting_agent_removed');
+  });
+
+  it('defaults trustLevel to approval and accepts an explicit trusted level', () => {
+    const plain = createMeeting(ctx, { title: 'Default' });
+    expect(plain.trustLevel).toBe('approval');
+
+    const trusted = createMeeting(ctx, { title: 'Trusted', trustLevel: 'trusted' });
+    expect(trusted.trustLevel).toBe('trusted');
+  });
+
+  it('updates the trust level in both directions and emits the event', () => {
+    const meeting = createMeeting(ctx, { title: 'Trust levels' });
+
+    const trusted = updateMeetingTrustLevel(ctx, meeting.id, 'trusted');
+    expect(trusted.trustLevel).toBe('trusted');
+
+    const back = updateMeetingTrustLevel(ctx, meeting.id, 'approval');
+    expect(back.trustLevel).toBe('approval');
+
+    const events = ctx.eventStore.list({ streamId: meeting.id });
+    const trustEvents = events.filter((event) => event.type === 'meeting_trust_level_changed');
+    expect(trustEvents.map((event) => event.data)).toEqual([
+      { oldTrustLevel: 'approval', newTrustLevel: 'trusted' },
+      { oldTrustLevel: 'trusted', newTrustLevel: 'approval' },
+    ]);
+  });
+
+  it('is idempotent when setting the same trust level (no write, no event)', () => {
+    const meeting = createMeeting(ctx, { title: 'Idempotent' });
+
+    const result = updateMeetingTrustLevel(ctx, meeting.id, 'approval');
+    expect(result.trustLevel).toBe('approval');
+
+    const events = ctx.eventStore.list({ streamId: meeting.id });
+    expect(events.map((event) => event.type)).not.toContain('meeting_trust_level_changed');
+  });
+
+  it('denies trust level changes for actors without manage_meetings', () => {
+    const meeting = createMeeting(ctx, { title: 'Guarded' });
+    const documenterCtx = createRuntimeContext({
+      rootDir: testDir,
+      actor: { id: 'agent:doc', type: 'agent', roles: ['documenter'] },
+    });
+
+    expect(() => updateMeetingTrustLevel(documenterCtx, meeting.id, 'trusted')).toThrow();
   });
 
   it('rejects meeting mutation denied by policy', () => {

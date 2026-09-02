@@ -133,6 +133,10 @@ function replayMeeting(events: MesaEvent[]) {
       projection.status = data.newStatus;
     }
 
+    if (event.type === 'meeting_trust_level_changed') {
+      projection.trustLevel = data.newTrustLevel;
+    }
+
     if (event.type === 'meeting_task_added') {
       const taskId = data.taskId as string;
       const taskIds = projection.taskIds as string[];

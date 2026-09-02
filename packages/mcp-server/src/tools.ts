@@ -261,7 +261,8 @@ const CHECK_STATUSES = ['passed', 'failed', 'error', 'skipped'] as const;
 const EVENT_TYPES = [
   'task_created', 'task_status_changed', 'task_assigned', 'task_deleted',
   'task_archived', 'meeting_created', 'meeting_status_changed',
-  'meeting_task_added', 'meeting_agent_added', 'meeting_agent_removed',
+  'meeting_trust_level_changed', 'meeting_task_added', 'meeting_agent_added',
+  'meeting_agent_removed',
   'agent_joined', 'agent_left', 'agent_registered', 'message_sent',
   'artifact_created', 'decision_made', 'agent_run_created',
   'agent_run_status_changed', 'agent_run_progress', 'agent_run_completed',
@@ -1086,6 +1087,17 @@ export async function handleActivateSessionAgent(
   const baseOptions = {
     ...(args.timeout !== undefined ? { timeout: args.timeout } : {}),
   };
+  // Trust posture mirrors the desk invite path: `trusted` meetings drop the
+  // speech fence so writes are judged by role capabilities. Note there is no
+  // askHuman here — the MCP caller is an agent with no human waiting on
+  // approvals, so at the `approval` level gated actions still fail closed.
+  let trustLevel: 'approval' | 'trusted' = 'approval';
+  try {
+    trustLevel = getMeeting(ctx, args.meetingId).trustLevel;
+  } catch {
+    // Unknown meeting — activateSessionAgent will surface the error; keep
+    // the safe default until then.
+  }
   const options = agent && shouldUseSessionDriver(preference, agent.client)
     ? attachPermissionResponder({
         ...baseOptions,
@@ -1101,11 +1113,12 @@ export async function handleActivateSessionAgent(
           roles: agent.roles,
           client: agent.client,
         },
-        // Phase 2 speech guard: meeting-speech turns are read-only for every
-        // role (state changes go through task → run → approval). No askHuman
-        // here: the MCP caller is an agent with no human waiting on approvals,
-        // and the guard denies mutative actions before the approval gate.
-        speechGuard: true,
+        // Speech guard (approval level, the default): meeting-speech turns
+        // are read-only for every role (state changes go through task → run
+        // → approval). At the `trusted` level the fence is off and writes
+        // follow the agent's role capabilities. Blocked patterns and
+        // secret-path checks apply at both levels.
+        speechGuard: trustLevel !== 'trusted',
       })
     : baseOptions;
   const result = await activateSessionAgent(ctx, args.meetingId, args.agentId, options);

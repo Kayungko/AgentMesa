@@ -454,6 +454,53 @@ describe('DeskServer', () => {
     expect(removedBody.agents).toContain('claude');
   });
 
+  it('updates meeting trust level and validates the value', async () => {
+    server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
+    await server.start();
+    const base = `http://localhost:${server.getPort()}`;
+    const headers = { Authorization: 'Bearer secret', 'Content-Type': 'application/json' };
+
+    const created = await fetch(`${base}/api/meetings`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ title: '信任档位' }),
+    });
+    const meeting = (await created.json()) as { id: string; trustLevel: string };
+    expect(meeting.trustLevel).toBe('approval');
+
+    // 切到 trusted
+    const trusted = await fetch(`${base}/api/meetings/${meeting.id}/trust-level`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ trustLevel: 'trusted' }),
+    });
+    expect(trusted.status).toBe(200);
+    expect(((await trusted.json()) as { trustLevel: string }).trustLevel).toBe('trusted');
+
+    // 双向切回
+    const back = await fetch(`${base}/api/meetings/${meeting.id}/trust-level`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ trustLevel: 'approval' }),
+    });
+    expect(back.status).toBe(200);
+    expect(((await back.json()) as { trustLevel: string }).trustLevel).toBe('approval');
+
+    // 非法值 400；未知会议 404
+    const invalid = await fetch(`${base}/api/meetings/${meeting.id}/trust-level`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ trustLevel: 'yolo' }),
+    });
+    expect(invalid.status).toBe(400);
+    const missing = await fetch(`${base}/api/meetings/meeting_missing/trust-level`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ trustLevel: 'trusted' }),
+    });
+    expect(missing.status).toBe(404);
+  });
+
   it('registers an agent via POST /api/agents and lists it', async () => {
     server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
     await server.start();

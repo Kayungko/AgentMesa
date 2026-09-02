@@ -114,6 +114,8 @@ export type MeetingStatus =
   | 'open'
   | 'closed';
 
+export type MeetingTrustLevel = 'approval' | 'trusted';
+
 export type TaskStatus =
   | 'backlog'
   | 'ready'

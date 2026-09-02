@@ -79,6 +79,15 @@ const meetingStatusSchema = z.enum([
   'closed',
 ]);
 
+/**
+ * Meeting trust level. `approval` (default): session speech turns are
+ * read-only fenced — gated actions escalate to human approval. `trusted`:
+ * the speech fence is off; writes are judged by the agent's role
+ * capabilities instead of requiring per-action human approval. Blocked
+ * patterns and secret-path protection apply at both levels.
+ */
+const meetingTrustLevelSchema = z.enum(['approval', 'trusted']);
+
 const taskStatusSchema = z.enum([
   'backlog',
   'ready',
@@ -120,6 +129,7 @@ export const eventTypeSchema = z.enum([
   'task_archived',
   'meeting_created',
   'meeting_status_changed',
+  'meeting_trust_level_changed',
   'meeting_task_added',
   'meeting_agent_added',
   'meeting_agent_removed',
@@ -298,6 +308,8 @@ export const MesaMeetingSchema = z.object({
   title: z.string().min(1),
   purpose: z.string().optional(),
   status: meetingStatusSchema,
+  // Default keeps pre-trust-level meeting files parsing unchanged.
+  trustLevel: meetingTrustLevelSchema.default('approval'),
   workspaceId: z.string().optional(),
   ownerAgentId: z.string().optional(),
   tasks: z.array(z.string()).default([]),
@@ -611,6 +623,7 @@ export const CreateArtifactInputSchema = z.object({
 export const CreateMeetingInputSchema = z.object({
   title: z.string().min(1),
   purpose: z.string().optional(),
+  trustLevel: meetingTrustLevelSchema.optional(),
   tasks: z.array(z.string()).default([]),
   agents: z.array(z.string()).default([]),
   workspaceId: z.string().optional(),

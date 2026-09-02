@@ -183,6 +183,7 @@ export const fixtureMeeting: MesaMeeting = {
   title: 'QR Login Feature',
   purpose: 'Implement and review QR code login for the authentication system.',
   status: 'active',
+  trustLevel: 'approval',
   workspaceId: 'ws_w1w2w3w4',
   ownerAgentId: builderId,
   tasks: [taskId],

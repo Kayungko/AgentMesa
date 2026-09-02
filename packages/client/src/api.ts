@@ -44,7 +44,7 @@ export function listPendingPermissions(config: RuntimeConfig): Promise<{ pending
 export function decidePermission(
   config: RuntimeConfig,
   id: string,
-  decision: 'allow' | 'deny',
+  decision: 'allow' | 'deny' | 'allow_session',
 ): Promise<{ ok: boolean }> {
   return postJson<{ ok: boolean }>(
     config,
@@ -350,6 +350,18 @@ export function updateMeetingStatus(config: RuntimeConfig, meetingId: string, st
     config,
     `/api/meetings/${encodeURIComponent(meetingId)}/status`,
     { status },
+  );
+}
+
+export function updateMeetingTrustLevel(
+  config: RuntimeConfig,
+  meetingId: string,
+  trustLevel: 'approval' | 'trusted',
+): Promise<MesaMeeting> {
+  return postJson<MesaMeeting>(
+    config,
+    `/api/meetings/${encodeURIComponent(meetingId)}/trust-level`,
+    { trustLevel },
   );
 }
 

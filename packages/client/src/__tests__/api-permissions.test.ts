@@ -49,4 +49,15 @@ describe('permission approval API bindings', () => {
     await expect(decidePermission(config, 'ghost', 'allow')).rejects.toThrow('Unknown permission request: ghost');
     vi.unstubAllGlobals();
   });
+
+  it('decidePermission passes allow_session through to the body', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await decidePermission(config, 'req_9', 'allow_session');
+
+    const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({ decision: 'allow_session' });
+    vi.unstubAllGlobals();
+  });
 });

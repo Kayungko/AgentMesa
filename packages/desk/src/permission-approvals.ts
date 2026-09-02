@@ -98,24 +98,62 @@ function extractReason(request: DriverPermissionRequest): string | undefined {
  */
 export class PermissionApprovalQueue {
   private readonly entries = new Map<string, QueueEntry>();
+  /**
+   * Session-scoped grants from `allow_session` decisions: meetingId → kinds
+   * the human pre-approved for the rest of this desk process. Never persisted
+   * — a desk restart revokes everything (that is the point of "session").
+   */
+  private readonly sessionGrants = new Map<string, Set<PendingPermissionApproval['kind']>>();
+  private readonly onGrantHit?: (info: {
+    meetingId: string;
+    kind: PendingPermissionApproval['kind'];
+    requestId: string;
+    title: string;
+  }) => void;
+
+  constructor(options: {
+    onGrantHit?: (info: {
+      meetingId: string;
+      kind: PendingPermissionApproval['kind'];
+      requestId: string;
+      title: string;
+    }) => void;
+  } = {}) {
+    this.onGrantHit = options.onGrantHit;
+  }
 
   /**
    * Register a pending approval and return the promise the driver awaits.
    * After `timeoutMs` (default 5 min) the promise resolves `'deny'` and the
    * entry leaves the queue. A duplicate `requestId` denies the older entry
    * first (fail-closed) before queueing the new one.
+   *
+   * A prior `allow_session` decision for this (meetingId, kind) short-circuits
+   * the whole round-trip: no entry, no timer, no approval card — the request
+   * resolves `'allow'` immediately.
    */
   enqueue(
     request: DriverPermissionRequest,
     options: PermissionApprovalEnqueueOptions = {},
   ): Promise<'allow' | 'deny'> {
+    const kind: PendingPermissionApproval['kind'] = KINDS.has(request.kind) ? request.kind : 'tool';
+    if (options.meetingId && this.hasSessionGrant(options.meetingId, kind)) {
+      this.onGrantHit?.({
+        meetingId: options.meetingId,
+        kind,
+        requestId: request.requestId,
+        title: request.title,
+      });
+      return Promise.resolve('allow');
+    }
+
     if (this.entries.has(request.requestId)) {
       this.decide(request.requestId, 'deny');
     }
 
     const pending: PendingPermissionApproval = {
       id: request.requestId,
-      kind: KINDS.has(request.kind) ? request.kind : 'tool',
+      kind,
       title: request.title,
       resource: extractResource(request),
       reason: extractReason(request),
@@ -141,23 +179,49 @@ export class PermissionApprovalQueue {
   /**
    * Resolve one approval. Returns `true` when the id was pending (and the
    * driver's promise is now settled); `false` for unknown/already-settled ids.
+   *
+   * `'allow_session'` resolves the driver's promise as `'allow'` and records a
+   * (meetingId, kind) grant so subsequent requests of the same kind in that
+   * meeting skip the queue. Entries without a meetingId degrade to a plain
+   * allow (nowhere to scope the grant to).
    */
-  decide(id: string, decision: 'allow' | 'deny'): boolean {
+  decide(id: string, decision: 'allow' | 'deny' | 'allow_session'): boolean {
     const entry = this.entries.get(id);
     if (!entry) {
       return false;
     }
     this.entries.delete(id);
     clearTimeout(entry.timer);
+    if (decision === 'allow_session') {
+      const meetingId = entry.pending.meetingId;
+      if (meetingId) {
+        let kinds = this.sessionGrants.get(meetingId);
+        if (!kinds) {
+          kinds = new Set();
+          this.sessionGrants.set(meetingId, kinds);
+        }
+        kinds.add(entry.pending.kind);
+      }
+      entry.resolve('allow');
+      return true;
+    }
     entry.resolve(decision === 'allow' ? 'allow' : 'deny');
     return true;
   }
 
-  /** Deny everything still pending (desk stop / workspace switch). */
+  /** Deny everything still pending and revoke all session grants. */
   clear(): void {
     for (const id of [...this.entries.keys()]) {
       this.decide(id, 'deny');
     }
+    this.sessionGrants.clear();
+  }
+
+  private hasSessionGrant(
+    meetingId: string,
+    kind: PendingPermissionApproval['kind'],
+  ): boolean {
+    return this.sessionGrants.get(meetingId)?.has(kind) === true;
   }
 }
 

@@ -34,6 +34,7 @@ export type {
   MessageType,
   ArtifactKind,
   MeetingStatus,
+  MeetingTrustLevel,
   TaskStatus,
   TaskPriority,
   TaskKind,

@@ -328,6 +328,41 @@ describe('MesaMeetingSchema', () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it('defaults trustLevel to approval when absent (pre-trust-level meeting files)', () => {
+    const result = MesaMeetingSchema.safeParse({
+      id: 'meeting_m1m2m3m4',
+      title: 'Legacy',
+      status: 'active',
+      tasks: [],
+      agents: [],
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.trustLevel).toBe('approval');
+    }
+  });
+
+  it('accepts trustLevel trusted and rejects invalid values', () => {
+    const base = {
+      id: 'meeting_m1m2m3m4',
+      title: 'Trust',
+      status: 'active',
+      tasks: [],
+      agents: [],
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+    };
+    const trusted = MesaMeetingSchema.safeParse({ ...base, trustLevel: 'trusted' });
+    expect(trusted.success).toBe(true);
+    if (trusted.success) {
+      expect(trusted.data.trustLevel).toBe('trusted');
+    }
+    const invalid = MesaMeetingSchema.safeParse({ ...base, trustLevel: 'trustedX' });
+    expect(invalid.success).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -486,6 +521,7 @@ describe('MesaEventSchema', () => {
       'task_archived',
       'meeting_created',
       'meeting_status_changed',
+      'meeting_trust_level_changed',
       'meeting_task_added',
       'meeting_agent_added',
       'meeting_agent_removed',

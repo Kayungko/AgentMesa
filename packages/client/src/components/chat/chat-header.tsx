@@ -1,6 +1,6 @@
-import type { MesaAgent } from '@agentmesa/protocol';
+import type { MesaAgent, MeetingTrustLevel } from '@agentmesa/protocol';
 import { AvatarStack } from '../ui/avatar.js';
-import { StatusChip } from '../ui/badge.js';
+import { StatusChip, TrustChip } from '../ui/badge.js';
 import { IconButton } from '../ui/icon-button.js';
 import { SemanticDot } from '../ui/semantic-dot.js';
 import { Info } from '../ui/icons.js';
@@ -9,6 +9,7 @@ export function ChatHeader({
   kind,
   title,
   status,
+  trustLevel,
   participants,
   bridge,
   meta,
@@ -18,6 +19,7 @@ export function ChatHeader({
   kind: 'meeting' | 'room';
   title: string;
   status?: string;
+  trustLevel?: MeetingTrustLevel;
   participants?: MesaAgent[];
   bridge?: string;
   meta?: string;
@@ -29,6 +31,7 @@ export function ChatHeader({
       <div className="chat-head__title">
         <h2>{title}</h2>
         {kind === 'meeting' && status ? <StatusChip status={status} /> : null}
+        {kind === 'meeting' && trustLevel ? <TrustChip trustLevel={trustLevel} /> : null}
         {kind === 'room' ? (
           <span className="room-live" title={roomLive ? '实时推送已连接' : '实时推送未连接（低频轮询兜底）'}>
             <SemanticDot tone={roomLive ? 'success' : 'muted'} />

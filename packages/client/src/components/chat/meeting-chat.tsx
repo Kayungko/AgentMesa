@@ -116,6 +116,7 @@ export function MeetingChat({
         kind="meeting"
         title={detail.title}
         status={detail.status}
+        trustLevel={detail.trustLevel}
         participants={participants}
         bridge={pair.length >= 2 ? `${pair[0]!.name} ↔ ${pair[1]!.name} 桥接中` : undefined}
         onOpenDrawer={onOpenDrawer}

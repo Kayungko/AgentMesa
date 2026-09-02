@@ -55,6 +55,18 @@ export function StatusChip({ status, label }: { status: string; label?: string }
   return <span className={`status-chip ${statusClass(status)}`}>{label ?? status}</span>;
 }
 
+/**
+ * Meeting trust level chip. `approval` (default): gated speech actions go
+ * through human approval cards. `trusted`: the human's explicit decision to
+ * let writes be judged by role capabilities without per-action cards.
+ */
+export function TrustChip({ trustLevel }: { trustLevel: 'approval' | 'trusted' }) {
+  if (trustLevel === 'trusted') {
+    return <span className="status-chip status--completed">受信</span>;
+  }
+  return <span className="status-chip status--idle">人审</span>;
+}
+
 export function UnreadBadge({ count }: { count: number }) {
   if (count <= 0) return null;
   return <b className="unread-badge">{count > 99 ? '99+' : count}</b>;

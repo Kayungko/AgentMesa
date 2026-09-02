@@ -46,6 +46,7 @@ import {
   updateTaskStatus,
   assignTask,
   updateMeetingStatus,
+  updateMeetingTrustLevel,
   removeAgentFromMeeting,
   registerAgent,
   MesaError,
@@ -218,7 +219,15 @@ export class DeskServer {
   private actualPort = 0;
   private server: Server | null = null;
   private readonly eventResponses = new Set<ServerResponse>();
-  private readonly permissionApprovalQueue = new PermissionApprovalQueue();
+  // Session grants (allow_session decisions) are observable through this
+  // hook so a cache hit is distinguishable from a human clicking "allow".
+  private readonly permissionApprovalQueue = new PermissionApprovalQueue({
+    onGrantHit: (info) => {
+      this.logQueueEvent?.('permission.session_grant_hit', info);
+    },
+  });
+  /** Optional logger injected at start() when a runtime context exists. */
+  private logQueueEvent: ((event: string, data: unknown) => void) | undefined;
 
   constructor(rootDir: string, port: number = 3456, options: DeskServerOptions = {}) {
     this.rootDir = rootDir;
@@ -242,6 +251,7 @@ export class DeskServer {
     this.reconcileInFlightRuns();
 
     const readContext = this.createReadContext();
+    this.logQueueEvent = (event, data) => readContext.logger.info(event, data as Record<string, unknown>);
 
     return new Promise((resolve, reject) => {
       this.server = createServer((req, res) => {
@@ -371,6 +381,17 @@ export class DeskServer {
       agent = undefined;
     }
     const baseOptions = { timeout: this.sessionRunTimeout };
+    // Trust posture: `approval` (default) keeps the speech guard; `trusted`
+    // is the human's explicit decision to let writes be judged by role
+    // capabilities instead of per-action approval cards. Blocked patterns
+    // and secret-path checks apply at BOTH levels (they run before the
+    // fence inside the permission bridge).
+    let trustLevel: 'approval' | 'trusted' = 'approval';
+    try {
+      trustLevel = getMeeting(writeContext, meetingId).trustLevel;
+    } catch {
+      // Meeting removed between invite and activation — keep the safe default.
+    }
     const options = agent && shouldUseSessionDriver(preference, agent.client)
       ? attachPermissionResponder({
           ...baseOptions,
@@ -390,14 +411,16 @@ export class DeskServer {
           // Gated actions run under the agent's registered identity, not the
           // desk write actor.
           actor: sessionAgentActor(agentId, agent),
-          // Phase 2 speech guard: meeting-speech turns are read-only BY
-          // DEFAULT — read-only commands pass, while gated actions (patches,
-          // mutating tools, non-read-only commands) escalate to the human
-          // approval gate below instead of being silently denied. This is
-          // what lets an adopted coordinator session dispatch work to its
-          // child sessions while every gated action stays audited (desk
-          // approval cards).
-          speechGuard: true,
+          // Speech guard (approval level, the default): meeting-speech turns
+          // are read-only — read-only commands pass, while gated actions
+          // (patches, mutating tools, non-read-only commands) escalate to the
+          // human approval gate below instead of being silently denied. At
+          // the `trusted` level the fence is off: writes go through the role
+          // capability / file-access judgment directly. requirePermissions
+          // stays true at BOTH levels — the codex read-only sandbox + the
+          // claude permissionMode keep every gated action flowing through
+          // the bridge so trusted writes are still judged and audited.
+          speechGuard: trustLevel !== 'trusted',
           // Human approval bridge: gated speech actions arrive here as desk
           // approval cards (5-minute auto-deny fail-closed window).
           askHuman: createDeskAskHuman(this.permissionApprovals, { meetingId }),
@@ -954,8 +977,12 @@ export class DeskServer {
     const permissionDecideMatch = pathname.match(/^\/api\/permissions\/([^/]+)\/decide$/);
     if (permissionDecideMatch) {
       const body = await this.readJsonBody(req) as { decision?: unknown };
-      if (body.decision !== 'allow' && body.decision !== 'deny') {
-        throw new MesaError('VALIDATION_ERROR', 'decision must be "allow" or "deny"');
+      if (
+        body.decision !== 'allow'
+        && body.decision !== 'deny'
+        && body.decision !== 'allow_session'
+      ) {
+        throw new MesaError('VALIDATION_ERROR', 'decision must be "allow", "deny" or "allow_session"');
       }
       // The client URL-encodes the request id (`encodeURIComponent`) and
       // permission ids routinely contain `:` / `/` (e.g. "Write:call_42bd…"),
@@ -1137,6 +1164,17 @@ export class DeskServer {
         meetingStatusMatch[1]!,
         body.status as MeetingStatus,
       );
+      this.sendJson(res, meeting);
+      return;
+    }
+
+    const meetingTrustMatch = pathname.match(/^\/api\/meetings\/([^/]+)\/trust-level$/);
+    if (meetingTrustMatch) {
+      const body = await this.readJsonBody(req) as { trustLevel?: unknown };
+      if (body.trustLevel !== 'approval' && body.trustLevel !== 'trusted') {
+        throw new MesaError('VALIDATION_ERROR', 'trustLevel must be "approval" or "trusted"');
+      }
+      const meeting = updateMeetingTrustLevel(writeContext, meetingTrustMatch[1]!, body.trustLevel);
       this.sendJson(res, meeting);
       return;
     }

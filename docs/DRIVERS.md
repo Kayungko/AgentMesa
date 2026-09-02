@@ -395,21 +395,56 @@ type DriverPermissionResponder =
   - MCP task runs still pass no gate — the MCP caller is an agent with no
     human waiting; approval-required operations deny fail-closed.
 - **Session speech guard (`speechGuard: true`) — approval posture (Phase 3,
-  2026-09-01)** — both session-run call sites (MCP
-  `mesa_activate_session_agent`, Desk invite) enable it: meeting-speech turns
-  are read-only **by default** for every role (owner included). Read-only
-  commands (`SPEECH_READONLY_COMMANDS`) and read-only tools pass through.
-  Gated actions — patches (`speech.patch_approval_required`), non-read-only
-  commands (`speech.command_approval_required`), and tools mapping to
-  `modify_source` / `push_code` / `merge_pr` / `run_command`
-  (`speech.tool_approval_required`) — escalate to the `askHuman` gate as
-  approval cards instead of being silently denied, and the human decision
-  wins (audited as `human.approved` / `human.denied` with `viaHuman: true`).
-  Without an askHuman gate configured they fail closed (`approval.required`).
-  This replaced the old hard-deny fence, which deadlocked adopted coordinator
-  sessions: a resumed external coordinator dispatching work to its child
-  sessions was either blocked by the fence or ran with no audit constraint —
-  read-only-by-default + human approval keeps both coordination and audit.
+  2026-09-01)** — meeting-speech turns are read-only **by default** for every
+  role (owner included). Read-only commands (`SPEECH_READONLY_COMMANDS`) and
+  read-only tools pass through. Gated actions — patches
+  (`speech.patch_approval_required`), non-read-only commands
+  (`speech.command_approval_required`), and tools mapping to `modify_source` /
+  `push_code` / `merge_pr` / `run_command` (`speech.tool_approval_required`)
+  — escalate to the `askHuman` gate as approval cards instead of being
+  silently denied, and the human decision wins (audited as `human.approved` /
+  `human.denied` with `viaHuman: true`). Without an askHuman gate configured
+  they fail closed (`approval.required`). This replaced the old hard-deny
+  fence, which deadlocked adopted coordinator sessions: a resumed external
+  coordinator dispatching work to its child sessions was either blocked by
+  the fence or ran with no audit constraint — read-only-by-default + human
+  approval keeps both coordination and audit.
+- **Meeting trust levels (2026-09-02)** — the guard is now a per-meeting
+  posture, not a constant. `MesaMeeting.trustLevel` (`'approval'` default |
+  `'trusted'`, set via `PATCH /api/meetings/:id/trust-level`, policy action
+  `meeting.updateTrustLevel` → `manage_meetings`):
+  - `approval`: `speechGuard: true` — exactly the posture above.
+  - `trusted`: `speechGuard: false` — the human's explicit decision that
+    writes in this meeting are judged by the agent's **role capabilities**
+    (capability table + file-access scope) without per-action approval cards.
+    Both activation paths (Desk invite and MCP `mesa_activate_session_agent`)
+    read the level when building the responder; the level applies to runs
+    activated after the change (a posture is fixed at responder construction).
+    On the MCP path there is still no `askHuman` gate, so `approval`-level
+    gated actions fail closed there either way.
+  - **What does NOT change at `trusted`**: blocked-pattern commands and
+    secret-path checks (they run before the fence at both levels);
+    `unknownToolPolicy` stays `deny`; and — deliberately —
+    `requirePermissions` stays **true** on both levels. The codex read-only
+    sandbox + `approvalPolicy: 'on-request'` and the claude
+    `permissionMode: 'default'` are what keep every gated action flowing
+    through the permission bridge; relaxing the sandbox to workspace-write
+    would make codex execute workspace writes with zero approval round-trips
+    (verified live), bypassing the Mesa policy engine entirely. A trusted
+    write therefore costs one local JSON-RPC approval round-trip that the
+    bridge auto-answers from the capability table — no human in the loop,
+    every write still judged and audited. (Follow-up option if live testing
+    ever shows this round-trip hurts codex behavior: decouple
+    `DriverSessionInit.sandbox` and accept the audit downgrade — documented
+    here, deliberately not built.)
+- **Session approval grants (`allow_session`, 2026-09-02)** — the desk
+  approval card offers a third decision, 本会话允许: it resolves the current
+  request as allow **and** records a `(meetingId, kind)` grant so subsequent
+  requests of the same kind in that meeting skip the queue entirely (no card,
+  no 5-minute auto-deny timer). Grants live in the `PermissionApprovalQueue`
+  only — never persisted, revoked by desk restart / `clear()`. Grant hits are
+  logged as `permission.session_grant_hit` to distinguish them from a human
+  clicking 允许.
 
 ## Implementation Status
 
@@ -426,8 +461,8 @@ type DriverPermissionResponder =
 | Env switch + call-site wiring (`drivers/env.ts`) | **Done.** `AGENTMESA_DRIVER` gates the registry at the MCP server / orchestrator / CLI call sites; `cli` disables deep drivers. |
 | Session-run deep-driver opt-in (`AGENTMESA_SESSION_DRIVER`) | **Done.** Default `cli`; `auto` claude-family only; explicit kinds full; unregistered agent ids fall back to CLI. Speech guard on; Desk askHuman bridge wired. |
 | External-session adoption (`drivers/adopt.ts`) | **Done.** Desk import `adopt: true` seeds the sidecar handle (`adoptExternalDriverSession`) with the `adopted` marker; desk activation passes `resumeMode: 'strict'` for adopted handles (fail-loud takeover) and strict failures surface as meeting-timeline failure bubbles. `POST /api/imports/precheck` probes adoption before import (codex live resume probe + stray-process census; claude transcript probe). Live cross-client resume behavior unverified (see the adoption section). |
-| Speech guard (`permission-bridge.ts`) | **Done.** `speechGuard` option: read-only-by-default meeting-speech turns for every role; gated actions escalate to the askHuman approval gate (desk approval cards) instead of hard-denying — the takeover deadlock fix (Phase 3). |
-| askHuman bridges | **Done.** Desk `PermissionApprovalQueue` + client approval cards; CLI terminal gate on `mesa runs exec`. |
+| Speech guard (`permission-bridge.ts`) | **Done.** `speechGuard` option: read-only-by-default meeting-speech turns for every role; gated actions escalate to the askHuman approval gate (desk approval cards) instead of hard-denying — the takeover deadlock fix (Phase 3). Per-meeting trust levels (2026-09-02): `trusted` meetings drop the fence and let role capabilities judge writes (blocked-pattern / secret-path / requirePermissions unchanged at both levels). |
+| askHuman bridges | **Done.** Desk `PermissionApprovalQueue` + client approval cards (now with the `allow_session` third decision and `(meetingId, kind)` session grants); CLI terminal gate on `mesa runs exec`. |
 
 ## Live codex integration notes (2026-08-30, codex-cli 0.131.0 on Windows)
 

@@ -8,6 +8,7 @@ import {
   loadWorkspaceMeetings,
   removeMeetingAgent,
   updateMeetingStatus,
+  updateMeetingTrustLevel,
   updateTaskStatus,
 } from '../../api.js';
 import type { MeetingDetail, RoomDetail, RuntimeConfig } from '../../types.js';
@@ -133,6 +134,17 @@ function MeetingDrawerContent({
     }
   };
 
+  const changeTrustLevel = async (trustLevel: 'approval' | 'trusted') => {
+    setActionError(undefined);
+    try {
+      const updated = await updateMeetingTrustLevel(config, meetingId, trustLevel);
+      setDetail((current) => ({ ...updated, messages: current?.messages ?? [] }));
+      await runtime.refresh();
+    } catch (reason) {
+      setActionError(reason instanceof Error ? reason.message : String(reason));
+    }
+  };
+
   if (!detail) return <SkeletonStack count={2} compact />;
 
   const open = detail.status !== 'archived' && detail.status !== 'completed' && detail.status !== 'closed';
@@ -205,6 +217,40 @@ function MeetingDrawerContent({
             <Button small onClick={() => void changeMeetingStatus('archived')}>归档</Button>
           </div>
         ) : null}
+      </section>
+
+      <section className="ctx-section">
+        <div className="section-heading">
+          <span>信任档位</span>
+          <small>{detail.trustLevel === 'trusted' ? '受信' : '人审'}</small>
+        </div>
+        {open ? (
+          <>
+            <div className="ctx-actions">
+              <Button
+                small
+                variant={detail.trustLevel === 'trusted' ? 'primary' : 'ghost'}
+                onClick={() => void changeTrustLevel('trusted')}
+                disabled={detail.trustLevel === 'trusted'}
+              >
+                受信
+              </Button>
+              <Button
+                small
+                variant={detail.trustLevel === 'approval' ? 'primary' : 'ghost'}
+                onClick={() => void changeTrustLevel('approval')}
+                disabled={detail.trustLevel === 'approval'}
+              >
+                人审
+              </Button>
+            </div>
+            <p className="ctx-hint">
+              受信档：会话内 Agent 的写操作按其角色能力自动判定，不再逐条人审；受保护路径与封禁命令检查仍然生效。
+            </p>
+          </>
+        ) : (
+          <p className="ctx-hint">会话已结束，信任档位不再生效。</p>
+        )}
       </section>
 
       <section className="ctx-section">

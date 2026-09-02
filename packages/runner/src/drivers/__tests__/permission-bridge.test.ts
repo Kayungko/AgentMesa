@@ -586,3 +586,37 @@ describe('createPolicyPermissionResponder — speechGuard', () => {
     expect(log[0]).toMatchObject({ decision: 'deny', rule: 'command.capability' });
   });
 });
+
+describe('createPolicyPermissionResponder — trusted meetings (speechGuard off)', () => {
+  // `speechGuard: false` is exactly what the desk/MCP activation paths pass
+  // for a meeting with `trustLevel: 'trusted'` — these cases pin the trusted
+  // posture: writes follow role capabilities; protections stay on.
+
+  it('auto-allows a modify_source tool for a builder by capability (no human gate)', async () => {
+    const { log, onDecision } = records();
+    const responder = createPolicyPermissionResponder({
+      roles: ['builder'],
+      onDecision,
+    });
+    await expect(
+      responder(request('tool', { toolName: 'Write', input: { file_path: 'src/a.ts' } })),
+    ).resolves.toBe('allow');
+    expect(log[0]).toMatchObject({ decision: 'allow' });
+  });
+
+  it('still denies secret paths and blocked commands at the trusted level', async () => {
+    const { log, onDecision } = records();
+    const responder = createPolicyPermissionResponder({
+      roles: ['owner'],
+      onDecision,
+    });
+    // Secret path protection runs before any capability judgment.
+    await expect(
+      responder(request('tool', { toolName: 'Write', input: { file_path: '.env' } })),
+    ).resolves.toBe('deny');
+    expect(log[0]?.rule).toBe('tool.secret_path');
+    // Blocked-pattern commands are denied regardless of trust level.
+    await expect(responder(request('command', { command: 'cat .env' }))).resolves.toBe('deny');
+    expect(log[1]?.rule).toBe('command.secret_path');
+  });
+});
