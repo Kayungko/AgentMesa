@@ -137,6 +137,40 @@ export function updateMeetingTrustLevel(
   return result;
 }
 
+/**
+ * Toggle the auto-refresh flag on an imported meeting's metadata. When on,
+ * the desk watches the source transcript and runs an incremental refresh
+ * when it grows (snapshot P2). Deliberately a plain metadata flag with no
+ * dedicated event: it is a low-sensitivity convenience switch, not a trust
+ * posture (contrast `updateMeetingTrustLevel`). Import sessions under active
+ * takeover (adopted) should NOT enable it — the driver's own turns keep
+ * growing the source, and re-syncing them would duplicate the write-back
+ * bubbles.
+ */
+export function setMeetingAutoRefresh(
+  ctx: MesaRuntimeContext,
+  meetingId: string,
+  enabled: boolean
+): MesaMeeting {
+  assertPolicy(ctx, 'meeting.updateAutoRefresh', `meeting:${meetingId}`);
+  const meeting = getMeeting(ctx, meetingId);
+
+  if ((meeting.metadata?.['autoRefresh'] === true) === enabled) {
+    return meeting;
+  }
+
+  const metadata = { ...(meeting.metadata ?? {}), autoRefresh: enabled };
+  const updated: MesaMeeting = {
+    ...meeting,
+    metadata,
+    updatedAt: new Date().toISOString(),
+  };
+
+  const result = MesaMeetingSchema.parse(updated);
+  writeMeeting(ctx, result);
+  return result;
+}
+
 export function addTaskToMeeting(
   ctx: MesaRuntimeContext,
   meetingId: string,

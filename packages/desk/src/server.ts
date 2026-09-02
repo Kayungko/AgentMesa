@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
-import { existsSync, mkdirSync, watch, type FSWatcher } from 'node:fs';
+import { existsSync, mkdirSync, statSync, watch, type FSWatcher } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
-import { join } from 'node:path';
+import { join, dirname, basename } from 'node:path';
 import {
   addAgentToMeeting,
   addTaskToMeeting,
@@ -47,6 +47,7 @@ import {
   assignTask,
   updateMeetingStatus,
   updateMeetingTrustLevel,
+  setMeetingAutoRefresh,
   removeAgentFromMeeting,
   registerAgent,
   MesaError,
@@ -269,6 +270,10 @@ export class DeskServer {
         resolve();
       });
     });
+
+    // Snapshot P2: watch source transcripts of meetings with autoRefresh on
+    // (fail-soft — manual refresh keeps working if watching is unavailable).
+    this.startImportWatchers();
   }
 
   async stop(): Promise<void> {
@@ -278,6 +283,10 @@ export class DeskServer {
     // Fail-closed any permission approvals still awaiting a human answer —
     // the desk restart (also the workspace-switch path) cannot serve them.
     this.permissionApprovalQueue.clear();
+    // Stop watching imported-session sources (they live in the user's home,
+    // outside this workspace — a leaked watcher would keep refreshing the
+    // old workspace's meetings after a switch).
+    this.stopImportWatchers();
 
     for (const response of this.eventResponses) {
       response.end();
@@ -354,6 +363,205 @@ export class DeskServer {
           runId: run.id,
           error: error instanceof Error ? error.message : String(error),
         });
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Imported-session source watcher (snapshot P2)
+  // -------------------------------------------------------------------------
+
+  /** dirPath → directory watcher (shared by all meetings whose source lives there). */
+  private importWatchers = new Map<string, FSWatcher>();
+  /** meetingId → source file location (dirPath + fileName) being watched. */
+  private watchedSources = new Map<string, { dirPath: string; fileName: string }>();
+  /** meetingId → debounced "source changed" timer. */
+  private refreshDebounces = new Map<string, NodeJS.Timeout>();
+  /** meetingId → last completed auto-refresh (ms epoch) — the ≥60s throttle. */
+  private lastAutoRefreshAt = new Map<string, number>();
+  /** meetingId → scheduled boundary rescan when a change hit the throttle window. */
+  private pendingRescans = new Map<string, NodeJS.Timeout>();
+
+  private static AUTO_REFRESH_DEBOUNCE_MS = 3_000;
+  private static AUTO_REFRESH_THROTTLE_MS = 60_000;
+
+  /** Watch every imported meeting that has autoRefresh on (called from start()). */
+  private startImportWatchers(): void {
+    try {
+      const ctx = this.createReadContext();
+      for (const meeting of listMeetings(ctx)) {
+        if (meeting.metadata?.['autoRefresh'] === true) {
+          this.watchImportedMeetingSource(meeting.id);
+        }
+      }
+    } catch (error) {
+      this.createReadContext().logger.warn('Failed to start import source watchers', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private stopImportWatchers(): void {
+    for (const watcher of this.importWatchers.values()) {
+      watcher.close();
+    }
+    this.importWatchers.clear();
+    this.watchedSources.clear();
+    for (const timer of this.refreshDebounces.values()) clearTimeout(timer);
+    this.refreshDebounces.clear();
+    for (const timer of this.pendingRescans.values()) clearTimeout(timer);
+    this.pendingRescans.clear();
+    this.lastAutoRefreshAt.clear();
+  }
+
+  /** Start (idempotently) watching one imported meeting's source transcript. */
+  private watchImportedMeetingSource(meetingId: string): void {
+    if (this.watchedSources.has(meetingId)) return;
+    let sourceFilePath: string | undefined;
+    try {
+      const meeting = getMeeting(this.createReadContext(), meetingId);
+      const meta = meeting.metadata as { sourceFilePath?: unknown } | undefined;
+      if (typeof meta?.sourceFilePath === 'string') sourceFilePath = meta.sourceFilePath;
+    } catch {
+      return; // unknown meeting — nothing to watch
+    }
+    if (!sourceFilePath) return; // not an imported meeting
+
+    const dirPath = dirname(sourceFilePath);
+    const fileName = basename(sourceFilePath);
+    this.watchedSources.set(meetingId, { dirPath, fileName });
+
+    let watcher = this.importWatchers.get(dirPath);
+    if (!watcher) {
+      try {
+        // Watch the PARENT DIRECTORY (not the file): a rename-replace write
+        // style invalidates a single-file watch, and several sessions in the
+        // same project directory share one watcher anyway.
+        watcher = watch(dirPath, () => {
+          // Coarse wake-up: let each watched meeting in this directory run its
+          // own debounced anchor check (the callback carries no filename on
+          // some platforms, so we never rely on it).
+          for (const [id, source] of this.watchedSources) {
+            if (source.dirPath === dirPath) this.scheduleAutoRefresh(id);
+          }
+        });
+        watcher.unref();
+        this.importWatchers.set(dirPath, watcher);
+      } catch (error) {
+        this.watchedSources.delete(meetingId);
+        this.createReadContext().logger.warn('Import source watcher unavailable (auto-refresh disabled for this meeting; manual refresh unaffected)', {
+          meetingId,
+          dirPath,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
+  /** Stop watching one meeting's source (called when autoRefresh is turned off). */
+  private unwatchImportedMeetingSource(meetingId: string): void {
+    const source = this.watchedSources.get(meetingId);
+    if (!source) return;
+    this.watchedSources.delete(meetingId);
+    const stillUsed = [...this.watchedSources.values()].some((s) => s.dirPath === source.dirPath);
+    if (!stillUsed) {
+      this.importWatchers.get(source.dirPath)?.close();
+      this.importWatchers.delete(source.dirPath);
+    }
+    const debounce = this.refreshDebounces.get(meetingId);
+    if (debounce) clearTimeout(debounce);
+    this.refreshDebounces.delete(meetingId);
+    const rescan = this.pendingRescans.get(meetingId);
+    if (rescan) clearTimeout(rescan);
+    this.pendingRescans.delete(meetingId);
+  }
+
+  /** Debounced entry point from a watcher event. */
+  private scheduleAutoRefresh(meetingId: string): void {
+    const existing = this.refreshDebounces.get(meetingId);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      this.refreshDebounces.delete(meetingId);
+      void this.maybeAutoRefresh(meetingId);
+    }, DeskServer.AUTO_REFRESH_DEBOUNCE_MS);
+    timer.unref();
+    this.refreshDebounces.set(meetingId, timer);
+  }
+
+  /**
+   * Anchor-check + throttle + refresh. The refresh itself is idempotent
+   * (zero-diff only touches the anchors), so every guard here is about
+   * avoiding pointless synchronous parses of possibly-large transcripts.
+   */
+  private async maybeAutoRefresh(meetingId: string): Promise<void> {
+    const source = this.watchedSources.get(meetingId);
+    if (!source) return;
+
+    let stats: { mtimeMs: number; size: number };
+    try {
+      const stat = statSync(join(source.dirPath, source.fileName));
+      stats = { mtimeMs: stat.mtimeMs, size: stat.size };
+    } catch {
+      return; // source moved/deleted — fail-soft; the manual refresh path fails loud
+    }
+
+    let anchors: { sourceLastModified?: string; sourceSizeBytes?: number };
+    try {
+      const meeting = getMeeting(this.createReadContext(), meetingId);
+      anchors = meeting.metadata as { sourceLastModified?: string; sourceSizeBytes?: number };
+    } catch {
+      return;
+    }
+    // Unchanged since the last snapshot → nothing to do.
+    if (
+      anchors?.sourceSizeBytes === stats.size
+      && anchors?.sourceLastModified === new Date(stats.mtimeMs).toISOString()
+    ) {
+      return;
+    }
+
+    const last = this.lastAutoRefreshAt.get(meetingId) ?? 0;
+    const elapsed = Date.now() - last;
+    if (elapsed < DeskServer.AUTO_REFRESH_THROTTLE_MS) {
+      // Schedule one boundary rescan so the change is not lost.
+      const existing = this.pendingRescans.get(meetingId);
+      if (existing) clearTimeout(existing);
+      const timer = setTimeout(() => {
+        this.pendingRescans.delete(meetingId);
+        this.scheduleAutoRefresh(meetingId);
+      }, DeskServer.AUTO_REFRESH_THROTTLE_MS - elapsed);
+      timer.unref();
+      this.pendingRescans.set(meetingId, timer);
+      return;
+    }
+
+    this.runAutoRefresh(meetingId);
+  }
+
+  /** One refresh attempt with a single lock-contention retry. */
+  private runAutoRefresh(meetingId: string): void {
+    try {
+      refreshImportedMeeting(this.createWriteContext(), meetingId);
+      this.lastAutoRefreshAt.set(meetingId, Date.now());
+    } catch (error) {
+      // withLock('event_log') does not queue — a busy log means LockError.
+      // Retry once after a short backoff, then give up until the next event.
+      const message = error instanceof Error ? error.message : String(error);
+      if (/lock/i.test(message)) {
+        const timer = setTimeout(() => {
+          try {
+            refreshImportedMeeting(this.createWriteContext(), meetingId);
+            this.lastAutoRefreshAt.set(meetingId, Date.now());
+          } catch (retryError) {
+            this.createReadContext().logger.warn('Auto-refresh retry failed (will retry on next source change)', {
+              meetingId,
+              error: retryError instanceof Error ? retryError.message : String(retryError),
+            });
+          }
+        }, 2_000);
+        timer.unref();
+      } else {
+        this.createReadContext().logger.warn('Auto-refresh failed', { meetingId, error: message });
       }
     }
   }
@@ -1189,6 +1397,28 @@ export class DeskServer {
         throw new MesaError('VALIDATION_ERROR', 'trustLevel must be "approval" or "trusted"');
       }
       const meeting = updateMeetingTrustLevel(writeContext, meetingTrustMatch[1]!, body.trustLevel);
+      this.sendJson(res, meeting);
+      return;
+    }
+
+    // Imported-meeting auto-refresh switch (snapshot P2): when on, the desk
+    // watches the source transcript and runs an incremental refresh when it
+    // grows. Meetings under active takeover should NOT enable it — the
+    // driver's own turns grow the source and would be re-synced as
+    // duplicates of the write-back bubbles.
+    const meetingAutoRefreshMatch = pathname.match(/^\/api\/meetings\/([^/]+)\/auto-refresh$/);
+    if (meetingAutoRefreshMatch) {
+      const body = await this.readJsonBody(req) as { autoRefresh?: unknown };
+      if (typeof body.autoRefresh !== 'boolean') {
+        throw new MesaError('VALIDATION_ERROR', 'autoRefresh must be a boolean');
+      }
+      const meetingId = decodeURIComponent(meetingAutoRefreshMatch[1]!);
+      const meeting = setMeetingAutoRefresh(writeContext, meetingId, body.autoRefresh);
+      if (body.autoRefresh) {
+        this.watchImportedMeetingSource(meetingId);
+      } else {
+        this.unwatchImportedMeetingSource(meetingId);
+      }
       this.sendJson(res, meeting);
       return;
     }

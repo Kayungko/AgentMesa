@@ -9,6 +9,7 @@ import {
   removeMeetingAgent,
   updateMeetingStatus,
   updateMeetingTrustLevel,
+  setMeetingAutoRefresh,
   updateTaskStatus,
 } from '../../api.js';
 import type { MeetingDetail, RoomDetail, RuntimeConfig } from '../../types.js';
@@ -145,6 +146,16 @@ function MeetingDrawerContent({
     }
   };
 
+  const changeAutoRefresh = async (autoRefresh: boolean) => {
+    setActionError(undefined);
+    try {
+      const updated = await setMeetingAutoRefresh(config, meetingId, autoRefresh);
+      setDetail((current) => ({ ...updated, messages: current?.messages ?? [] }));
+    } catch (reason) {
+      setActionError(reason instanceof Error ? reason.message : String(reason));
+    }
+  };
+
   if (!detail) return <SkeletonStack count={2} compact />;
 
   const open = detail.status !== 'archived' && detail.status !== 'completed' && detail.status !== 'closed';
@@ -252,6 +263,40 @@ function MeetingDrawerContent({
           <p className="ctx-hint">会话已结束，信任档位不再生效。</p>
         )}
       </section>
+
+      {typeof detail.metadata?.['autoRefresh'] === 'boolean' || detail.metadata?.['source'] ? (
+        <section className="ctx-section">
+          <div className="section-heading">
+            <span>自动同步</span>
+            <small>{detail.metadata?.['autoRefresh'] === true ? '已开启' : '已关闭'}</small>
+          </div>
+          {open ? (
+            <>
+              <div className="ctx-actions">
+                <Button
+                  small
+                  variant={detail.metadata?.['autoRefresh'] === true ? 'primary' : 'ghost'}
+                  onClick={() => void changeAutoRefresh(true)}
+                  disabled={detail.metadata?.['autoRefresh'] === true}
+                >
+                  开启
+                </Button>
+                <Button
+                  small
+                  variant={detail.metadata?.['autoRefresh'] === true ? 'ghost' : 'primary'}
+                  onClick={() => void changeAutoRefresh(false)}
+                  disabled={detail.metadata?.['autoRefresh'] !== true}
+                >
+                  关闭
+                </Button>
+              </div>
+              <p className="ctx-hint">
+                开启后：源转录有更新时自动同步到会议快照（增量，消息 id 稳定）。接管续跑的会议不建议开启——会造成消息重复。
+              </p>
+            </>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="ctx-section">
         <div className="section-heading">

@@ -55,6 +55,7 @@ const ACTION_CAPABILITY: Record<string, Capability> = {
   'meeting.create': 'manage_meetings',
   'meeting.updateStatus': 'manage_meetings',
   'meeting.updateTrustLevel': 'manage_trust_level',
+  'meeting.updateAutoRefresh': 'manage_meetings',
   'meeting.addTask': 'manage_meetings',
   'meeting.addAgent': 'manage_meetings',
   'message.append': 'post_message',

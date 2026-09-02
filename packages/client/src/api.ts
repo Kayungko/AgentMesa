@@ -365,6 +365,18 @@ export function updateMeetingTrustLevel(
   );
 }
 
+export function setMeetingAutoRefresh(
+  config: RuntimeConfig,
+  meetingId: string,
+  autoRefresh: boolean,
+): Promise<MesaMeeting> {
+  return postJson<MesaMeeting>(
+    config,
+    `/api/meetings/${encodeURIComponent(meetingId)}/auto-refresh`,
+    { autoRefresh },
+  );
+}
+
 // --- External session import (Claude Code / codex CLI transcripts) ---
 
 /** 列出某个来源（claude / codex）本机可导入的外部会话。 */

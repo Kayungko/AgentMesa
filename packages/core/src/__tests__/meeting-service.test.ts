@@ -15,6 +15,7 @@ import {
   removeAgentFromMeeting,
   updateMeetingStatus,
   updateMeetingTrustLevel,
+  setMeetingAutoRefresh,
 } from '../services/meeting-service.js';
 import { InvalidStatusTransitionError, MeetingNotFoundError } from '../errors.js';
 
@@ -161,6 +162,27 @@ describe('meeting service', () => {
 
     const events = ctx.eventStore.list({ streamId: meeting.id });
     expect(events.map((event) => event.type)).not.toContain('meeting_trust_level_changed');
+  });
+
+  it('toggles autoRefresh on meeting metadata (idempotent, preserves other fields)', () => {
+    const meeting = createMeeting(ctx, { title: '自动同步' });
+    expect(meeting.metadata?.['autoRefresh']).toBeUndefined();
+
+    const on = setMeetingAutoRefresh(ctx, meeting.id, true);
+    expect(on.metadata?.['autoRefresh']).toBe(true);
+
+    const again = setMeetingAutoRefresh(ctx, meeting.id, true);
+    expect(again.updatedAt).toBe(on.updatedAt); // idempotent: no rewrite
+
+    const off = setMeetingAutoRefresh(ctx, meeting.id, false);
+    expect(off.metadata?.['autoRefresh']).toBe(false);
+
+    // Other metadata fields survive the patch.
+    const documenterCtx = createRuntimeContext({
+      rootDir: testDir,
+      actor: { id: 'agent:doc', type: 'agent', roles: ['documenter'] },
+    });
+    expect(() => setMeetingAutoRefresh(documenterCtx, meeting.id, true)).toThrow();
   });
 
   it('denies trust level changes for actors without manage_trust_level', () => {

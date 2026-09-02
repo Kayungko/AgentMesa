@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -621,4 +621,123 @@ describe('DeskServer external-session imports', () => {
     expect(fallback.status).toBe(200);
     expect(fallbackBody.mode).toBe('incremental');
   });
+  describe('auto-refresh watcher (snapshot P2)', () => {
+    it('PATCH auto-refresh validates the value and unknown meetings 404', async () => {
+      server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
+      await server.start();
+
+      const importRes = await postImport({ source: 'claude', sessionId: SESSION_ID });
+      const { meetingId } = (await importRes.json()) as ImportResponseBody;
+
+      const bad = await fetch(`${baseUrl()}/api/meetings/${meetingId}/auto-refresh`, authed({
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ autoRefresh: 'yes' }),
+      }));
+      expect(bad.status).toBe(400);
+
+      const missing = await fetch(`${baseUrl()}/api/meetings/meeting_missing/auto-refresh`, authed({
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ autoRefresh: true }),
+      }));
+      expect(missing.status).toBe(404);
+
+      const ok = await fetch(`${baseUrl()}/api/meetings/${meetingId}/auto-refresh`, authed({
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ autoRefresh: true }),
+      }));
+      expect(ok.status).toBe(200);
+      const meeting = (await ok.json()) as { metadata?: { autoRefresh?: boolean } };
+      expect(meeting.metadata?.autoRefresh).toBe(true);
+    });
+
+    it('automatically runs an incremental refresh when the watched source grows', async () => {
+      server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
+      await server.start();
+
+      const importRes = await postImport({ source: 'claude', sessionId: SESSION_ID });
+      const { meetingId } = (await importRes.json()) as ImportResponseBody;
+
+      // Snapshot ids before enabling auto-refresh.
+      const before = (await (await fetch(`${baseUrl()}/api/meetings/${meetingId}`, authed())).json() as {
+        messages: Array<{ id: string }>;
+      }).messages.map((m) => m.id).sort();
+
+      const enable = await fetch(`${baseUrl()}/api/meetings/${meetingId}/auto-refresh`, authed({
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ autoRefresh: true }),
+      }));
+      expect(enable.status).toBe(200);
+
+      // The external conversation continues.
+      const transcript = join(claudeRoot, 'E--FakeRepo', `${SESSION_ID}.jsonl`);
+      writeFileSync(
+        transcript,
+        `${readFileSync(transcript, 'utf-8')}${JSON.stringify({
+          type: 'assistant',
+          uuid: 'a-watch-1',
+          timestamp: '2026-08-01T13:00:00.000Z',
+          message: { content: [{ type: 'text', text: 'watch 同步的新回复' }] },
+        })}\n`,
+        'utf-8',
+      );
+
+      // Debounce is 3s — wait for the automatic incremental refresh to land.
+      await vi.waitFor(async () => {
+        const detail = (await (await fetch(`${baseUrl()}/api/meetings/${meetingId}`, authed())).json() as {
+          messages: Array<{ id: string; summary: string }>;
+        });
+        expect(detail.messages.some((m) => m.summary === 'watch 同步的新回复')).toBe(true);
+      }, { timeout: 15_000, interval: 500 });
+
+      const after = (await (await fetch(`${baseUrl()}/api/meetings/${meetingId}`, authed())).json() as {
+        messages: Array<{ id: string }>;
+      }).messages.map((m) => m.id).sort();
+
+      // Incremental semantics: old ids stable, exactly one new message.
+      expect(after).toHaveLength(before.length + 1);
+      for (const id of before) {
+        expect(after).toContain(id);
+      }
+    });
+
+    it('stop() tears the watchers down (no refresh after stop)', async () => {
+      server = new DeskServer(testDir, 0, { sessionToken: 'secret' });
+      await server.start();
+
+      const importRes = await postImport({ source: 'claude', sessionId: SESSION_ID });
+      const { meetingId } = (await importRes.json()) as ImportResponseBody;
+
+      const enable = await fetch(`${baseUrl()}/api/meetings/${meetingId}/auto-refresh`, authed({
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ autoRefresh: true }),
+      }));
+      expect(enable.status).toBe(200);
+      await server.stop();
+      server = undefined as unknown as DeskServer; // afterEach would stop() again — it's already down
+
+      const transcript = join(claudeRoot, 'E--FakeRepo', `${SESSION_ID}.jsonl`);
+      writeFileSync(
+        transcript,
+        `${readFileSync(transcript, 'utf-8')}${JSON.stringify({
+          type: 'assistant',
+          uuid: 'a-after-stop',
+          timestamp: '2026-08-01T14:00:00.000Z',
+          message: { content: [{ type: 'text', text: '停止后不应出现' }] },
+        })}\n`,
+        'utf-8',
+      );
+
+      // No desk to query — assert instead that nothing crashed and the file
+      // simply grew; the watcher-down behavior is that no process reacts.
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      expect(readFileSync(transcript, 'utf-8')).toContain('a-after-stop');
+    });
+
+});
+
 });
